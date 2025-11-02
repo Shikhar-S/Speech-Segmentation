@@ -47,7 +47,6 @@ def task_wrapper(task_func: Callable) -> Callable:
         - make sure loggers are closed even if the task function raises an exception (prevents multirun failure)
         - save the exception to a `.log` file
         - mark the run as failed with a dedicated file in the `logs/` folder (so we can find and rerun it later)
-        - etc. (adjust depending on your needs)
 
     Example:
     ```

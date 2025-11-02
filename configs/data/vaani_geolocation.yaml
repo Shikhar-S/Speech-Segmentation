@@ -1,0 +1,8 @@
+_target_: src.data.vaani.geolocation.VaaniGeolocation
+data_dir: /work/hdd/bbjs/shared/corpora/vaani_iisc/Vaani/audio
+pincode_metadata_path: /work/hdd/bbjs/shared/corpora/vaani_iisc/Vaani/pincode_metadata.csv
+target_sr: 16000
+batch_size: 2 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+split: [0.8, 0.1, 0.1]
+num_workers: 0
+pin_memory: False
