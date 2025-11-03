@@ -15,7 +15,7 @@ ______________________________________________________________________
 
 ## Description
 
-A toolkit and benchmark for evaluating phonetic capabilities of models.
+A benchmark for evaluating phonetic models.
 
 ## 🚀 Quickstart
 
@@ -24,14 +24,10 @@ A toolkit and benchmark for evaluating phonetic capabilities of models.
 git clone git@github.com:changelinglab/PhoneBench.git
 cd PhoneBench
 
-# [OPTIONAL] create conda environment
-conda create -n myenv python=3.9
-conda activate myenv
+# create conda environment
+conda create -n pbench python=3.10
+conda activate phonebench
 
-# install pytorch according to instructions
-# https://pytorch.org/get-started/
-
-# install requirements
 pip install -r requirements.txt
 ```
 
