@@ -2,9 +2,9 @@
 
 defaults:
   - _self_
-  - data: mnist # choose datamodule with `test_dataloader()` for evaluation
-  - model: mnist
-  - logger: null
+  - data: vaani_geolocation # choose datamodule with `test_dataloader()` for evaluation
+  - model: powsm_geolocation
+  - logger: csv
   - trainer: default
   - paths: default
   - extras: default
@@ -12,6 +12,8 @@ defaults:
 
 task_name: "eval"
 
+train: False
+test: True
 tags: ["dev"]
 
 # passing checkpoint path is necessary for evaluation
