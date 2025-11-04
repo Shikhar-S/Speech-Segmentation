@@ -43,7 +43,9 @@ def cfg_eval_global() -> DictConfig:
     :return: A DictConfig containing a default Hydra configuration for evaluation.
     """
     with initialize(version_base="1.3", config_path="../configs"):
-        cfg = compose(config_name="eval.yaml", return_hydra_config=True, overrides=["ckpt_path=."])
+        cfg = compose(
+            config_name="eval.yaml", return_hydra_config=True, overrides=["ckpt_path=."]
+        )
 
         # set defaults for all tests
         with open_dict(cfg):
@@ -77,7 +79,7 @@ def cfg_train(cfg_train_global: DictConfig, tmp_path: Path) -> DictConfig:
 
     with open_dict(cfg):
         cfg.paths.output_dir = str(tmp_path)
-        cfg.paths.log_dir = str(tmp_path)
+        cfg.paths.exp_dir = str(tmp_path)
 
     yield cfg
 
@@ -100,7 +102,7 @@ def cfg_eval(cfg_eval_global: DictConfig, tmp_path: Path) -> DictConfig:
 
     with open_dict(cfg):
         cfg.paths.output_dir = str(tmp_path)
-        cfg.paths.log_dir = str(tmp_path)
+        cfg.paths.exp_dir = str(tmp_path)
 
     yield cfg
 

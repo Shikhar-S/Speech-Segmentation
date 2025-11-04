@@ -7,18 +7,41 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from src.model.powsm.powsm_model import build_powsm
+from lightning.pytorch.utilities import grad_norm
 
 
-def get_kv_pooling_mask(lengths: torch.Tensor) -> torch.Tensor:
+def get_kv_pooling_mask(lengths):
     max_len = lengths.max()
     batch_size = lengths.size(0)
     mask = torch.arange(max_len, device=lengths.device).expand(
         batch_size, max_len
     ) >= lengths.unsqueeze(1)
-    return mask.unsqueeze(1)  # (B, 1, T)
+    return mask  # (B, T)
 
 
-class GeolocationLoss(nn.Module):
+class GeolocationRegressionLoss(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        # https://par.nsf.gov/servlets/purl/10544360
+        # not used currently to make training stable
+        self.earth_radius_km = 6378.1
+
+    def forward(
+        self,
+        pred_v: torch.Tensor,
+        true_lat: torch.Tensor,
+        true_long: torch.Tensor,
+    ) -> torch.Tensor:
+        x = torch.cos(true_lat) * torch.cos(true_long)
+        y = torch.cos(true_lat) * torch.sin(true_long)
+        z = torch.sin(true_lat)
+        true_v = torch.stack([x, y, z], dim=-1)
+        d_regression = (pred_v - true_v).pow(2).sum(dim=-1)
+        total_loss = torch.mean(d_regression)
+        return total_loss
+
+
+class GeolocationAngularLoss(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         # https://par.nsf.gov/servlets/purl/10544360
@@ -32,12 +55,11 @@ class GeolocationLoss(nn.Module):
         true_lat: torch.Tensor,
         true_long: torch.Tensor,
     ) -> torch.Tensor:
-        d_angular = torch.acos(
-            torch.sin(true_lat) * torch.sin(pred_lat)
-            + torch.cos(true_lat)
-            * torch.cos(pred_lat)
-            * torch.cos(pred_long - true_long)
-        )
+        cos_val = torch.sin(true_lat) * torch.sin(pred_lat) + torch.cos(
+            true_lat
+        ) * torch.cos(pred_lat) * torch.cos(pred_long - true_long)
+        cos_val = torch.clamp(cos_val, -1.0 + 1e-7, 1.0 - 1e-7)
+        d_angular = torch.acos(cos_val)
         total_loss = torch.mean(d_angular)
         return total_loss
 
@@ -93,7 +115,8 @@ class PowsmGeolocationModule(LightningModule):
             embed_dim=self.encoder_dim, num_heads=1
         )
         self.geohead = GeolocationHead(self.encoder_dim)
-        self.criterion = GeolocationLoss()
+        # self.criterion = GeolocationAngularLoss()
+        self.criterion = GeolocationRegressionLoss()
 
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -103,12 +126,12 @@ class PowsmGeolocationModule(LightningModule):
     def forward(self, x: torch.Tensor, x_lengths: torch.Tensor) -> torch.Tensor:
         h, h_len = self.net.encode(x, x_lengths)  # (B, T, D), (B,)
         b, t, d = h.size()
-        attn_mask = get_kv_pooling_mask(h_len)
+        key_mask = get_kv_pooling_mask(h_len)
         h = self.attentive_pooling(
             query=self.query_vector.repeat(1, b, 1),  # (1, B, D)
             key=h.transpose(0, 1),
             value=h.transpose(0, 1),
-            attn_mask=attn_mask,
+            key_padding_mask=key_mask,
         )[0].squeeze(0)
         # (B, D)
         pred = self.geohead(h)  # (B, 3), (B,), (B,)  # (xyz), lat, lon
@@ -120,13 +143,18 @@ class PowsmGeolocationModule(LightningModule):
         y_lat = batch["latitude"]
         y_long = batch["longitude"]
         coordinates, pred_lat, pred_long = self.forward(audio, lengths)
-        loss = self.criterion(pred_lat, pred_long, y_lat, y_long)
+        # loss = self.criterion(pred_lat, pred_long, y_lat, y_long) # angular loss
+        loss = self.criterion(coordinates, y_lat, y_long)
         return {
             "loss": loss,
             "pred_coord": coordinates,
             "targets": torch.stack([y_lat, y_long], dim=1),
             "preds": torch.stack([pred_lat, pred_long], dim=1),
         }
+
+    def on_before_optimizer_step(self, optimizer):
+        norms = grad_norm(self, norm_type=2)
+        self.log_dict(norms)
 
     def on_train_start(self) -> None:
         self.train_loss.reset()
@@ -140,7 +168,7 @@ class PowsmGeolocationModule(LightningModule):
         batch = self.model_step(batch)
         self.train_loss(batch["loss"])
         self.log(
-            "train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True
+            "train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True
         )
         return batch["loss"]
 
@@ -168,7 +196,7 @@ class PowsmGeolocationModule(LightningModule):
         )
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        optimizer = self.hparams.optimizer(params=self.trainer.model.parameters())
+        optimizer = self.hparams.optimizer(params=self.parameters())
         if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)
             return {

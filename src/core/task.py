@@ -62,15 +62,16 @@ class Task:
             )
 
         train_metrics = trainer.callback_metrics
+        ckpt_path = trainer.checkpoint_callback.best_model_path
 
         if self.task_cfg.get("test"):
             log.info("Starting testing!")
-            ckpt_path = trainer.checkpoint_callback.best_model_path
+            if self.task_cfg.ckpt_path is not None:
+                ckpt_path = self.task_cfg.ckpt_path  # override ckpt to test if provided
             if ckpt_path == "":
-                log.warning("Best ckpt not found! Using current weights for testing...")
-                ckpt_path = None
+                log.error("Testing ckpt not provided!")
             trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
-            log.info(f"Best ckpt path: {ckpt_path}")
+            log.info(f"Ckpt path: {ckpt_path}")
 
         test_metrics = trainer.callback_metrics
 
