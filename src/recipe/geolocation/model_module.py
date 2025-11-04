@@ -22,6 +22,7 @@ class GeolocationLoss(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         # https://par.nsf.gov/servlets/purl/10544360
+        # not used currently to make training stable
         self.earth_radius_km = 6378.1
 
     def forward(
@@ -37,8 +38,7 @@ class GeolocationLoss(nn.Module):
             * torch.cos(pred_lat)
             * torch.cos(pred_long - true_long)
         )
-        total_loss = self.earth_radius_km * d_angular
-        total_loss = torch.mean(total_loss)
+        total_loss = torch.mean(d_angular)
         return total_loss
 
 

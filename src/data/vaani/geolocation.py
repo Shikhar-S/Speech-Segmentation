@@ -120,7 +120,7 @@ class VaaniGeolocation(LightningDataModule):
             )
             self.ds_val = VaaniParquetDataset(
                 self.hparams.metadata_path,
-                "valid",
+                "val",
                 self.hparams.data_dir,
                 self.hparams.target_sr,
             )

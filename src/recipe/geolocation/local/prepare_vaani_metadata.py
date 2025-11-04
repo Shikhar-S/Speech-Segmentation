@@ -1,3 +1,17 @@
+"""Prepare metadata for Vaani geolocation dataset.
+Run with:
+
+srun -p cpu -A bbjs-delta-cpu \
+    --cpus-per-task=32 \
+    --mem=64G \
+    --time=10:00:00 \
+    --job-name=vaani_geo \
+    --output=logs/vaani_geo_%j.out \
+    bash -c "source ~/.bashrc && conda activate pseld \
+    && cd /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/src/recipe/geolocation/local \
+    && python prepare_vaani_metadata.py"
+"""
+
 import os, random, itertools, io, re, math, pandas as pd, pyarrow.parquet as pq
 from glob import glob
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -7,7 +21,7 @@ import soundfile as sf
 
 PATH_PATTERN = "/work/hdd/bbjs/shared/corpora/vaani_iisc/Vaani/audio/**/*parquet"
 PIN_META = "/work/hdd/bbjs/shared/corpora/vaani_iisc/Vaani/pincode_metadata.csv"
-OUT_CSV = "vaani_geolocation_metadata.csv"
+OUT_CSV = "vaani_geolocation_metadata.big.csv"
 K = 1000  # Checkpoint every K items
 
 
@@ -34,32 +48,43 @@ print(f"Built pincode map with {len(PINMAP)} entries.")
 
 
 def process_row(args):
-    path, rg_idx, row_idx = args
+    path, rg_idx = args
     pf = pq.ParquetFile(path)
-    row = (
-        pf.read_row_group(rg_idx, columns=["pincode", "audio"])
-        .slice(row_idx, row_idx + 1)
-        .to_pandas()
-    )
+    table = pf.read_row_group(rg_idx, columns=["pincode", "audio"])
+    results = []
+    try:
+        # try catch because sometimes pincode is missing!
+        pincode_col = table.column("pincode")
+        audio_col = table.column("audio")
 
-    pc6 = re.search(r"\d{6}", str(row["pincode"].iloc[0]) or "")
-    pc6 = pc6.group(0) if pc6 else None
-    lat, lon = PINMAP.get(pc6, {}).get("Latitude", math.nan), PINMAP.get(pc6, {}).get(
-        "Longitude", math.nan
-    )
+        rel_path = path.replace("/work/hdd/bbjs/shared/corpora/vaani_iisc/", "")
 
-    with sf.SoundFile(io.BytesIO(row["audio"].iloc[0].get("bytes", b""))) as sfh:
-        wlen = len(sfh) / sfh.samplerate
+        for row_idx in range(table.num_rows):
+            pincode_val = pincode_col[row_idx].as_py()
+            pc6_match = re.search(r"\d{6}", str(pincode_val) or "")
+            pc6 = pc6_match.group(0) if pc6_match else None
 
-    return (
-        path.replace("/work/hdd/bbjs/shared/corpora/vaani_iisc/", ""),
-        rg_idx,
-        row_idx,
-        pc6,
-        lat,
-        lon,
-        wlen,
-    )
+            coords = PINMAP.get(pc6, {})
+            lat = coords.get("Latitude", math.nan)
+            lon = coords.get("Longitude", math.nan)
+
+            audio_entry = audio_col[row_idx].as_py()
+            audio_bytes = (
+                audio_entry.get("bytes")
+                if isinstance(audio_entry, dict)
+                else audio_entry
+            ) or b""
+
+            try:
+                with sf.SoundFile(io.BytesIO(audio_bytes)) as sfh:
+                    wlen = len(sfh) / sfh.samplerate
+            except Exception:
+                wlen = math.nan  # handle corrupted files safely
+
+            results.append((rel_path, rg_idx, row_idx, pc6, lat, lon, wlen))
+    except Exception as e:
+        print(f"Error processing {path} row group {rg_idx}: {e}")
+    return results
 
 
 if __name__ == "__main__":
@@ -68,7 +93,7 @@ if __name__ == "__main__":
     paths = glob(PATH_PATTERN, recursive=True)
     paths = sorted(paths)
     # Sample few files for preparing data
-    n = 3
+    n = 20
     sampled_paths = [
         p
         for _, g in itertools.groupby(
@@ -80,8 +105,7 @@ if __name__ == "__main__":
     for path in tqdm(sampled_paths, desc="parquet files"):
         pf = pq.ParquetFile(path)
         for rg_idx in range(pf.num_row_groups):
-            n_rows = pf.metadata.row_group(rg_idx).num_rows
-            work_items.extend((path, rg_idx, i) for i in range(n_rows))
+            work_items.append((path, rg_idx))
 
     # Process in parallel with checkpointing using as_completed
     columns = [
@@ -106,7 +130,7 @@ if __name__ == "__main__":
         pbar = tqdm(as_completed(futures), total=len(futures))
         for future in pbar:
             result = future.result()
-            buffer.append(result)
+            buffer.extend(result)
 
             # Checkpoint when buffer reaches K items
             if len(buffer) >= K:
