@@ -7,12 +7,22 @@ optimizer:
   weight_decay: 0.0
 
 scheduler:
-  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _target_: torch.optim.lr_scheduler.LinearLR
   _partial_: true
-  mode: min
-  factor: 0.1
-  patience: 10
+  total_iters: 100
+  last_epoch: -1
 
-s2t_train_config: /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/exp_bigpr/s2t_train_s2t_transformer_mask_norm_raw_bpe40000/config.yaml
-s2t_model_file: /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/exp_bigpr/s2t_train_s2t_transformer_mask_norm_raw_bpe40000/valid.acc.ave_5best.till40epoch.pth
-bpemodel: /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/data/token_list/bpe_unigram40000/bpe.model
+# scheduler:
+#   _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+#   _partial_: true
+#   mode: min
+#   factor: 0.1
+#   patience: 5
+
+hf_cache_dir: ${paths.exp_dir}/powsm_cache
+hf_repo: espnet/powsm
+# provide paths to override from local files instead of HF repo
+s2t_train_config: null
+s2t_model_file: null
+bpemodel: null
+stats_file: null

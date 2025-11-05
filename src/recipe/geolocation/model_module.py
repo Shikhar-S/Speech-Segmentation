@@ -1,5 +1,5 @@
 import pyarrow.parquet as pq  # before torch
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
 
 import torch
 import torch.nn as nn
@@ -64,13 +64,35 @@ class GeolocationAngularLoss(nn.Module):
         return total_loss
 
 
+class GeolocationRadianRegressionLoss(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self,
+        pred_lat: torch.Tensor,
+        pred_long: torch.Tensor,
+        true_lat: torch.Tensor,
+        true_long: torch.Tensor,
+    ) -> torch.Tensor:
+        d_lat = (pred_lat - true_lat).pow(2)
+        d_long = (pred_long - true_long).pow(2)
+        total_loss = torch.mean(d_lat + d_long)
+        return total_loss
+
+
 class GeolocationHead(nn.Module):
     def __init__(self, in_dim):
         super().__init__()
-        self.mlp = nn.Sequential(nn.Linear(in_dim, 3), nn.Tanh())
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, in_dim // 2),
+            nn.Tanh(),
+            nn.Linear(in_dim // 2, 3),
+            nn.Tanh(),
+        )
 
     def forward(self, x):
-        v = F.normalize(self.mlp(x), dim=-1)  # (B,3) on S^2
+        v = self.mlp(x)
         x_, y_, z_ = v.unbind(-1)
         # [-π, π]
         lon = torch.atan2(y_, x_)
@@ -82,17 +104,17 @@ class GeolocationHead(nn.Module):
 class PowsmGeolocationModule(LightningModule):
     def __init__(
         self,
-        s2t_train_config: str,
-        s2t_model_file: str,
-        bpemodel: str,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
+        hf_cache_dir: str,
+        hf_repo: Optional[str] = "espnet/powsm",
+        s2t_train_config: Optional[str] = None,
+        s2t_model_file: Optional[str] = None,
+        bpemodel: Optional[str] = None,
+        stats_file: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
-
-        self.s2t_train_config = s2t_train_config
-        self.s2t_model_file = s2t_model_file
 
         ###### Alternate ######
         # from espnet2.bin.speech2text import Speech2Text
@@ -104,9 +126,12 @@ class PowsmGeolocationModule(LightningModule):
         #########################
 
         self.net, self.tokenizer = build_powsm(
-            config_file=self.s2t_train_config,
-            model_file=self.s2t_model_file,
+            work_dir=hf_cache_dir,
+            hf_repo=hf_repo,
+            config_file=s2t_train_config,
+            model_file=s2t_model_file,
             bpemodel=bpemodel,
+            stats_file=stats_file,
         )
 
         self.encoder_dim = self.net.encoder.output_size()
@@ -115,8 +140,9 @@ class PowsmGeolocationModule(LightningModule):
             embed_dim=self.encoder_dim, num_heads=1
         )
         self.geohead = GeolocationHead(self.encoder_dim)
-        # self.criterion = GeolocationAngularLoss()
-        self.criterion = GeolocationRegressionLoss()
+        self.criterion = GeolocationAngularLoss()
+        # self.criterion = GeolocationRegressionLoss()
+        # self.criterion = GeolocationRadianRegressionLoss()
 
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -125,14 +151,19 @@ class PowsmGeolocationModule(LightningModule):
 
     def forward(self, x: torch.Tensor, x_lengths: torch.Tensor) -> torch.Tensor:
         h, h_len = self.net.encode(x, x_lengths)  # (B, T, D), (B,)
+        h = F.normalize(h, dim=-1, eps=1e-8)
         b, t, d = h.size()
         key_mask = get_kv_pooling_mask(h_len)
+        q = F.normalize(self.query_vector, dim=-1, eps=1e-8).expand(
+            1, b, -1
+        )  # (1, B, D)
         h = self.attentive_pooling(
-            query=self.query_vector.repeat(1, b, 1),  # (1, B, D)
+            query=q,  # (1, B, D)
             key=h.transpose(0, 1),
             value=h.transpose(0, 1),
             key_padding_mask=key_mask,
         )[0].squeeze(0)
+        h = F.normalize(h, dim=-1, eps=1e-8)
         # (B, D)
         pred = self.geohead(h)  # (B, 3), (B,), (B,)  # (xyz), lat, lon
         return pred
@@ -142,9 +173,9 @@ class PowsmGeolocationModule(LightningModule):
         lengths = batch["lengths"]
         y_lat = batch["latitude"]
         y_long = batch["longitude"]
-        coordinates, pred_lat, pred_long = self.forward(audio, lengths)
-        # loss = self.criterion(pred_lat, pred_long, y_lat, y_long) # angular loss
-        loss = self.criterion(coordinates, y_lat, y_long)
+        coordinates, pred_lat, pred_long = self(audio, lengths)
+        loss = self.criterion(pred_lat, pred_long, y_lat, y_long)  # angular loss
+        # loss = self.criterion(coordinates, y_lat, y_long)
         return {
             "loss": loss,
             "pred_coord": coordinates,
@@ -213,13 +244,11 @@ class PowsmGeolocationModule(LightningModule):
 
 if __name__ == "__main__":
     model = PowsmGeolocationModule(
-        s2t_train_config="/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/exp_bigpr/s2t_train_s2t_transformer_mask_norm_raw_bpe40000/config.yaml",
-        s2t_model_file="/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/exp_bigpr/s2t_train_s2t_transformer_mask_norm_raw_bpe40000/valid.acc.ave_5best.till40epoch.pth",
-        bpemodel="/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/data/token_list/bpe_unigram40000/bpe.model",
+        hf_cache_dir="/tmp/powsm_cache",
+        hf_repo="espnet/powsm",
         optimizer=torch.optim.Adam,
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
     )
-    # print(model)
     dummy_input = torch.randn(2, 16000 * 5)  # batch of 2, 5 seconds of audio at 16kHz
     dummy_lengths = torch.tensor([16000 * 5, 16000 * 5])
     output = model.training_step(
