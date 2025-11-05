@@ -24,11 +24,11 @@ A benchmark for evaluating phonetic models.
 git clone git@github.com:changelinglab/PhoneBench.git
 cd PhoneBench
 
-# create conda environment
-conda create -n pbench python=3.10
-conda activate phonebench
+# create environment with your favourite package manager 
+# and install dependencies from requirements.txt
+# We provide "setup_uv.sh" for doing these and activating environment
+. ./setup_uv.sh
 
-pip install -r requirements.txt
 ```
 
 ## How to run
