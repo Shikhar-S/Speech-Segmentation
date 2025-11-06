@@ -31,12 +31,17 @@ import numpy as np
 def preprocess_inputs_wav2vec2(
     preprocessor: Wav2Vec2Processor,
     speech: List[torch.Tensor] | torch.Tensor,
+    speech_lengths: List[int] | torch.Tensor,
     device: torch.device,
 ) -> Dict[str, torch.Tensor]:
     """Prepare batched input for Wav2Vec2 model."""
     if isinstance(speech, torch.Tensor):
         speech = speech if speech.ndim == 1 else list(speech)
-    batch = [x.detach().cpu().float().numpy().squeeze() for x in speech]
+    # convert to list of trimmed numpy arrays
+    batch = [
+        x.detach().cpu().float().numpy().squeeze()[:xl]
+        for x, xl in zip(speech, speech_lengths)
+    ]
 
     inputs = preprocessor(
         batch,
@@ -64,7 +69,6 @@ class Wav2Vec2PhonemeModel(nn.Module):
         self.processor = Wav2Vec2Processor.from_pretrained(hf_repo)
         self.model = Wav2Vec2ForCTC.from_pretrained(hf_repo)
         self.model_stride = np.prod(self.model.config.conv_stride)
-        print(f"Model stride: {self.model_stride}")
         self.encoder_dim = self.model.config.output_hidden_size
         self.vocab_size = self.model.config.vocab_size
 
@@ -74,8 +78,12 @@ class Wav2Vec2PhonemeModel(nn.Module):
         encoder_out, encoder_out_lens = self.encode(inputs)
         return encoder_out, encoder_out_lens
 
-    def encode(self, inputs) -> Tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, speech, speech_lengths) -> Tuple[torch.Tensor, torch.Tensor]:
         """Frontend + Encoder"""
+        device = self.model.device
+        inputs = preprocess_inputs_wav2vec2(
+            self.processor, speech, speech_lengths, device=device
+        )
         model_out = self.model(
             **inputs,
             output_hidden_states=True,
@@ -87,7 +95,7 @@ class Wav2Vec2PhonemeModel(nn.Module):
         )
         return encoder_out, encoder_out_lens
 
-    def output_size(self) -> int:
+    def encoder_output_size(self) -> int:
         """Get output dimension"""
         return self.encoder_dim
 
@@ -118,7 +126,6 @@ if __name__ == "__main__":
     ]  # Batch of 2 samples, 1 sec, 0.5 sec at 16kHz
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    inputs = preprocess_inputs_wav2vec2(model.processor, dummy_speech, device=device)
-    encoder_out, encoder_out_lens = model.encode(inputs)
+    encoder_out, encoder_out_lens = model.encode(dummy_speech, [16000, 8000])
     print(f"Encoder output shape: {encoder_out.shape}")
     print(f"Encoder output lengths: {encoder_out_lens}")

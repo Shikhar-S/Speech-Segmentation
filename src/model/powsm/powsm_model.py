@@ -413,6 +413,10 @@ class PowsmModel(torch.nn.Module):
             cer_ctc = self.error_calculator(ys_hat.cpu(), ys_pad.cpu(), is_ctc=True)
         return loss_ctc, cer_ctc
 
+    def encoder_output_size(self) -> int:
+        """Get encoder output dimension"""
+        return self.encoder.output_size()
+
 
 def build_powsm_from_files(
     config_file: str,
@@ -488,8 +492,9 @@ def build_powsm_from_files(
     logging.info(f"Model loaded: {model_file} with info: {load_info}")
 
     # 9. Build tokenizer
-    tokenizer = SentencepiecesTokenizer(bpemodel, dict())
-    return model, tokenizer
+    # tokenizer = SentencepiecesTokenizer(bpemodel, dict())
+    # TODO(shikhar): Integrate with the decoding flow
+    return model
 
 
 def build_powsm(

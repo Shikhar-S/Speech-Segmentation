@@ -1,5 +1,7 @@
 #!/bin/bash
+echo $1
 
+virtual_env_dir=${1:-".venv"}
 # Check pixi
 if ! command -v pixi >/dev/null 2>&1; then
     echo "pixi not found. Installing pixi..."
@@ -21,16 +23,16 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 # If .venv doesn't exist, create it
-if [ ! -d ".venv" ]; then
-    echo "Creating .venv..."
-    uv venv -p 3.10
+if [ ! -d "$virtual_env_dir" ]; then
+    echo "Creating $virtual_env_dir..."
+    uv venv -p 3.10 $virtual_env_dir
 else
-    echo ".venv already exists"
+    echo "$virtual_env_dir already exists"
 fi
 
 # Activate the virtual environment
-echo "Activating .venv..."
-. .venv/bin/activate
+echo "Activating $virtual_env_dir..."
+. $virtual_env_dir/bin/activate
 
 
 uv pip install -r requirements.txt

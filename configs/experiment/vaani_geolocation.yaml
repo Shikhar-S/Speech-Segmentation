@@ -14,7 +14,7 @@ defaults:
 # this allows you to overwrite only specified parameters
 
 task_name: "vaani_geolocation"
-tags: ["vaani_geolocation", "powsm"]
+tags: ["vaani_geolocation"]
 
 seed: 42
 

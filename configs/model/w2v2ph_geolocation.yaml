@@ -1,0 +1,21 @@
+_target_: src.recipe.geolocation.model_module.GeolocationModel
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.LinearLR
+  _partial_: true
+  total_iters: 100
+  last_epoch: -1
+
+model:
+  _target_: src.model.wav2vec2phoneme.wav2vec2phoneme_model.build_wav2vec2phoneme
+  hf_repo: facebook/wav2vec2-lv-60-espeak-cv-ft
+  # _partial_: true
+# facebook/wav2vec2-lv-60-espeak-cv-ft
+# facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns

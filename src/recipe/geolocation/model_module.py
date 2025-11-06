@@ -1,3 +1,10 @@
+"""Lightning style Geolocation Model.
+
+This module works with both powsm and wav2vec2phoneme encoders.
+Run main:
+    python -m src.recipe.geolocation.model_module
+"""
+
 import pyarrow.parquet as pq  # before torch
 from typing import Any, Dict, Tuple, Optional
 
@@ -6,7 +13,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
-from src.model.powsm.powsm_model import build_powsm
 from lightning.pytorch.utilities import grad_norm
 
 
@@ -101,40 +107,17 @@ class GeolocationHead(nn.Module):
         return v, lat, lon
 
 
-class PowsmGeolocationModule(LightningModule):
+class GeolocationModel(LightningModule):
     def __init__(
         self,
+        model: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
-        hf_cache_dir: str,
-        hf_repo: Optional[str] = "espnet/powsm",
-        s2t_train_config: Optional[str] = None,
-        s2t_model_file: Optional[str] = None,
-        bpemodel: Optional[str] = None,
-        stats_file: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
-
-        ###### Alternate ######
-        # from espnet2.bin.speech2text import Speech2Text
-        # self.net = Speech2Text(
-        #     s2t_train_config=self.s2t_train_config,
-        #     s2t_model_file=self.s2t_model_file,
-        #     bpemodel=bpemodel,
-        # ).s2t_model
-        #########################
-
-        self.net, self.tokenizer = build_powsm(
-            work_dir=hf_cache_dir,
-            hf_repo=hf_repo,
-            config_file=s2t_train_config,
-            model_file=s2t_model_file,
-            bpemodel=bpemodel,
-            stats_file=stats_file,
-        )
-
-        self.encoder_dim = self.net.encoder.output_size()
+        self.net = model
+        self.encoder_dim = self.net.encoder_output_size()
         self.query_vector = nn.Parameter(torch.randn(1, 1, self.encoder_dim))
         self.attentive_pooling = nn.MultiheadAttention(
             embed_dim=self.encoder_dim, num_heads=1
@@ -243,9 +226,15 @@ class PowsmGeolocationModule(LightningModule):
 
 
 if __name__ == "__main__":
-    model = PowsmGeolocationModule(
-        hf_cache_dir="/tmp/powsm_cache",
-        hf_repo="espnet/powsm",
+    from src.model.powsm.powsm_model import build_powsm
+    from src.model.wav2vec2phoneme.wav2vec2phoneme_model import build_wav2vec2phoneme
+
+    model = GeolocationModel(
+        model=build_wav2vec2phoneme("facebook/wav2vec2-lv-60-espeak-cv-ft"),
+        # model=build_powsm(
+        #     work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
+        #     hf_repo="espnet/powsm",
+        # ),
         optimizer=torch.optim.Adam,
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
     )

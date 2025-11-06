@@ -1,7 +1,8 @@
 # --------- pytorch --------- #
-torch>=2.0.0
-torchaudio>=2.6.0
-torchvision>=0.15.0
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.6.0
+torchaudio==2.6.0
+torchvision==0.21.0
 lightning>=2.0.0
 torchmetrics>=0.11.4
 
@@ -27,3 +28,5 @@ espnet==202509
 huggingface_hub==0.35.3
 pyarrow==22.0.0
 pandas
+transformers
+phonemizer==3.3.0
