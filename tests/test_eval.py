@@ -5,12 +5,13 @@ import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
-from src.eval import evaluate
-from src.main import train
+from src.main import run_task
 
 
 @pytest.mark.slow
-def test_train_eval(tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig) -> None:
+def test_train_eval(
+    tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig
+) -> None:
     """Tests training and evaluation by training for 1 epoch with `train.py` then evaluating with
     `eval.py`.
 
@@ -25,7 +26,7 @@ def test_train_eval(tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig)
         cfg_train.test = True
 
     HydraConfig().set_config(cfg_train)
-    train_metric_dict, _ = train(cfg_train)
+    train_metric_dict, _ = run_task(cfg_train)
 
     assert "last.ckpt" in os.listdir(tmp_path / "checkpoints")
 
@@ -33,7 +34,12 @@ def test_train_eval(tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig)
         cfg_eval.ckpt_path = str(tmp_path / "checkpoints" / "last.ckpt")
 
     HydraConfig().set_config(cfg_eval)
-    test_metric_dict, _ = evaluate(cfg_eval)
+    cfg_eval.train = False
+    cfg_eval.test = True
+    test_metric_dict, _ = run_task(cfg_eval)
 
     assert test_metric_dict["test/acc"] > 0.0
-    assert abs(train_metric_dict["test/acc"].item() - test_metric_dict["test/acc"].item()) < 0.001
+    assert (
+        abs(train_metric_dict["test/acc"].item() - test_metric_dict["test/acc"].item())
+        < 0.001
+    )
