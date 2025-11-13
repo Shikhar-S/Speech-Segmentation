@@ -1,4 +1,3 @@
-# TODO(shikhar): Copy over code from espnet to avoid installation.
 from pathlib import Path
 import token
 from huggingface_hub import snapshot_download
@@ -7,6 +6,7 @@ import logging
 from typing import Dict, List, Optional, Tuple, Union
 import yaml
 import torch
+import torchaudio
 from torch.cuda.amp import autocast
 from typeguard import typechecked
 import argparse
@@ -16,7 +16,6 @@ from espnet.nets.pytorch_backend.nets_utils import pad_list, th_accuracy
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (
     LabelSmoothingLoss,
 )
-
 from src.model.powsm.ctc import CTC
 from src.model.powsm.utils import force_gatherable
 from src.model.powsm.frontend import DefaultFrontend, GlobalMVN
@@ -123,6 +122,21 @@ class PowsmModel(torch.nn.Module):
             assert (
                 self.frontend is None
             ), "frontend should be None when using full Whisper model"
+
+        # Fixed!
+        self.frames2points_ratio = None
+        self.sampling_rate = self.frontend.fs if self.frontend is not None else 16_000
+
+    @torch.no_grad()
+    def frames2points(self) -> int:
+        """Get the ratio of input points to output frames."""
+        if self.frames2points_ratio is None:
+            dummy_input = torch.randn(1, 16000)
+            dummy_length = torch.tensor([16000])
+            with torch.no_grad():
+                feats, feat_lengths = self.encode(dummy_input, dummy_length)
+                self.frames2points_ratio = 16000 // feat_lengths.item()
+        return self.frames2points_ratio
 
     def forward(
         self,
@@ -417,13 +431,78 @@ class PowsmModel(torch.nn.Module):
         """Get encoder output dimension"""
         return self.encoder.output_size()
 
+    def ctc_logits(
+        self, speech: torch.Tensor, speech_lengths: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get CTC logits from encoder output
+
+        Args:
+            speech: (Batch, Length, ...)
+            speech_lengths: (Batch,)
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - CTC logits: (Batch, Length, Vocab)
+                - Encoder output lengths: (Batch,)
+        """
+        encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
+        logits = self.ctc.ctc_lo(encoder_out)
+        return logits, encoder_out_lens
+
+    @torch.no_grad()
+    def forced_align(self, speech, speech_lengths, text, text_lengths):
+        """Calculate frame-wise alignment from CTC probabilities.
+        Only an inference function that uses the ctc posteriors.
+
+        Args:
+            speech: (Batch, Length, ...)
+            speech_lengths: (Batch,)
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+        Returns:
+            Tuple(tensor, tensor):
+                - Label for each time step in the alignment path computed
+                using forced alignment.
+                - Log probability scores of the labels for each time
+                step.
+        """
+        assert (
+            self.ctc is not None
+        ), "CTC is not used in this model. Cannot compute forced alignment."
+        assert text_lengths.dim() == 1, text_lengths.shape
+        # Check that batch_size is unified
+        assert (
+            speech.shape[0]
+            == speech_lengths.shape[0]
+            == text.shape[0]
+            == text_lengths.shape[0]
+        ), (
+            speech.shape,
+            speech_lengths.shape,
+            text.shape,
+            text_lengths.shape,
+        )
+        batch_size = speech.shape[0]
+        assert batch_size == 1, "Forced alignment needs batch size 1."
+
+        # -1 is used as padding index in collate fn
+        text = torch.where(text == -1, self.ignore_id, text)
+        text = text[:, : text_lengths.max()]  # for data-parallel
+        encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
+
+        log_probs = self.ctc.log_softmax(encoder_out)  # (B, Tmax, odim)
+        assert log_probs.size(0) == 1, "Forced alignment needs batch size 1"
+        assert not (text == self.blank_id).any(), "Target has blank tokens."
+        align_label, align_prob = torchaudio.functional.forced_align(
+            log_probs, text, encoder_out_lens, text_lengths, blank=self.blank_id
+        )
+        return align_label, align_prob
+
 
 def build_powsm_from_files(
     config_file: str,
     model_file: str,
-    bpemodel: str,
     stats_file: str,
-) -> Tuple[PowsmModel, SentencepiecesTokenizer]:
+) -> PowsmModel:
     with open(config_file, "r", encoding="utf-8") as f:
         args = yaml.safe_load(f)
     args = argparse.Namespace(**args)
@@ -490,10 +569,7 @@ def build_powsm_from_files(
     state_dict = torch.load(model_file, map_location="cpu", weights_only=False)
     load_info = model.load_state_dict(state_dict, strict=True)
     logging.info(f"Model loaded: {model_file} with info: {load_info}")
-
-    # 9. Build tokenizer
-    # tokenizer = SentencepiecesTokenizer(bpemodel, dict())
-    # TODO(shikhar): Integrate with the decoding flow
+    model.training_args = args
     return model
 
 
@@ -504,7 +580,6 @@ def build_powsm(
     force: bool = False,
     config_file: Optional[str] = None,
     model_file: Optional[str] = None,
-    bpemodel: Optional[str] = None,
     stats_file: Optional[str] = None,
 ):
     """Build Powsm model from local files or huggingface repo.
@@ -516,17 +591,14 @@ def build_powsm(
           Takes precedence over hf_repo.
         model_file: Path to model file. If None, use default path in hf repo.
           Takes precedence over hf_repo.
-        bpemodel: Path to bpe model file. If None, use default path in hf repo.
-          Takes precedence over hf_repo.
         stats_file: Path to stats file. If None, use default path in hf repo.
           Takes precedence over hf_repo.
-    Returns: PowsmModel, Tokenizer
+    Returns: PowsmModel
     """
     # Relative paths from hf repo structure (espnet style)
     # TODO(shikhar): Convert to patterns and match patterns within downloaded files.
     REL_CONFIG = "exp/s2t_train_s2t_ebf_conv2d_size768_e9_d9_piecewise_lr5e-4_warmup60k_flashattn_raw_bpe40000/config.yaml"
     REL_CKPT = "exp/s2t_train_s2t_ebf_conv2d_size768_e9_d9_piecewise_lr5e-4_warmup60k_flashattn_raw_bpe40000/valid.acc.ave_5best.till45epoch.pth"
-    REL_BPE = "data/token_list/bpe_unigram40000"
     REL_STATS = "exp/s2t_stats_raw_bpe40000/train/feats_stats.npz"
 
     if hf_repo:
@@ -540,12 +612,10 @@ def build_powsm(
     root = Path(work_dir)
     cfg = config_file or str(root / REL_CONFIG)
     mdl = model_file or str(root / REL_CKPT)
-    bpe = bpemodel or str(root / REL_BPE)
     stats = stats_file or str(root / REL_STATS)
     # assert files exist
     assert Path(cfg).exists(), f"Config file not found: {cfg}"
     assert Path(mdl).exists(), f"Model file not found: {mdl}"
-    assert Path(bpe).exists(), f"BPE model file not found: {bpe}"
     assert Path(stats).exists(), f"Stats file not found: {stats}"
 
-    return build_powsm_from_files(cfg, mdl, bpe, stats)
+    return build_powsm_from_files(cfg, mdl, stats)

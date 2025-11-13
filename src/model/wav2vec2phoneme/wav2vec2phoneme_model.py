@@ -1,30 +1,34 @@
 """Wav2Vec2Phoneme model implementation using Hugging Face Transformers.
 Functionalities:
 1. TODO(shikhar): Model fine-tuning with ctc loss
-2. Encoder output extraction via encode() method.
-3. TODO(shikhar): CTC-Decoding via decode() method.
-4. TODO(shikhar): Forced alignment via forced_align() method.
+3. TODO(shikhar): CTC-Decoding via an inference file.
 
 This file supports the following pretrained models:
 - facebook/wav2vec2-lv-60-espeak-cv-ft
 - facebook/wav2vec2-xlsr-53-espeak-cv-ft
 - ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
 
+Note:
 "facebook" models use phonemizer which needs espeak-ng
+If you see an error like: "TypeError: Received a bool for argument tokenizer, but a PreTrainedTokenizerBase was expected"
 Build espeak-ng following https://github.com/espeak-ng/espeak-ng/blob/master/docs/building.md
 Then export the following paths:
 export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
 Here the prefix is the path passed to ./configure --prefix=/usr during build.
 Both of these exports are necessary.
+
+Usage:
+    python -m src.model.wav2vec2phoneme.wav2vec2phoneme_model
+
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torchaudio
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
-from typing import Dict, List, Optional, Tuple, Union
-from pathlib import Path
-import logging
+from typing import Dict, List, Tuple
 import numpy as np
 
 
@@ -71,55 +75,112 @@ class Wav2Vec2PhonemeModel(nn.Module):
         self.model_stride = np.prod(self.model.config.conv_stride)
         self.encoder_dim = self.model.config.output_hidden_size
         self.vocab_size = self.model.config.vocab_size
+        # Fixed!
+        self.frames2points_ratio = None
+        self.sampling_rate = self.processor.feature_extractor.sampling_rate
+        self.blank_id = self.model.config.pad_token_id
 
-    def forward(self, inputs) -> Tuple[torch.Tensor, torch.Tensor]:
+    @torch.no_grad()
+    def frames2points(self) -> int:
+        """Get the ratio of input points to output frames."""
+        if self.frames2points_ratio is None:
+            dummy_input = torch.randn(1, 16000)
+            dummy_length = torch.tensor([16000])
+            with torch.no_grad():
+                feats, feat_lengths = self.encode(dummy_input, dummy_length)
+                self.frames2points_ratio = 16000 // feat_lengths.item()
+        return self.frames2points_ratio
+
+    def forward(self, inputs) -> Dict[str, torch.Tensor]:
         """Forward pass compatible with PowsmModel interface"""
-        # TODO(shikhar): Implement training with CTC loss
-        encoder_out, encoder_out_lens = self.encode(inputs)
-        return encoder_out, encoder_out_lens
-
-    def encode(self, speech, speech_lengths) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Frontend + Encoder"""
-        device = self.model.device
-        inputs = preprocess_inputs_wav2vec2(
-            self.processor, speech, speech_lengths, device=device
-        )
         model_out = self.model(
             **inputs,
             output_hidden_states=True,
             return_dict=True,
         )
+        return model_out
+
+    def _extract_feats(self, speech, speech_lengths) -> torch.Tensor:
+        device = self.model.device
+        inputs = preprocess_inputs_wav2vec2(
+            self.processor, speech, speech_lengths, device=device
+        )
+        return inputs
+
+    def encode(self, speech, speech_lengths) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Frontend + Encoder"""
+        inputs = self._extract_feats(speech, speech_lengths)
+        model_out = self(inputs)
         encoder_out = model_out.hidden_states[-1]
         encoder_out_lens = self.model._get_feat_extract_output_lengths(
             inputs["attention_mask"].sum(-1)
         )
         return encoder_out, encoder_out_lens
 
+    def ctc_logits(self, speech, speech_lengths) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get CTC logits from encoder output"""
+        inputs = self._extract_feats(speech, speech_lengths)
+        model_out = self(inputs)
+        logits = model_out.logits
+        logit_lengths = self.model._get_feat_extract_output_lengths(
+            inputs["attention_mask"].sum(-1)
+        )
+        return logits, logit_lengths
+
     def encoder_output_size(self) -> int:
         """Get output dimension"""
         return self.encoder_dim
 
+    @torch.no_grad()
+    def forced_align(self, speech, speech_lengths, text, text_lengths):
+        """Calculate frame-wise alignment from CTC probabilities.
+        Only an inference function that uses the ctc posteriors.
 
-def build_wav2vec2phoneme(
-    hf_repo: str = "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns",
-):
-    """Build Wav2Vec2Phoneme model
+        Args:
+            speech: (Batch, Length, ...)
+            speech_lengths: (Batch,)
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+        Returns:
+            Tuple(tensor, tensor):
+                - Label for each time step in the alignment path computed
+                using forced alignment.
+                - Log probability scores of the labels for each time
+                step.
+        """
+        assert text_lengths.dim() == 1, text_lengths.shape
+        # Check that batch_size is unified
+        assert (
+            speech.shape[0]
+            == speech_lengths.shape[0]
+            == text.shape[0]
+            == text_lengths.shape[0]
+        ), (
+            speech.shape,
+            speech_lengths.shape,
+            text.shape,
+            text_lengths.shape,
+        )
+        batch_size = speech.shape[0]
+        assert batch_size == 1, "Forced alignment needs batch size 1."
 
-    Args:
-        hf_repo: HuggingFace repository ID
-
-    Returns:
-        Wav2Vec2Phoneme model
-    """
-    model = Wav2Vec2PhonemeModel(hf_repo=hf_repo)
-    logging.info(f"Wav2Vec2Phoneme model loaded from {hf_repo}")
-    logging.info(f"Model vocab size: {model.vocab_size}")
-    return model
+        # -1 is used as padding index in collate fn
+        text = text[:, : text_lengths.max()]  # for data-parallel
+        logits, logit_lengths = self.ctc_logits(speech, speech_lengths)
+        log_probs = F.softmax(logits, dim=-1)  # (B, Tmax, odim)
+        assert log_probs.size(0) == 1, "Forced alignment needs batch size 1"
+        assert not (text == self.blank_id).any(), "Target has blank tokens."
+        align_label, align_prob = torchaudio.functional.forced_align(
+            log_probs, text, logit_lengths, text_lengths, blank=self.blank_id
+        )
+        return align_label, align_prob
 
 
 if __name__ == "__main__":
     # Example usage
-    model = build_wav2vec2phoneme("facebook/wav2vec2-lv-60-espeak-cv-ft")
+    model = Wav2Vec2PhonemeModel(
+        "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
+    )
     dummy_speech = [
         torch.randn(16000),
         torch.randn(8000),
