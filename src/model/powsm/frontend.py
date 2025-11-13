@@ -51,6 +51,7 @@ class DefaultFrontend(AbsFrontend):
         if isinstance(fs, str):
             fs = humanfriendly.parse_size(fs)
 
+        self.fs = fs
         # Deepcopy (In general, dict shouldn't be used as default arg)
         frontend_conf = copy.deepcopy(frontend_conf)
         self.hop_length = hop_length

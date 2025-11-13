@@ -19,5 +19,4 @@ model:
   # provide paths to override from local files instead of HF repo
   config_file: null
   model_file: null
-  bpemodel: null
   stats_file: null

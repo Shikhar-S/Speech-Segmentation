@@ -155,19 +155,100 @@ class VaaniGeolocation(LightningDataModule):
         return self._dl(self.ds_test, shuffle=False)
 
 
+def _naive_baseline():
+    metadata_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/vaani_geolocation_metadata.train10.csv"
+    import pandas as pd
+
+    metadata = pd.read_csv(metadata_path)
+    trainset = metadata[metadata["split"] == "train"]
+    lat_av = trainset["latitude"].mean()
+    long_av = trainset["longitude"].mean()
+    print(f"Train set average latitude: {lat_av}")
+    print(f"Train set average longitude: {long_av}")
+
+    test_set = metadata[metadata["split"] == "test"]
+    from src.recipe.geolocation.model_module import GeolocationAngularLoss
+
+    loss_fn = GeolocationAngularLoss()
+    total_loss = 0.0
+    count = 0
+    for idx, row in test_set.iterrows():
+        true_lat = (
+            math.radians(row["latitude"]) if not math.isnan(row["latitude"]) else 0.0
+        )
+        true_long = (
+            math.radians(row["longitude"]) if not math.isnan(row["longitude"]) else 0.0
+        )
+        pred_lat = math.radians(lat_av) if not math.isnan(lat_av) else 0.0
+        pred_long = math.radians(long_av) if not math.isnan(long_av) else 0.0
+        loss_val = loss_fn(
+            pred_lat=torch.tensor([pred_lat]),
+            pred_long=torch.tensor([pred_long]),
+            true_lat=torch.tensor([true_lat]),
+            true_long=torch.tensor([true_long]),
+        )
+        total_loss += loss_val.item()
+        count += 1
+    print(f"Total test loss: {total_loss}")
+    print(f"Average test loss: {total_loss / count if count > 0 else 0}")
+
+
 if __name__ == "__main__":
-    dm = VaaniGeolocation(
-        data_dir="/work/hdd/bbjs/shared/corpora/vaani_iisc",
-        metadata_path="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/notebook/vaani_geolocation_metadata_small.withsplits.csv",  # Path to the generated metadata
-        batch_size=2,
-        num_workers=1,
-        target_sr=16000,
-    )
-    dm.setup()
-    for x in dm.train_dataloader():
-        print(x["pincode"])
-        print(x["audio"].shape)
-        print(x["lengths"].shape)
-        print(x["latitude"])
-        print(x["longitude"])
-        break
+    # A naive baseline using average of the training set
+    _naive_baseline()
+    # from tqdm import tqdm
+
+    # dm = VaaniGeolocation(
+    #     data_dir="/work/hdd/bbjs/shared/corpora/vaani_iisc",
+    #     metadata_path="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/vaani_geolocation_metadata.train10.csv",  # Path to the generated metadata
+    #     batch_size=2,
+    #     num_workers=1,
+    #     target_sr=16000,
+    # )
+    # # Average of dataset
+    # dm.setup()
+    # lat_av = 0
+    # long_av = 0
+    # count = 0
+    # c = 0
+    # for x in tqdm(dm.train_dataloader(), desc="Train batches", unit="batch"):
+    #     lat_av += x["latitude"].sum().item()
+    #     long_av += x["longitude"].sum().item()
+    #     count += x["latitude"].numel()
+    #     c += 1
+    #     if c > 1000:
+    #         break
+
+    # lat_av /= count
+    # long_av /= count
+    # print(f"Train set average latitude (radians): {lat_av}")
+    # print(f"Train set average longitude (radians): {long_av}")
+
+    # calculate metrics based on this average
+    # from src.recipe.geolocation.model_module import GeolocationAngularLoss
+
+    # lat_av = 0.4340759042825375
+    # long_av = 1.413005766156432
+    # loss_fn = GeolocationAngularLoss()
+    # total_loss = 0.0
+    # count = 0
+    # c_iter = 0
+    # for x in tqdm(dm.val_dataloader(), desc="Validation batches", unit="batch"):
+    #     loss_val = loss_fn(
+    #         pred_lat=torch.full_like(x["latitude"], lat_av),
+    #         pred_long=torch.full_like(x["longitude"], long_av),
+    #         true_lat=x["latitude"],
+    #         true_long=x["longitude"],
+    #     )
+    #     total_loss += loss_val.item()
+    #     count += x["latitude"].numel()
+    #     c_iter += 1
+    #     if c_iter % 100:
+    #         print(f"Processed {c_iter} validation batches")
+    #         print(
+    #             f"Current average validation loss: {total_loss / count if count > 0 else 0}"
+    #         )
+    #     # break
+    #     # print(f"Validation loss: {loss_val.item()}")
+    # print(f"Total validation loss: {total_loss}")
+    # print(f"Average validation loss: {total_loss / count if count > 0 else 0}")

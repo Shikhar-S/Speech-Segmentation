@@ -3,7 +3,7 @@
 # you can replace it with "." if you want the root to be the current working directory
 root_dir: ${oc.env:PROJECT_ROOT}
 
-exp_dir: ${paths.root_dir}/exp/
+exp_dir: ${paths.root_dir}/exp
 
 # path to output directory, created dynamically by hydra
 # path generation pattern is specified in `configs/hydra/default.yaml`
