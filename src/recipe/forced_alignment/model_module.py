@@ -15,7 +15,7 @@ from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
 
 from src.recipe.forced_alignment.forced_alignment_loss import ForcedAlignmentLoss
-from src.recipe.forced_alignment.metrics import AlignmentEvaluator, ForcedAlignmentData
+from src.recipe.forced_alignment.metrics import AlignmentEvaluator, ForceAlignedUnit
 
 
 class ForcedAlignmentModel(LightningModule):
@@ -132,7 +132,7 @@ class ForcedAlignmentModel(LightningModule):
 
     def _build_gt_alignments(
         self, batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, List[ForcedAlignmentData]]:
+    ) -> Dict[str, List[ForceAlignedUnit]]:
         """Build ground truth alignments from target_start/target_end."""
         frames2points = self.net.frames2points()
         target = batch["target"]
@@ -147,12 +147,12 @@ class ForcedAlignmentModel(LightningModule):
             ends = target_end[b, :length]
             labels = target[b, :length]
 
-            segs: List[ForcedAlignmentData] = []
+            segs: List[ForceAlignedUnit] = []
             for s, e, lab in zip(starts, ends, labels):
                 if s < 0 or e <= s:
                     continue
                 segs.append(
-                    ForcedAlignmentData(
+                    ForceAlignedUnit(
                         start=float(s.item()) * frames2points / self.net.sampling_rate,
                         end=float(e.item()) * frames2points / self.net.sampling_rate,
                         label=int(lab.item()),
@@ -208,7 +208,7 @@ class ForcedAlignmentModel(LightningModule):
 
     def _align(
         self, speech, speech_length, text, text_length
-    ) -> List[List[ForcedAlignmentData]]:
+    ) -> List[List[ForceAlignedUnit]]:
         """Get forced alignments for a batch.
 
         Args:
@@ -219,7 +219,7 @@ class ForcedAlignmentModel(LightningModule):
         Returns:
             List[List[AlignmentResult]]: per-utterance segment list.
         """
-        predicted_alignments: List[List[ForcedAlignmentData]] = []
+        predicted_alignments: List[List[ForceAlignedUnit]] = []
         frames2points = self.net.frames2points()
 
         for sp, splen, txt, txtlen in zip(speech, speech_length, text, text_length):
@@ -234,12 +234,12 @@ class ForcedAlignmentModel(LightningModule):
                 predicted_alignments.append([])
                 continue
 
-            alignment_result: List[ForcedAlignmentData] = []
+            alignment_result: List[ForceAlignedUnit] = []
             start_idx = 0
             for i in range(1, len(labels)):
                 if labels[i] != labels[i - 1]:
                     alignment_result.append(
-                        ForcedAlignmentData(
+                        ForceAlignedUnit(
                             start=start_idx * frames2points / self.net.sampling_rate,
                             end=i * frames2points / self.net.sampling_rate,
                             label=labels[i - 1],
@@ -248,7 +248,7 @@ class ForcedAlignmentModel(LightningModule):
                     start_idx = i
 
             alignment_result.append(
-                ForcedAlignmentData(
+                ForceAlignedUnit(
                     start=start_idx * frames2points / self.net.sampling_rate,
                     end=len(labels) * frames2points / self.net.sampling_rate,
                     label=labels[-1],

@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.recipe.forced_alignment.metrics import AlignmentEvaluator, ForcedAlignmentData
+from src.recipe.forced_alignment.metrics import AlignmentEvaluator, ForceAlignedUnit
 
 
 def make_results(boundaries, labels=None):
@@ -9,7 +9,7 @@ def make_results(boundaries, labels=None):
         # Use simple integer labels if none are provided
         labels = list(range(len(boundaries)))
     return [
-        ForcedAlignmentData(start=s, end=e, label=labels[i])
+        ForceAlignedUnit(start=s, end=e, label=labels[i])
         for i, (s, e) in enumerate(boundaries)
     ]
 

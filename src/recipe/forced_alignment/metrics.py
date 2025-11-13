@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ForcedAlignmentData:
+class ForceAlignedUnit:
     """Represents a single aligned unit (e.g., phone)."""
 
     start: int | float
@@ -26,8 +26,8 @@ class AlignmentEvaluator:
 
     def evaluate_boundaries(
         self,
-        predicted: List[ForcedAlignmentData],
-        ground_truth: List[ForcedAlignmentData],
+        predicted: List[ForceAlignedUnit],
+        ground_truth: List[ForceAlignedUnit],
         symbols: Optional[List[str]] = None,
     ) -> Dict[str, float]:
         """Evaluate predicted phone boundaries against ground truth.
@@ -363,8 +363,8 @@ class AlignmentEvaluator:
 
     def evaluate_batch(
         self,
-        predictions: Dict[str, List[ForcedAlignmentData]],
-        ground_truth: Dict[str, List[ForcedAlignmentData]],
+        predictions: Dict[str, List[ForceAlignedUnit]],
+        ground_truth: Dict[str, List[ForceAlignedUnit]],
         symbols_dict: Optional[Dict[str, List[str]]] = None,
     ) -> Dict:
         """Evaluate batch of predictions.
@@ -449,16 +449,16 @@ if __name__ == "__main__":
     print("=" * 60)
 
     ground_truth = [
-        ForcedAlignmentData(0.0, 0.1, "AH"),
-        ForcedAlignmentData(0.1, 0.2, "T"),
-        ForcedAlignmentData(0.2, 0.3, "AH"),
-        ForcedAlignmentData(0.3, 0.4, "K"),
+        ForceAlignedUnit(0.0, 0.1, "AH"),
+        ForceAlignedUnit(0.1, 0.2, "T"),
+        ForceAlignedUnit(0.2, 0.3, "AH"),
+        ForceAlignedUnit(0.3, 0.4, "K"),
     ]
     predicted = [
-        ForcedAlignmentData(0.01, 0.11, "AH"),
-        ForcedAlignmentData(0.11, 0.21, "T"),
-        ForcedAlignmentData(0.21, 0.31, "AH"),
-        ForcedAlignmentData(0.31, 0.41, "K"),
+        ForceAlignedUnit(0.01, 0.11, "AH"),
+        ForceAlignedUnit(0.11, 0.21, "T"),
+        ForceAlignedUnit(0.21, 0.31, "AH"),
+        ForceAlignedUnit(0.31, 0.41, "K"),
     ]
     symbols = ["AH", "T", "AH", "K"]
 
@@ -472,36 +472,36 @@ if __name__ == "__main__":
 
     batch_pred = {
         "segment_001": [
-            ForcedAlignmentData(0.01, 0.11, "AH"),
-            ForcedAlignmentData(0.11, 0.21, "T"),
-            ForcedAlignmentData(0.21, 0.31, "AH"),
+            ForceAlignedUnit(0.01, 0.11, "AH"),
+            ForceAlignedUnit(0.11, 0.21, "T"),
+            ForceAlignedUnit(0.21, 0.31, "AH"),
         ],
         "segment_002": [
-            ForcedAlignmentData(0.02, 0.12, "K"),
-            ForcedAlignmentData(0.12, 0.22, "AH"),
+            ForceAlignedUnit(0.02, 0.12, "K"),
+            ForceAlignedUnit(0.12, 0.22, "AH"),
         ],
         "segment_003": [
-            ForcedAlignmentData(0.0, 0.1, "T"),
-            ForcedAlignmentData(0.1, 0.2, "AH"),
-            ForcedAlignmentData(0.2, 0.3, "K"),
-            ForcedAlignmentData(0.3, 0.4, "AH"),
+            ForceAlignedUnit(0.0, 0.1, "T"),
+            ForceAlignedUnit(0.1, 0.2, "AH"),
+            ForceAlignedUnit(0.2, 0.3, "K"),
+            ForceAlignedUnit(0.3, 0.4, "AH"),
         ],
     }
     batch_gt = {
         "segment_001": [
-            ForcedAlignmentData(0.0, 0.1, "AH"),
-            ForcedAlignmentData(0.1, 0.2, "T"),
-            ForcedAlignmentData(0.2, 0.3, "AH"),
+            ForceAlignedUnit(0.0, 0.1, "AH"),
+            ForceAlignedUnit(0.1, 0.2, "T"),
+            ForceAlignedUnit(0.2, 0.3, "AH"),
         ],
         "segment_002": [
-            ForcedAlignmentData(0.0, 0.1, "K"),
-            ForcedAlignmentData(0.1, 0.2, "AH"),
+            ForceAlignedUnit(0.0, 0.1, "K"),
+            ForceAlignedUnit(0.1, 0.2, "AH"),
         ],
         "segment_003": [
-            ForcedAlignmentData(0.0, 0.1, "T"),
-            ForcedAlignmentData(0.1, 0.2, "AH"),
-            ForcedAlignmentData(0.2, 0.3, "K"),
-            ForcedAlignmentData(0.3, 0.4, "AH"),
+            ForceAlignedUnit(0.0, 0.1, "T"),
+            ForceAlignedUnit(0.1, 0.2, "AH"),
+            ForceAlignedUnit(0.2, 0.3, "K"),
+            ForceAlignedUnit(0.3, 0.4, "AH"),
         ],
     }
     batch_symbols = {
