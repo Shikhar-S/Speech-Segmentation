@@ -3,7 +3,7 @@ import token
 from huggingface_hub import snapshot_download
 
 import logging
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 import yaml
 import torch
 import torchaudio
@@ -149,7 +149,7 @@ class PowsmModel(torch.nn.Module):
         text_ctc: torch.Tensor,
         text_ctc_lengths: torch.Tensor,
         **kwargs,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+    ) -> Dict[str, Any]:
         """Frontend + Encoder + Decoder + Calc loss"""
         assert text_lengths.dim() == 1, text_lengths.shape
         # Check that batch_size is unified
@@ -255,7 +255,8 @@ class PowsmModel(torch.nn.Module):
 
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
-        return loss, stats, weight
+        model_output = {"loss": loss, "stats": stats, "weight": weight}
+        return model_output
 
     def collect_feats(
         self,

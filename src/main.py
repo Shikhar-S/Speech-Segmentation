@@ -1,3 +1,4 @@
+import logging
 import pyarrow.parquet as pq  # before torch
 from typing import Any, Dict, Optional, Tuple
 
@@ -40,11 +41,22 @@ def run_task(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if cfg.get("seed"):
         L.seed_everything(cfg.seed, workers=True)
     task = Task(cfg)
-    metric_dict, object_dict = task.run()
+
+    if cfg.get("distributed_predict", False):
+        if cfg.get("train", False) or cfg.get("test", False):
+            logging.warning(
+                "Distributed inference cannot be combined with training or testing. "
+                "Please set 'train' and 'test' to False in the configuration."
+            )
+        task.run_distributed_inference()
+        return None, None  # signature consistency
+
+    # run normal training/testing/prediction with lightning
+    metric_dict, object_dict = task.run_experiment()
     return metric_dict, object_dict
 
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
+@hydra.main(version_base="1.3", config_path="../configs", config_name="main.yaml")
 def main(cfg: DictConfig) -> Optional[float]:
     """Main entry point for training.
 
@@ -55,7 +67,7 @@ def main(cfg: DictConfig) -> Optional[float]:
     # (e.g. ask for tags if none are provided in cfg, print cfg tree, etc.)
     extras(cfg)
 
-    # train the model
+    # run task
     metric_dict, _ = run_task(cfg)
     # safely retrieve metric value for hydra-based hyperparameter optimization
     metric_value = get_metric_value(

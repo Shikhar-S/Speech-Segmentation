@@ -1,6 +1,5 @@
-"""Lightning style Geolocation Model.
+"""Forced alignment model module.
 
-This module works with both powsm and wav2vec2phoneme encoders.
 Run main:
     python -m src.recipe.forced_alignment.model_module
 """
@@ -15,7 +14,7 @@ from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
 
 from src.recipe.forced_alignment.forced_alignment_loss import ForcedAlignmentLoss
-from src.recipe.forced_alignment.metrics import AlignmentEvaluator, ForceAlignedUnit
+from src.metrics.forced_alignment import AlignmentEvaluator, ForceAlignedUnit
 
 
 class ForcedAlignmentModel(LightningModule):

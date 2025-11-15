@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple, Union, Dict, Any
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from typeguard import typechecked
 
 from espnet.nets.beam_search import BeamSearch, Hypothesis
@@ -21,16 +22,6 @@ from src.model.powsm.sentencepiece_tokenizer import SentencepiecesTokenizer
 from src.model.powsm.token_id_converter import TokenIDConverter
 from src.model.powsm.utils import to_device
 from src.model.powsm.powsm_model import build_powsm
-
-ListOfHypothesis = List[
-    Tuple[
-        Optional[str],
-        List[str],
-        List[int],
-        Optional[str],
-        Hypothesis,
-    ]
-]
 
 
 class ScoreFilter(BatchScorerInterface, torch.nn.Module):
@@ -147,7 +138,6 @@ class PowsmInference:
         device: str = "cpu",
         maxlenratio: float = 0.0,
         minlenratio: float = 0.0,
-        batch_size: int = 1,
         dtype: str = "float32",
         beam_size: int = 5,
         ctc_weight: float = 0.0,
@@ -226,23 +216,17 @@ class PowsmInference:
     def __call__(
         self,
         speech: Union[torch.Tensor, np.ndarray],
-        speech_length: Union[torch.Tensor, np.ndarray],
+        *args,
         text_prev: Optional[Union[torch.Tensor, np.ndarray, str, List]] = None,
         lang_sym: Optional[str] = None,
         task_sym: Optional[str] = None,
         predict_time: Optional[bool] = False,
-    ) -> Union[
-        ListOfHypothesis,
-        Tuple[
-            ListOfHypothesis,
-            Optional[Dict[int, List[str]]],
-        ],
-    ]:
+        **kwargs,
+    ) -> Any:
         """Perform inference on a SINGLE input utterance.
 
         Args:
             speech: Input speech of shape (nsamples,)
-            speech_length: Speech length in samples
 
         Returns:
             List of (text, tokens, token_ids, score) tuples for n-best hypotheses
@@ -270,22 +254,23 @@ class PowsmInference:
         # Preapre speech
         if isinstance(speech, np.ndarray):
             speech = torch.tensor(speech)
-        if isinstance(speech_length, np.ndarray):
-            speech_length = torch.tensor(speech_length)
 
         if speech.dim() > 1:
             raise ValueError("Only single utterance decoding is supported.")
 
-        speech = speech.unsqueeze(0)  # (1, nsamples)
-        speech_length = speech_length.unsqueeze(0)  # (1,)
         model_speech_length = int(
             self.preprocessor_conf["fs"] * self.preprocessor_conf["speech_length"]
         )
-        speech_length = torch.minimum(speech_length, torch.tensor(model_speech_length))
-        if speech.shape[1] > speech_length[0]:
-            speech = speech[:, : speech_length[0]]  # remove padding
-        speech = speech[:, : speech_length[0]]  # cut speech to max allowed length
         speech = speech.to(getattr(torch, self.dtype))
+        # Pad or trim speech to the fixed length
+        if speech.size(-1) >= model_speech_length:
+            speech = speech[:model_speech_length]
+        else:
+            speech = F.pad(speech, (0, model_speech_length - speech.size(-1)))
+        speech = speech.unsqueeze(0)  # (1, nsamples)
+        speech_length = speech.new_full(
+            [1], dtype=torch.long, fill_value=speech.size(1)
+        )
         batch = {"speech": speech, "speech_lengths": speech_length}
         batch = to_device(batch, device=self.device)
 
@@ -354,7 +339,15 @@ class PowsmInference:
                 text = self.tokenizer.tokens2text(token)
                 text_nospecial = self.tokenizer.tokens2text(token_nospecial)
 
-            results.append((text, token, token_int, text_nospecial, hyp))
+            results.append(
+                {
+                    "transcript": text_nospecial,
+                    # "text": text,
+                    # "token": token,
+                    # "token_int": token_int,
+                    # "hyp": hyp, # full hypothesis object with scores
+                }
+            )
 
         return results
 
@@ -376,7 +369,6 @@ def build_powsm_inference(
     normalize_length: bool = False,
     maxlenratio: float = 0.0,
     minlenratio: float = 0.0,
-    batch_size: int = 1,
 ) -> PowsmInference:
     """Build PowsmInference from Hugging Face repo or local files.
 
@@ -397,7 +389,6 @@ def build_powsm_inference(
         normalize_length: Whether to normalize scores by length
         maxlenratio: Maximum length ratio
         minlenratio: Minimum length ratio
-        batch_size: Batch size for inference
 
     Returns:
         PowsmInference object that wraps powsm model and can be called for decoding
@@ -431,7 +422,6 @@ def build_powsm_inference(
         normalize_length=normalize_length,
         maxlenratio=maxlenratio,
         minlenratio=minlenratio,
-        batch_size=batch_size,
     )
 
     return inference
@@ -441,7 +431,6 @@ if __name__ == "__main__":
     inference_obj = build_powsm_inference(
         work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
         hf_repo="espnet/powsm",
-        batch_size=2,
     )
 
     from src.model.powsm.powsm_model import build_powsm
@@ -480,8 +469,7 @@ if __name__ == "__main__":
         print("batch speech length shape:", speech_length.shape)
         for sp, splen in zip(speech, speech_length):
             print("single speech shape:", sp.shape)
-            print("single speech length:", splen)
-            results = inference_obj(speech=sp, speech_length=splen)
+            results = inference_obj(speech=sp)
             for text, tokens, token_ids, text_nospecial, hyp in results:
                 print("Text:", text)
                 print("Tokens:", tokens)

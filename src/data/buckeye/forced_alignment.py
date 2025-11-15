@@ -15,7 +15,7 @@ from typing import Optional
 
 import torch
 import torchaudio
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import logging
 import buckeye
 import lightning as L
@@ -96,7 +96,9 @@ def extract_buckeye_clip(
             torchaudio.save(str(out), wav, sr)
         return True
     except Exception as e:
-        logger.warning(f"Audio extract failed [{track.name} {t0:.2f}-{t1:.2f}s]: {e}")
+        logger.warning(
+            f"speech extraction failed [{track.name} {t0:.2f}-{t1:.2f}s]: {e}"
+        )
         return False
 
 
@@ -111,7 +113,7 @@ class BuckeyeAlignmentDataset(Dataset):
         metadata_path: str,
         model_tokenizer,
         target_sr: int = 16000,
-        max_audio_length: Optional[float] = None,  # in seconds
+        max_speech_length: Optional[float] = None,  # in seconds
     ):
         """
         Args:
@@ -119,11 +121,11 @@ class BuckeyeAlignmentDataset(Dataset):
             metadata_path: Path to JSON metadata file created by BuckeyeDataPreparator
             model_tokenizer: Tokenizer for converting phonemes to indices, dependent on model
             target_sr: Target sample rate
-            max_audio_length: Maximum audio length in seconds (for truncation)
+            max_speech_length: Maximum speech length in seconds (for truncation)
         """
         self.buckeye_root = buckeye_root
         self.target_sr = target_sr
-        self.max_audio_length = max_audio_length
+        self.max_speech_length = max_speech_length
 
         # Load metadata
         with open(metadata_path, "r") as f:
@@ -131,8 +133,8 @@ class BuckeyeAlignmentDataset(Dataset):
 
         self.clip_paths_cache = {}
         self.tokenizer = model_tokenizer
-        self.audiocache_root = Path(buckeye_root) / "audio"
-        self.audiocache_root.mkdir(parents=True, exist_ok=True)
+        self.speechcache_root = Path(buckeye_root) / "audio"
+        self.speechcache_root.mkdir(parents=True, exist_ok=True)
         # self._construct_cache()
 
     def __len__(self):
@@ -144,10 +146,10 @@ class BuckeyeAlignmentDataset(Dataset):
             self._construct_clip_path(item)
 
     def _construct_clip_path(self, item) -> Path:
-        """Construct and cache the audio clip from metadata item and buckeye root."""
+        """Construct and cache the speech clip from metadata item and buckeye root."""
         if item["segment_id"] in self.clip_paths_cache:
             return self.clip_paths_cache[item["segment_id"]]
-        path = Path(self.audiocache_root) / (item["segment_id"] + ".wav")
+        path = Path(self.speechcache_root) / (item["segment_id"] + ".wav")
         extract_buckeye_clip(
             self.buckeye_root,
             item,
@@ -163,8 +165,8 @@ class BuckeyeAlignmentDataset(Dataset):
         """
         Returns:
             dict with:
-                - audio: Tensor of shape (1, T) or (T,)
-                - audio_length: int, actual audio length
+                - speech: Tensor of shape (1, T) or (T,)
+                - speech_length: int, actual speech length
                 - phone_ids: Tensor of phone indices
                 - phone_timestamps: List of (start, end) tuples
                 - text: String transcript
@@ -173,9 +175,9 @@ class BuckeyeAlignmentDataset(Dataset):
         """
         item = self.metadata[idx]
 
-        # Load audio
-        audiopath = self._construct_clip_path(item)
-        waveform, sr = torchaudio.load(str(audiopath))
+        # Load speech
+        speechpath = self._construct_clip_path(item)
+        waveform, sr = torchaudio.load(str(speechpath))
 
         # Resample if necessary
         if sr != self.target_sr:
@@ -188,8 +190,8 @@ class BuckeyeAlignmentDataset(Dataset):
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
         # Truncate if necessary
-        if self.max_audio_length is not None:
-            max_samples = int(self.max_audio_length * sr)
+        if self.max_speech_length is not None:
+            max_samples = int(self.max_speech_length * sr)
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
 
@@ -205,8 +207,8 @@ class BuckeyeAlignmentDataset(Dataset):
             for start, end in item["phone_timestamps"]
         ]
         return {
-            "audio": waveform.squeeze(0),  # Shape: (T,)
-            "audio_length": waveform.shape[1],
+            "speech": waveform.squeeze(0),  # Shape: (T,)
+            "speech_length": waveform.shape[1],
             "phones": item["phones"],
             "phone_ids": torch.tensor(phone_ids, dtype=torch.long),
             "phone_pointstamps": phone_pointstamps,
@@ -224,7 +226,7 @@ def collate_fn(batch):
 
     Returns:
         dict with keys:
-            - speech: Tensor of shape (batch_size, max_audio_length)
+            - speech: Tensor of shape (batch_size, max_speech_length)
             - speech_length: Tensor of shape (batch_size,), actual lengths
             - target: Tensor of shape (batch_size, max_target_length)
             - target_length: Tensor of shape (batch_size,), actual lengths
@@ -232,12 +234,12 @@ def collate_fn(batch):
             - target_end: Tensor of shape (batch_size, max_target_length)
     """
     # Find max lengths
-    max_audio_length = max(item["audio_length"] for item in batch)
+    max_speech_length = max(item["speech_length"] for item in batch)
     max_target_length = max(len(item["phone_ids"]) for item in batch)
 
     # Initialize tensors with -1 padding
     batch_size = len(batch)
-    speech = torch.full((batch_size, max_audio_length), -1.0, dtype=torch.float32)
+    speech = torch.full((batch_size, max_speech_length), -1.0, dtype=torch.float32)
     speech_length = torch.zeros(batch_size, dtype=torch.long)
     phone_id = torch.full((batch_size, max_target_length), -1, dtype=torch.long)
     target_length = torch.zeros(batch_size, dtype=torch.long)
@@ -248,11 +250,11 @@ def collate_fn(batch):
 
     # Fill tensors
     for i, item in enumerate(batch):
-        audio_len = item["audio_length"]
+        speech_len = item["speech_length"]
         phone_len = len(item["phone_ids"])
 
-        speech[i, :audio_len] = item["audio"]
-        speech_length[i] = audio_len
+        speech[i, :speech_len] = item["speech"]
+        speech_length[i] = speech_len
         phone_id[i, :phone_len] = item["phone_ids"]
         target_length[i] = phone_len
 
@@ -284,7 +286,7 @@ class BuckeyeAlignment(L.LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         target_sr: int = 16000,
-        max_audio_length: Optional[float] = None,
+        max_speech_length: Optional[float] = None,
     ):
         super().__init__()
         self.buckeye_root = buckeye_root
@@ -296,7 +298,7 @@ class BuckeyeAlignment(L.LightningDataModule):
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.target_sr = target_sr
-        self.max_audio_length = max_audio_length
+        self.max_speech_length = max_speech_length
 
     def setup(self, stage: Optional[str] = None):
         self.train_dataset = BuckeyeAlignmentDataset(
@@ -304,21 +306,21 @@ class BuckeyeAlignment(L.LightningDataModule):
             metadata_path=self.train_metadata,
             model_tokenizer=self.model_tokenizer,
             target_sr=self.target_sr,
-            max_audio_length=self.max_audio_length,
+            max_speech_length=self.max_speech_length,
         )
         self.val_dataset = BuckeyeAlignmentDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.val_metadata,
             model_tokenizer=self.model_tokenizer,
             target_sr=self.target_sr,
-            max_audio_length=self.max_audio_length,
+            max_speech_length=self.max_speech_length,
         )
         self.test_dataset = BuckeyeAlignmentDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.test_metadata,
             model_tokenizer=self.model_tokenizer,
             target_sr=self.target_sr,
-            max_audio_length=self.max_audio_length,
+            max_speech_length=self.max_speech_length,
         )
 
     def train_dataloader(self):
@@ -344,6 +346,16 @@ class BuckeyeAlignment(L.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            collate_fn=collate_fn,
+        )
+
+    def predict_dataloader(self):
+        return DataLoader(
+            ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]),
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
@@ -410,7 +422,7 @@ if __name__ == "__main__":
     # Test evaluator
     print("===" * 20)
     print("Naive baseline - equal segmentation")
-    from src.recipe.forced_alignment.metrics import AlignmentEvaluator
+    from src.metrics.forced_alignment import AlignmentEvaluator
 
     evaluator = AlignmentEvaluator(tolerance_ms=20)
     test_batch = next(iter(test_loader))

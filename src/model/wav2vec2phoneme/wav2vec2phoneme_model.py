@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 import numpy as np
 
 
@@ -91,13 +91,38 @@ class Wav2Vec2PhonemeModel(nn.Module):
                 self.frames2points_ratio = 16000 // feat_lengths.item()
         return self.frames2points_ratio
 
-    def forward(self, inputs) -> Dict[str, torch.Tensor]:
+    def _calculate_stats(self, output, inputs):
+        """Token-level accuracy."""
+        logits = output.logits.detach()
+        if "target" not in inputs:
+            return {}
+        target = inputs["target"]
+        if logits.ndim != target.ndim or logits.size(1) != target.size(1):
+            raise ValueError(
+                f"Logits and target size mismatch: {logits.size()} vs {target.size()}"
+            )
+        preds = logits.argmax(dim=-1)  # (B, L)
+        if "target_length" in inputs:
+            B, L = target.shape
+            lengths = inputs["target_length"]
+            idxs = torch.arange(L, device=target.device)[None, :].expand(B, L)
+            mask = idxs < lengths.unsqueeze(1)
+            correct = (preds == target) & mask
+            acc = correct.sum().float() / mask.sum().clamp_min(1)
+        else:
+            acc = (preds == target).float().mean()
+
+        return {"acc": acc}
+
+    def forward(self, inputs) -> Any:
         """Forward pass compatible with PowsmModel interface"""
         model_out = self.model(
             **inputs,
             output_hidden_states=True,
             return_dict=True,
         )
+        stats = self._calculate_stats(model_out, inputs)
+        model_out["stats"] = stats
         return model_out
 
     def _extract_feats(self, speech, speech_lengths) -> torch.Tensor:

@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.recipe.forced_alignment.metrics import AlignmentEvaluator, ForceAlignedUnit
+from src.metrics.forced_alignment import AlignmentEvaluator, ForceAlignedUnit
 
 
 def make_results(boundaries, labels=None):
