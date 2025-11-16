@@ -152,11 +152,11 @@ class GeolocationModel(LightningModule):
         return pred
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        audio = batch["audio"]
-        lengths = batch["lengths"]
+        speech = batch["speech"]
+        speech_length = batch["speech_length"]
         y_lat = batch["latitude"]
         y_long = batch["longitude"]
-        coordinates, pred_lat, pred_long = self(audio, lengths)
+        coordinates, pred_lat, pred_long = self(speech, speech_length)
         loss = self.criterion(pred_lat, pred_long, y_lat, y_long)  # angular loss
         # loss = self.criterion(coordinates, y_lat, y_long)
         return {
@@ -242,8 +242,8 @@ if __name__ == "__main__":
     dummy_lengths = torch.tensor([16000 * 5, 16000 * 5])
     output = model.training_step(
         {
-            "audio": dummy_input,
-            "lengths": dummy_lengths,
+            "speech": dummy_input,
+            "speech_length": dummy_lengths,
             "latitude": torch.tensor([0.0, 0.0]),
             "longitude": torch.tensor([0.0, 0.0]),
         },
