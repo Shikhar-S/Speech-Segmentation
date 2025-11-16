@@ -1,0 +1,3 @@
+_target_: src.data.powsm_dataset.build_powsm_datamodule
+dataset_name: l2arctic_perceived
+dataset_config_path: configs/data/powsm_evalset_index.yaml

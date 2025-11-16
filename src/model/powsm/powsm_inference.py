@@ -341,7 +341,10 @@ class PowsmInference:
 
             results.append(
                 {
-                    "transcript": text_nospecial,
+                    "processed_transcript": text_nospecial.split(">")[-1].replace(
+                        "/", ""
+                    ),
+                    "predicted_transcript": text_nospecial,
                     # "text": text,
                     # "token": token,
                     # "token_int": token_int,

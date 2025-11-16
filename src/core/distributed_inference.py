@@ -8,7 +8,14 @@ from tqdm import tqdm
 import json
 
 
-def work_chunk_(args, dataset, inference_config, inference_call_args=None, device=None):
+def work_chunk_(
+    args,
+    dataset,
+    inference_config,
+    inference_call_args=None,
+    passthrough_keys=None,
+    device=None,
+):
     """Worker function to run inference on a chunk of data."""
     worker_id, idxs = args
     if torch.cuda.is_available() and torch.cuda.device_count() > 1 and device != "cpu":
@@ -18,10 +25,11 @@ def work_chunk_(args, dataset, inference_config, inference_call_args=None, devic
     out = []
     for i in tqdm(idxs, desc="Processing", leave=False):
         it = dataset[i]
-        pred = model(
-            **(inference_call_args or {}), **it
-        )  # keys from dataset override those in inference_call_args
-        out.append((i, pred))
+        # keys from dataset override those in inference_call_args
+        pred = model(**(inference_call_args or {}), **it)
+        # keys from dataset that must be passthroughly passed to
+        # output to be written
+        out.append((i, pred, {k: it[k] for k in (passthrough_keys or []) if k in it}))
     return out
 
 
@@ -38,8 +46,19 @@ def run_distributed_inference_(
     inference_call_args=None,
     num_workers: int = 1,
     out_file=None,
+    passthrough_keys=[],
 ):
-    """Splits dataset and runs inference in parallel workers."""
+    """Splits dataset and runs inference in parallel workers.
+
+    Args:
+        dataset: Dataset object with __len__ and __getitem__
+        inference_config: config for inference object to be instantiated in each worker
+        inference_call_args: additional args to be passed to inference __call__ method
+        num_workers: number of parallel workers
+        out_file: output file to save results
+        passthrough_keys: list of keys in dataset item to be written directly to
+            output without processing
+    """
 
     # fail fast
     assert out_file, "Please provide an out_file to save results."
@@ -59,15 +78,7 @@ def run_distributed_inference_(
     # split items from dataset, run against inference object replicas, gather results
 
     N = len(dataset)
-    if num_workers <= 1:
-        return work_chunk_(
-            args=(0, range(N)),
-            dataset=dataset,
-            inference_config=inference_config,
-            inference_call_args=inference_call_args,
-            device=device,
-        )
-
+    N = 2
     cs = (N + num_workers - 1) // num_workers
     chunks = [
         range(i * cs, min((i + 1) * cs, N)) for i in range(num_workers) if i * cs < N
@@ -77,6 +88,7 @@ def run_distributed_inference_(
         dataset=dataset,
         inference_config=inference_config,
         inference_call_args=inference_call_args,
+        passthrough_keys=passthrough_keys,
         device=device,
     )
 
@@ -88,6 +100,8 @@ def run_distributed_inference_(
     for p in parts:
         out.extend(p)
     logging.info("Finished distributed inference.")
-    out.sort(key=lambda x: x[0])
-    save_json({x[0]: x[1] for x in out}, out_file)
+    save_json(
+        {i: {"pred": pred, "passthrough": passthrough} for i, pred, passthrough in out},
+        out_file,
+    )
     return out

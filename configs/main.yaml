@@ -4,7 +4,7 @@
 # all configs can be overridden from command line, e.g. `python src/main.py debug=default)
 defaults:
   - _self_
-  - data: vaani_geolocation
+  - data: ??? # must be defined in experiment config
   - model: powsm_geolocation
   - trainer: default
   - paths: default
