@@ -1,6 +1,6 @@
 """Forced alignment model module.
 
-Run main:
+Usage:
     python -m src.recipe.forced_alignment.model_module
 """
 
@@ -37,8 +37,6 @@ class ForcedAlignmentModel(LightningModule):
         self.test_loss = MeanMetric()
         self.val_loss_best = MinMetric()
 
-    # -------------------------- core model logic -------------------------- #
-
     def forward(
         self, x: torch.Tensor, x_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -74,8 +72,6 @@ class ForcedAlignmentModel(LightningModule):
             "logit_lengths": logit_len.detach(),
         }
 
-    # ----------------------------- metrics -------------------------------- #
-
     def on_before_optimizer_step(self, optimizer):
         norms = grad_norm(self, norm_type=2)
         self.log_dict(norms)
@@ -93,8 +89,6 @@ class ForcedAlignmentModel(LightningModule):
         mask = output["target_start"] != -1.0
         accuracy = accuracy.masked_select(mask).float().mean()
         return {"accuracy": accuracy}
-
-    # --------------------------- train / val ------------------------------ #
 
     def training_step(
         self, batch: Dict[str, torch.Tensor], batch_idx: int
@@ -126,8 +120,6 @@ class ForcedAlignmentModel(LightningModule):
             sync_dist=True,
             prog_bar=True,
         )
-
-    # ------------------------------ test ---------------------------------- #
 
     def _build_gt_alignments(
         self, batch: Dict[str, torch.Tensor]
@@ -203,8 +195,6 @@ class ForcedAlignmentModel(LightningModule):
                 on_epoch=True,
             )
 
-    # ------------------------- alignment utils ---------------------------- #
-
     def _align(
         self, speech, speech_length, text, text_length
     ) -> List[List[ForceAlignedUnit]]:
@@ -268,8 +258,6 @@ class ForcedAlignmentModel(LightningModule):
         target = batch["target"]
         target_length = batch["target_length"]
         return self._align(speech, speech_length, target, target_length)
-
-    # ---------------------------- optimizers ------------------------------- #
 
     def configure_optimizers(self) -> Dict[str, Any]:
         optimizer = self.hparams.optimizer(params=self.parameters())

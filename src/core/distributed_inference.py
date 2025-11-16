@@ -21,7 +21,8 @@ def work_chunk_(
     if torch.cuda.is_available() and torch.cuda.device_count() > 1 and device != "cpu":
         device = f"cuda:{worker_id % torch.cuda.device_count()}"
 
-    model = hydra.utils.instantiate(inference_config)
+    logging.info(f"Worker {worker_id} processing {len(idxs)} items on device {device}.")
+    model = hydra.utils.instantiate(inference_config, device=device)
     out = []
     for i in tqdm(idxs, desc="Processing", leave=False):
         it = dataset[i]
@@ -92,15 +93,36 @@ def run_distributed_inference_(
     )
 
     with mp.get_context("spawn").Pool(num_workers) as pool:
-        parts = list(
-            tqdm(pool.imap(worker, enumerate(chunks)), total=len(chunks), desc="Chunks")
-        )
-    out = []
-    for p in parts:
-        out.extend(p)
+        out = []
+        worker_id = 0
+        for p in tqdm(
+            pool.imap_unordered(worker, enumerate(chunks)), total=len(chunks)
+        ):
+            out.extend(p)
+
+            # collect incrementally
+            save_json(
+                {
+                    i: {"pred": pred, "passthrough": passthrough}
+                    for i, pred, passthrough in p
+                },
+                f"{out_file}.part{worker_id}.json",
+            )
+            worker_id += 1
     logging.info("Finished distributed inference.")
+
+    # collect all results
     save_json(
         {i: {"pred": pred, "passthrough": passthrough} for i, pred, passthrough in out},
         out_file,
     )
+    logging.info(f"Saved final output to {out_file}.")
+
+    # cleanup partial files
+    logging.info("Cleaning up partial files.")
+    for w_id in range(num_workers):
+        part_file = f"{out_file}.part{w_id}.json"
+        if os.path.exists(part_file):
+            os.remove(part_file)
+
     return out
