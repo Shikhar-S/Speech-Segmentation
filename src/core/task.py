@@ -82,6 +82,7 @@ class Task:
             ),
             num_workers=self.task_cfg.inference.num_workers,
             out_file=self.task_cfg.inference.out_file,
+            passthrough_keys=self.task_cfg.inference.get("passthrough_keys", []),
         )
 
     def run_experiment(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
