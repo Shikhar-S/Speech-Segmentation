@@ -29,6 +29,7 @@ trainer:
 model:
   optimizer:
     lr: 0.0002
+  freeze_encoder: true
 
 data:
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)

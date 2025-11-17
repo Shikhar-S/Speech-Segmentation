@@ -1,6 +1,12 @@
+"""Vaani Geolocation Dataset and DataModule.
+
+Usage (for naive baseline):
+    python -m src.data.vaani.geolocation
+"""
+
 import pyarrow.parquet as pq  # before torch
 import os, io, torch
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 import torchaudio
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from lightning import LightningDataModule
@@ -23,6 +29,7 @@ def pad_collate(batch):
         "latitude": torch.tensor([b["latitude"] for b in batch]),
         "longitude": torch.tensor([b["longitude"] for b in batch]),
         "split": [b.get("split", "none") for b in batch],
+        "metadata_idx": [b["metadata_idx"] for b in batch],
     }
 
 
@@ -89,6 +96,7 @@ class VaaniParquetDataset(Dataset):
             "latitude": latitude,
             "longitude": longitude,
             "split": row["split"],
+            "metadata_idx": i,
         }
 
 
@@ -163,7 +171,7 @@ class VaaniGeolocation(LightningDataModule):
 
 
 def _naive_baseline():
-    metadata_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/vaani_geolocation_metadata.train10.csv"
+    metadata_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/tmp/vaani_geolocation_metadata.train10.csv"
     import pandas as pd
 
     metadata = pd.read_csv(metadata_path)

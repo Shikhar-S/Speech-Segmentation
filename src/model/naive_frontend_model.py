@@ -34,8 +34,7 @@ class FrontendModel(torch.nn.Module):
             frontend_conf=None,  # no WPE/MVDR; just plain STFT -> LogMel
         )
 
-    @torch.no_grad()
-    def encode(
+    def forward(
         self,
         x: torch.Tensor,
         x_lengths: torch.Tensor,
@@ -63,6 +62,22 @@ class FrontendModel(torch.nn.Module):
         # DefaultFrontend.forward returns (features, feature_lengths)
         h, h_lens = self.frontend(x, x_lengths)
         return h, h_lens
+
+    def encode(self, x: torch.Tensor, x_lengths: torch.Tensor):
+        """
+        Alias for forward, to match expected interface.
+
+        Parameters
+        ----------
+        x : Tensor (B, T)
+        x_lengths : Tensor (B,)
+
+        Returns
+        -------
+        h : Tensor (B, T_frames, n_mels)
+        h_lens : Tensor (B,)
+        """
+        return self(x, x_lengths)
 
     def encoder_output_size(self) -> int:
         return self.frontend.n_mels

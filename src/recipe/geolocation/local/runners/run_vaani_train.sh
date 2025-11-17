@@ -24,9 +24,13 @@ source setup_uv.sh .venv_dai
 # for w2v2ph
 export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
-python src/main.py experiment=vaani_geolocation "$@"
+# python src/main.py experiment=vaani_geolocation logger.wandb.tags=['140cluster','geolocation'] model.freeze_encoder=False "$@"
+
+# freeze
+python src/main.py experiment=vaani_geolocation logger.wandb.tags=['probe','140cluster','geolocation'] "$@"
 
 # W2v2ph model options:
+# +logger.wandb.name=lv-60 model=w2v2ph_geolocation model.model.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
 # +logger.wandb.name=xlsr-53 model=w2v2ph_geolocation model.model.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
 # +logger.wandb.name=ctaguchi model=w2v2ph_geolocation model.model.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
 

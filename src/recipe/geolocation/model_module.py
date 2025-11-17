@@ -113,6 +113,7 @@ class GeolocationModel(LightningModule):
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
+        freeze_encoder: bool = True,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -124,6 +125,11 @@ class GeolocationModel(LightningModule):
         )
         self.geohead = GeolocationHead(self.encoder_dim)
         self.criterion = GeolocationAngularLoss()
+        self.freeze_encoder = freeze_encoder
+        if freeze_encoder:
+            self.net.eval()
+        else:
+            self.net.train()
         # self.criterion = GeolocationRegressionLoss()
         # self.criterion = GeolocationRadianRegressionLoss()
 
@@ -210,7 +216,13 @@ class GeolocationModel(LightningModule):
         )
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        optimizer = self.hparams.optimizer(params=self.parameters())
+        if self.freeze_encoder:
+            optimizable_params = [
+                x for n, x in self.named_parameters() if not n.startswith("net.")
+            ]
+        else:
+            optimizable_params = list(self.parameters())
+        optimizer = self.hparams.optimizer(params=optimizable_params)
         if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)
             return {

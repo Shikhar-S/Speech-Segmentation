@@ -1,7 +1,9 @@
 """Evaluate phone recognition output using panphon feature-based metrics.
 
 Usage:
-    python -m src.metrics.phone_recognition
+    python -m src.metrics.phone_recognition \
+        --prediction_file /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_evals/runs/20251115_193559/l2arctic_perceived_powsm_out.json \
+        --workers 4
 """
 
 import string
@@ -45,8 +47,6 @@ class PhoneRecognitionEvaluator:
         self.normalize_ipa = normalize_ipa
         self.dst = panphon.distance.Distance()
 
-    # ----------------------- text normalization ----------------------- #
-
     @staticmethod
     def clean_text(s: str) -> str:
         """Normalize IPA text: remove spaces/punct, NFC->NFD, fix 'g'→'ɡ'."""
@@ -56,8 +56,6 @@ class PhoneRecognitionEvaluator:
 
     def _prepare(self, text: str) -> str:
         return self.clean_text(text) if self.normalize_ipa else text
-
-    # ----------------------- core per-utt metrics ---------------------- #
 
     def _compute_utterance_metrics(
         self, hyp: str, ref: str
@@ -96,8 +94,6 @@ class PhoneRecognitionEvaluator:
             "fer": float(fed / n_phones * 100) if n_phones > 0 else 0.0,
         }
         return metrics, pfer, fed, per_errors, n_phones
-
-    # ----------------------- dataset-level eval ------------------------ #
 
     def evaluate(
         self, test_data: Dict[str, Dict[str, Any]]
@@ -153,8 +149,6 @@ class PhoneRecognitionEvaluator:
 
         return summary, instance_metrics
 
-    # ----------------------- pretty-print results ---------------------- #
-
     def pretty_print(
         self,
         summary: PhoneRecognitionSummary,
@@ -192,13 +186,31 @@ class PhoneRecognitionEvaluator:
         print()
 
 
-# ----------------------------- example usage ----------------------------- #
 if __name__ == "__main__":
-    test_data = {
-        "utt1": {"prediction": "p a t", "transcription": "k a t"},
-        "utt2": {"prediction": "k a t", "transcription": "k a t"},
-    }
+    import argparse
+    import json
 
-    evaluator = PhoneRecognitionEvaluator()
-    summary, inst = evaluator.evaluate(test_data)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prediction_file", required=True)
+    parser.add_argument("--workers", type=int, default=1)
+    args = parser.parse_args()
+
+    def _load_powsm_predictions(pred_file: str) -> Dict[str, Dict[str, str]]:
+        with open(pred_file, "r") as f:
+            data = json.load(f)
+        return {
+            item["passthrough"]["key"]: {
+                "prediction": item["pred"][0]["processed_transcript"],
+                "transcription": item["passthrough"]["text"],
+            }
+            for _, item in data.items()
+        }
+
+    # Load predictions
+    test_data = _load_powsm_predictions(args.prediction_file)
+    logging.info(f"Loaded predictions for {len(test_data)} utterances.")
+
+    # Evaluate
+    evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)
+    summary, instance_metrics = evaluator.evaluate(test_data)
     evaluator.pretty_print(summary, model_name="dummy-model", dataset_name="dummy-set")

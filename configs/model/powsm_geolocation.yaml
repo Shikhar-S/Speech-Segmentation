@@ -20,3 +20,5 @@ model:
   config_file: null
   model_file: null
   stats_file: null
+
+freeze_encoder: true
