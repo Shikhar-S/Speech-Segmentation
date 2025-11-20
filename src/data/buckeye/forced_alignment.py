@@ -30,7 +30,7 @@ import lightning as L
 
 logger = logging.getLogger(__name__)
 
-IPA_TO_ARPABET_EPITRAN = {
+IPA_TO_ARPABET = {
     "aʊ": "AW",
     "aɪ": "AY",
     "eɪ": "EY",
@@ -84,7 +84,7 @@ IPA_TO_ARPABET_EPITRAN = {
     "ɚ": "ER",
     "ɝ": "ER",
 }
-ARPABET_TO_IPA = {v.lower(): k for k, v in IPA_TO_ARPABET_EPITRAN.items()}
+ARPABET_TO_IPA = {v.lower(): k for k, v in IPA_TO_ARPABET.items()}
 
 
 def extract_buckeye_clip(
@@ -107,6 +107,29 @@ def extract_buckeye_clip(
             f"speech extraction failed [{track.name} {t0:.2f}-{t1:.2f}s]: {e}"
         )
         return False
+
+
+class IPATokenizer:
+    """Tokenizer mapping IPA phones to indices."""
+
+    def __init__(self):
+        self.blank_id = 0
+        self.blank_token = "<blank>"
+        self.unk_token = "<unk>"
+        VOCAB = [self.blank_token] + sorted(IPA_TO_ARPABET.keys()) + [self.unk_token]
+        self.phone2id = {phone: idx for idx, phone in enumerate(VOCAB)}
+        self.id2phone = {idx: phone for phone, idx in self.phone2id.items()}
+        self.unk_id = self.phone2id[self.unk_token]
+
+    def tokens2ids(self, tokens):
+        return [self.phone2id.get(token, self.unk_id) for token in tokens]
+
+    def ids2tokens(self, ids):
+        return [self.id2phone.get(idx, self.unk_token) for idx in ids]
+
+    @staticmethod
+    def vocab_size():
+        return len(IPA_TO_ARPABET) + 2
 
 
 class BuckeyeAlignmentDataset(Dataset):

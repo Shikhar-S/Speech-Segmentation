@@ -190,7 +190,7 @@ class Wav2Vec2PhonemeModel(nn.Module):
         # -1 is used as padding index in collate fn
         text = text[:, : text_lengths.max()]  # for data-parallel
         logits, logit_lengths = self.ctc_logits(speech, speech_lengths)
-        log_probs = F.softmax(logits, dim=-1)  # (B, Tmax, odim)
+        log_probs = F.log_softmax(logits, dim=-1)  # (B, Tmax, odim)
         assert log_probs.size(0) == 1, "Forced alignment needs batch size 1"
         assert not (text == self.blank_id).any(), "Target has blank tokens."
         if log_probs.shape[1] < text.shape[1]:
