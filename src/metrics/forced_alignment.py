@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional
 from collections import defaultdict
 import numpy as np
-import logging
 
-logger = logging.getLogger(__name__)
+from src.utils.pylogger import RankedLogger
+
+log = RankedLogger(__name__)
 
 
 @dataclass
@@ -22,33 +23,29 @@ class AlignmentEvaluator:
     def __init__(self, tolerance_ms: int = 20):
         self.tolerance_sec = tolerance_ms / 1000.0
 
-    # ------------------------ core single-segment eval ------------------------ #
-
     def evaluate_boundaries(
         self,
         predicted: List[ForceAlignedUnit],
         ground_truth: List[ForceAlignedUnit],
         symbols: Optional[List[str]] = None,
     ) -> Dict[str, float]:
-        """Evaluate predicted phone boundaries against ground truth.
+        """Evaluate predicted phone boundaries against ground truth
+            for a single utterance.
 
         Args:
-            predicted: list of AlignmentResult for predicted boundaries.
-            ground_truth: list of AlignmentResult for ground truth boundaries.
-            symbols: optional list of symbol labels (usually phones) aligned
-                     1-to-1 with ground_truth/predicted. If None, symbol-wise
-                     analysis is skipped.
+            predicted: list of ForceAlignedUnit for predicted boundaries.
+            ground_truth: list of ForceAlignedUnit for ground truth boundaries.
+            symbols: optional list of symbol labels aligned 1-to-1 with
+                ground_truth/predicted. If None, symbol-wise analysis is
+                skipped.
         """
-        n = min(len(predicted), len(ground_truth))
-        if n == 0:
-            return {}
-
-        predicted = predicted[:n]
-        ground_truth = ground_truth[:n]
-        if symbols:
-            symbols = symbols[:n]
-
-        # Compute errors for each phoneme
+        assert len(predicted) == len(ground_truth), (
+            "Predicted and ground truth lists must be of the same length "
+            f"for single utterance evaluation, but got {len(predicted)} and "
+            f"{len(ground_truth)}."
+        )
+        assert len(ground_truth) > 0, "Ground truth list is empty."
+        n = len(predicted)
         metrics = np.array(
             [
                 self._compute_metrics(p.start, p.end, g.start, g.end)
@@ -89,7 +86,7 @@ class AlignmentEvaluator:
         return results
 
     def _compute_metrics(self, ps, pe, gs, ge):
-        """Compute metrics for a single phoneme (in seconds)."""
+        """Compute metrics for a single phone (in seconds)."""
         start_err = abs(ps - gs)
         end_err = abs(pe - ge)
         return (
@@ -114,12 +111,13 @@ class AlignmentEvaluator:
     def _analyze_by_symbol(self, symbols, start_err, end_err, pbe, dur_err):
         """Analyze errors grouped by phoneme symbol.
 
-        Errors are still in seconds at this point; we convert to ms here.
+        Errors are still in seconds at this point.
         """
         symbol_data = defaultdict(
             lambda: {"start": [], "end": [], "pbe": [], "dur": []}
         )
 
+        # group by symbol
         for sym, se, ee, pb, de in zip(symbols, start_err, end_err, pbe, dur_err):
             symbol_data[sym]["start"].append(se * 1000)
             symbol_data[sym]["end"].append(ee * 1000)
@@ -137,8 +135,6 @@ class AlignmentEvaluator:
             }
             for sym, data in symbol_data.items()
         }
-
-    # ------------ helpers for printing aggregated vs per-segment ------------ #
 
     def _get_metric(self, results: Dict, key: str, default: float = 0.0) -> float:
         """Get metric, falling back to mean_<key> for batch results."""
@@ -160,8 +156,6 @@ class AlignmentEvaluator:
         if mean_key in results:
             return results[mean_key]
         return default
-
-    # ------------------------ pretty-printing logic ------------------------- #
 
     def pretty_print(self, results: Dict, verbosity: int = 1) -> None:
         """Print results as ASCII table."""
@@ -213,6 +207,8 @@ class AlignmentEvaluator:
     def _print_standard(self, results):
         """Standard output."""
         f1 = self._get_metric(results, "f1", 0.0)
+        precision = self._get_metric(results, "precision", 0.0)
+        recall = self._get_metric(results, "recall", 0.0)
         start_mean = self._get_metric(results, "start_err_mean", 0.0)
         start_std = self._get_metric(results, "start_err_std", 0.0)
         end_mean = self._get_metric(results, "end_err_mean", 0.0)
@@ -235,7 +231,7 @@ class AlignmentEvaluator:
 
         rows.extend(
             [
-                ["F1/Precision/Recall", f"{f1:.3f}"],
+                ["F1/Precision/Recall", f"{f1:.3f} / {precision:.3f} / {recall:.3f}"],
                 [
                     "Start Error (ms)",
                     f"{start_mean:.2f} +/- {start_std:.2f}",
@@ -366,15 +362,18 @@ class AlignmentEvaluator:
         predictions: Dict[str, List[ForceAlignedUnit]],
         ground_truth: Dict[str, List[ForceAlignedUnit]],
         symbols_dict: Optional[Dict[str, List[str]]] = None,
+        skip_symbols: Optional[set] = None,
     ) -> Dict:
         """Evaluate batch of predictions.
 
         Args:
-            predictions: Dict mapping segment IDs to lists of AlignmentResult
+            predictions: Dict mapping segment IDs to lists of ForceAlignedUnit
                          for predicted boundaries.
-            ground_truth: Dict mapping segment IDs to lists of AlignmentResult
+            ground_truth: Dict mapping segment IDs to lists of ForceAlignedUnit
                           for ground truth boundaries.
             symbols_dict: Optional dict mapping segment IDs to symbol lists.
+            skip_symbols: Optional set of symbols to skip in evaluation.
+                This can be the unk symbol for the model.
         Returns:
             Dict containing aggregated metrics for the batch.
         """
@@ -382,11 +381,23 @@ class AlignmentEvaluator:
 
         for seg_id in ground_truth:
             if seg_id not in predictions:
+                log.warning(f"Segment ID {seg_id} missing in predictions; skipping.")
                 continue
 
             preds = predictions[seg_id]
             gts = ground_truth[seg_id]
             syms = symbols_dict.get(seg_id) if symbols_dict else None
+
+            if skip_symbols:
+                preds_, gts_ = [], []
+                for p, g in zip(preds, gts):
+                    if g.label not in skip_symbols and p.label not in skip_symbols:
+                        preds_.append(p)
+                        gts_.append(g)
+                preds = preds_
+                gts = gts_
+                if syms:
+                    syms = [s for s in syms if s not in skip_symbols]
 
             res = self.evaluate_boundaries(preds, gts, syms)
             all_results.append(res)

@@ -128,8 +128,10 @@ class GeolocationModel(LightningModule):
         self.freeze_encoder = freeze_encoder
         if freeze_encoder:
             self.net.eval()
+            self.net.requires_grad_(False)
         else:
             self.net.train()
+            self.net.requires_grad_(True)
         # self.criterion = GeolocationRegressionLoss()
         # self.criterion = GeolocationRadianRegressionLoss()
 
@@ -239,27 +241,32 @@ class GeolocationModel(LightningModule):
 
 if __name__ == "__main__":
     from src.model.powsm.powsm_model import build_powsm
-    from src.model.wav2vec2phoneme.wav2vec2phoneme_model import build_wav2vec2phoneme
+    from src.model.wav2vec2phoneme.wav2vec2phoneme_model import Wav2Vec2PhonemeModel
 
     model = GeolocationModel(
-        model=build_wav2vec2phoneme("facebook/wav2vec2-lv-60-espeak-cv-ft"),
+        model=Wav2Vec2PhonemeModel(
+            "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
+        ),
         # model=build_powsm(
         #     work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
         #     hf_repo="espnet/powsm",
         # ),
         optimizer=torch.optim.Adam,
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
+        freeze_encoder=True,
     )
-    dummy_input = torch.randn(2, 16000 * 5)  # batch of 2, 5 seconds of audio at 16kHz
-    dummy_lengths = torch.tensor([16000 * 5, 16000 * 5])
-    output = model.training_step(
-        {
-            "speech": dummy_input,
-            "speech_length": dummy_lengths,
-            "latitude": torch.tensor([0.0, 0.0]),
-            "longitude": torch.tensor([0.0, 0.0]),
-        },
-        0,
-    )
-    print(output)
-    print("Model forward pass successful!")
+    # print(model.freeze_encoder)
+    # model.configure_optimizers()
+    # dummy_input = torch.randn(2, 16000 * 5)  # batch of 2, 5 seconds of audio at 16kHz
+    # dummy_lengths = torch.tensor([16000 * 5, 16000 * 5])
+    # output = model.training_step(
+    #     {
+    #         "speech": dummy_input,
+    #         "speech_length": dummy_lengths,
+    #         "latitude": torch.tensor([0.0, 0.0]),
+    #         "longitude": torch.tensor([0.0, 0.0]),
+    #     },
+    #     0,
+    # )
+    # print(output)
+    # print("Model forward pass successful!")

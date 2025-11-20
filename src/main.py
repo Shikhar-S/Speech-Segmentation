@@ -1,4 +1,3 @@
-import logging
 import pyarrow.parquet as pq  # before torch
 from typing import Any, Dict, Optional, Tuple
 
@@ -44,7 +43,7 @@ def run_task(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if cfg.get("distributed_predict", False):
         if cfg.get("train", False) or cfg.get("test", False):
-            logging.warning(
+            log.warning(
                 "Distributed inference cannot be combined with training or testing. "
                 "Please set 'train' and 'test' to False in the configuration."
             )

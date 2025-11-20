@@ -30,6 +30,9 @@ import torchaudio
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 from typing import Dict, List, Tuple, Any
 import numpy as np
+from src.utils import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def preprocess_inputs_wav2vec2(
@@ -76,20 +79,14 @@ class Wav2Vec2PhonemeModel(nn.Module):
         self.encoder_dim = self.model.config.output_hidden_size
         self.vocab_size = self.model.config.vocab_size
         # Fixed!
-        self.frames2points_ratio = None
         self.sampling_rate = self.processor.feature_extractor.sampling_rate
+        # pad is the blank token for w2v2
         self.blank_id = self.model.config.pad_token_id
 
     @torch.no_grad()
-    def frames2points(self) -> int:
+    def points_by_frames(self) -> int:
         """Get the ratio of input points to output frames."""
-        if self.frames2points_ratio is None:
-            dummy_input = torch.randn(1, 16000)
-            dummy_length = torch.tensor([16000])
-            with torch.no_grad():
-                feats, feat_lengths = self.encode(dummy_input, dummy_length)
-                self.frames2points_ratio = 16000 // feat_lengths.item()
-        return self.frames2points_ratio
+        return 320
 
     def _calculate_stats(self, output, inputs):
         """Token-level accuracy."""
@@ -126,9 +123,9 @@ class Wav2Vec2PhonemeModel(nn.Module):
         return model_out
 
     def _extract_feats(self, speech, speech_lengths) -> torch.Tensor:
-        device = self.model.device
+        """Frontend"""
         inputs = preprocess_inputs_wav2vec2(
-            self.processor, speech, speech_lengths, device=device
+            self.processor, speech, speech_lengths, device=self.model.device
         )
         return inputs
 
@@ -157,7 +154,7 @@ class Wav2Vec2PhonemeModel(nn.Module):
         return self.encoder_dim
 
     @torch.no_grad()
-    def forced_align(self, speech, speech_lengths, text, text_lengths):
+    def forced_align(self, speech, speech_lengths, text, text_lengths, utt_id=None):
         """Calculate frame-wise alignment from CTC probabilities.
         Only an inference function that uses the ctc posteriors.
 
@@ -166,6 +163,7 @@ class Wav2Vec2PhonemeModel(nn.Module):
             speech_lengths: (Batch,)
             text: (Batch, Length)
             text_lengths: (Batch,)
+            utt_id: str, identifier for the utterance
         Returns:
             Tuple(tensor, tensor):
                 - Label for each time step in the alignment path computed
@@ -195,10 +193,19 @@ class Wav2Vec2PhonemeModel(nn.Module):
         log_probs = F.softmax(logits, dim=-1)  # (B, Tmax, odim)
         assert log_probs.size(0) == 1, "Forced alignment needs batch size 1"
         assert not (text == self.blank_id).any(), "Target has blank tokens."
+        if log_probs.shape[1] < text.shape[1]:
+            log.error(
+                f"Logits length {log_probs.shape} is shorter than "
+                f"text length {text.shape}, for utt_id: {utt_id}"
+            )
         align_label, align_prob = torchaudio.functional.forced_align(
             log_probs, text, logit_lengths, text_lengths, blank=self.blank_id
         )
         return align_label, align_prob
+
+    def get_blank_id(self) -> int:
+        """Get blank id for CTC"""
+        return self.blank_id
 
 
 if __name__ == "__main__":

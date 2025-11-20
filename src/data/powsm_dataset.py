@@ -4,9 +4,11 @@ import torch
 import torchaudio
 import kaldiio
 from torch.utils.data import Dataset
-import logging
 import lightning as L
 import yaml
+from src.utils import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class PowsmDataset(Dataset):
@@ -23,7 +25,7 @@ class PowsmDataset(Dataset):
         assert all(
             k in self.key2lang for k in self.keys
         ), "Missing language tags for some keys"
-        logging.info(
+        log.info(
             f"Loaded dataset: {len(self.key2lang)} lang keys, {len(self.keys)} samples"
         )
 
@@ -101,7 +103,7 @@ class PowsmDataModule(L.LightningDataModule):
         num_workers=4,
     ):
         super().__init__()
-        logging.info(
+        log.info(
             f"Initializing PowsmDataModule with {wav_scp_file}, {text_file}, {lang_file}"
         )
         self.wav_scp_file = wav_scp_file

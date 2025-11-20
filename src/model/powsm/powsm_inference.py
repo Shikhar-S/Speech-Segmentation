@@ -3,7 +3,6 @@ Usage:
     python -m src.model.powsm.powsm_inference
 """
 
-import logging
 from pathlib import Path
 from typing import List, Optional, Tuple, Union, Dict, Any
 
@@ -12,16 +11,19 @@ import torch
 import torch.nn.functional as F
 from typeguard import typechecked
 
-from espnet.nets.beam_search import BeamSearch, Hypothesis
+from espnet.nets.beam_search import Hypothesis
 from espnet.nets.batch_beam_search import BatchBeamSearch
 from espnet.nets.scorer_interface import BatchScorerInterface
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.nets.scorers.length_bonus import LengthBonus
 
+from src.utils import RankedLogger
 from src.model.powsm.sentencepiece_tokenizer import SentencepiecesTokenizer
 from src.model.powsm.token_id_converter import TokenIDConverter
 from src.model.powsm.utils import to_device
 from src.model.powsm.powsm_model import build_powsm
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class ScoreFilter(BatchScorerInterface, torch.nn.Module):
@@ -193,9 +195,9 @@ class PowsmInference:
         beam_search.to(device=device, dtype=getattr(torch, dtype)).eval()
         converter = TokenIDConverter(token_list=token_list)
 
-        logging.info(f"Beam_search: {beam_search}")
-        logging.info(f"Decoding device={device}, dtype={dtype}")
-        logging.info(f"Text tokenizer: {tokenizer}")
+        log.info(f"Beam_search: {beam_search}")
+        log.info(f"Decoding device={device}, dtype={dtype}")
+        log.info(f"Text tokenizer: {tokenizer}")
 
         self.model = model
         self.training_args = model.training_args
@@ -428,57 +430,3 @@ def build_powsm_inference(
     )
 
     return inference
-
-
-if __name__ == "__main__":
-    inference_obj = build_powsm_inference(
-        work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
-        hf_repo="espnet/powsm",
-    )
-
-    from src.model.powsm.powsm_model import build_powsm
-    from src.data.buckeye.forced_alignment import BuckeyeAlignment
-    from pathlib import Path
-
-    data_dir = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache"
-    buckeye_root = "/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye"
-    train_meta = Path(data_dir) / "train_metadata.json"
-    val_meta = Path(data_dir) / "val_metadata.json"
-    test_meta = Path(data_dir) / "test_metadata.json"
-
-    from src.model.powsm.token_id_converter import build_powsm_tokenizer
-
-    model_tokenizer = build_powsm_tokenizer(
-        work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
-        hf_repo="espnet/powsm",
-    )
-
-    # Create dataloaders
-    data_module = BuckeyeAlignment(
-        buckeye_root=buckeye_root,
-        train_metadata=str(train_meta),
-        val_metadata=str(val_meta),
-        test_metadata=str(test_meta),
-        model_tokenizer=model_tokenizer,
-        batch_size=2,
-        num_workers=1,
-    )
-    data_module.setup()
-    train_loader = data_module.train_dataloader()
-    for batch in train_loader:
-        speech = batch["speech"]
-        speech_length = batch["speech_length"]
-        print("batch speech shape:", speech.shape)
-        print("batch speech length shape:", speech_length.shape)
-        for sp, splen in zip(speech, speech_length):
-            print("single speech shape:", sp.shape)
-            results = inference_obj(speech=sp)
-            for text, tokens, token_ids, text_nospecial, hyp in results:
-                print("Text:", text)
-                print("Tokens:", tokens)
-                print("Token IDs:", token_ids)
-                print("Text no special:", text_nospecial)
-                print("Score:", hyp.score)
-                print("-----")
-            break
-        break

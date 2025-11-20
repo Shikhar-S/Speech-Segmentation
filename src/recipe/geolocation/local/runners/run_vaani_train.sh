@@ -30,9 +30,9 @@ export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espea
 python src/main.py experiment=vaani_geolocation logger.wandb.tags=['probe','140cluster','geolocation'] "$@"
 
 # W2v2ph model options:
-# +logger.wandb.name=lv-60 model=w2v2ph_geolocation model.model.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
-# +logger.wandb.name=xlsr-53 model=w2v2ph_geolocation model.model.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
-# +logger.wandb.name=ctaguchi model=w2v2ph_geolocation model.model.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# +logger.wandb.name=F.lv-60 model=w2v2ph_geolocation model.model.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# +logger.wandb.name=F.xlsr-53 model=w2v2ph_geolocation model.model.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# +logger.wandb.name=F.ctaguchi model=w2v2ph_geolocation model.model.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
 
 # for naive frontend model
 # +logger.wandb.name=frontend_only model=naive_geolocation

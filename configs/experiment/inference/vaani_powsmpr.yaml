@@ -1,7 +1,6 @@
 # @package _global_
 
 # This config executes phoneme recognition inference 
-# with powsm on any eval dataset from the powsm paper:
 # python src/main.py experiment=inference/vaani_powsmpr
 
 defaults:

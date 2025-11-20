@@ -1,6 +1,14 @@
 """
 Buckeye Dataset and DataLoader for forced alignment
-
+srun -A bbjs-dtai-gh --gpus=1 \
+    --cpus-per-task=8 \
+    --mem=32G --time=02:00:00 \
+    --pty /bin/bash -c "cd /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench \
+      && source setup_uv.sh .venv_dai \
+    && python -m src.data.buckeye.forced_alignment \
+    --buckeye_root /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye \
+    --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache \
+    --batch_size 32 --num_workers 4"
 Usage:
     python -m src.data.buckeye.forced_alignment \
         --buckeye_root /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye \
@@ -23,33 +31,34 @@ import lightning as L
 logger = logging.getLogger(__name__)
 
 IPA_TO_ARPABET_EPITRAN = {
+    "aʊ": "AW",
+    "aɪ": "AY",
+    "eɪ": "EY",
+    "oʊ": "OW",
+    "ɔɪ": "OY",  # until this points not included in powsm vocab
+    "t͡ʃ": "CH",
+    "d͡ʒ": "JH",
     "ɑ": "AA",
     "æ": "AE",
     "ʌ": "AH",  # unstressed “uh”; schwa is AX
     "ɔ": "AO",
-    "aʊ": "AW",
-    "aɪ": "AY",
+    "ə˞": "ER",
     "b": "B",
-    "tʃ": "CH",
     "d": "D",
     "ð": "DH",
     "ɛ": "EH",
     "ɚ": "AXR",  # r-colored schwa
     "ɝ": "ER",  # stressed r-colored vowel
-    "eɪ": "EY",
     "f": "F",
     "ɡ": "G",
     "h": "HH",
     "ɪ": "IH",
     "i": "IY",
-    "dʒ": "JH",
     "k": "K",
     "l": "L",
     "m": "M",
     "n": "N",
     "ŋ": "NG",
-    "oʊ": "OW",
-    "ɔɪ": "OY",
     "p": "P",
     "ɹ": "R",
     "s": "S",
@@ -72,7 +81,6 @@ IPA_TO_ARPABET_EPITRAN = {
     "ɾ̃": "NX",
     "ɾ": "DX",
     "ʔ": "Q",
-    "ə˞": "ER",
     "ɚ": "ER",
     "ɝ": "ER",
 }
@@ -83,13 +91,12 @@ def extract_buckeye_clip(
     buckeye_root, item, t0: float, t1: float, out: Path, sr: int
 ) -> bool:
     try:
-        # TODO(shikhar): check the track creation
         speaker = buckeye.Speaker.from_zip(
             Path(buckeye_root) / (item["speaker_id"] + ".zip"),
             load_wavs=True,
         )
         track = speaker.tracks[item["track_id"]]
-        track.clip_wav(str(out), t0, t1)  # write original
+        track.clip_wav(str(out), t0, t1)
         wav, s = torchaudio.load(str(out))
         if s != sr:
             wav = torchaudio.transforms.Resample(s, sr)(wav)
@@ -111,7 +118,8 @@ class BuckeyeAlignmentDataset(Dataset):
         self,
         buckeye_root: str,
         metadata_path: str,
-        model_tokenizer,
+        cache_path: str,
+        tokenizer,
         target_sr: int = 16000,
         max_speech_length: Optional[float] = None,  # in seconds
     ):
@@ -119,11 +127,13 @@ class BuckeyeAlignmentDataset(Dataset):
         Args:
             buckeye_root: Path to Buckeye root
             metadata_path: Path to JSON metadata file created by BuckeyeDataPreparator
-            model_tokenizer: Tokenizer for converting phonemes to indices, dependent on model
+            cache_path: Path to cache directory for storing extracted audio clips
+            tokenizer: Tokenizer for converting phonemes to indices, dependent on model
             target_sr: Target sample rate
             max_speech_length: Maximum speech length in seconds (for truncation)
         """
         self.buckeye_root = buckeye_root
+        self.cache_path = cache_path
         self.target_sr = target_sr
         self.max_speech_length = max_speech_length
 
@@ -132,8 +142,8 @@ class BuckeyeAlignmentDataset(Dataset):
             self.metadata = json.load(f)
 
         self.clip_paths_cache = {}
-        self.tokenizer = model_tokenizer
-        self.speechcache_root = Path(buckeye_root) / "audio"
+        self.tokenizer = tokenizer
+        self.speechcache_root = Path(cache_path) / "speech_clips"
         self.speechcache_root.mkdir(parents=True, exist_ok=True)
         # self._construct_cache()
 
@@ -150,6 +160,9 @@ class BuckeyeAlignmentDataset(Dataset):
         if item["segment_id"] in self.clip_paths_cache:
             return self.clip_paths_cache[item["segment_id"]]
         path = Path(self.speechcache_root) / (item["segment_id"] + ".wav")
+        if path.exists():
+            self.clip_paths_cache[item["segment_id"]] = path
+            return path
         extract_buckeye_clip(
             self.buckeye_root,
             item,
@@ -167,10 +180,10 @@ class BuckeyeAlignmentDataset(Dataset):
             dict with:
                 - speech: Tensor of shape (1, T) or (T,)
                 - speech_length: int, actual speech length
-                - phone_ids: Tensor of phone indices
-                - phone_timestamps: List of (start, end) tuples
+                - target: Tensor of phone indices
+                - phone_pointstamps: List of (start, end) tuples
                 - text: String transcript
-                - segment_id: String identifier
+                - utt_id: String identifier
                 - duration: Float, segment duration in seconds
         """
         item = self.metadata[idx]
@@ -195,26 +208,32 @@ class BuckeyeAlignmentDataset(Dataset):
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
 
-        # Convert phones to indices
-        phones = [
-            ARPABET_TO_IPA.get(p.lower(), p)
-            for p in item["phones"]
-            if p not in ("IVER", "VOCNOISE", "{B_TRANS}")
-        ]
-        phone_ids = self.tokenizer.tokens2ids(phones)
-        phone_pointstamps = [
-            (start * self.target_sr, end * self.target_sr)
-            for start, end in item["phone_timestamps"]
-        ]
+        phone_ipa, phone_pointstamps = [], []
+        for phone, (start, end) in zip(item["phones"], item["phone_timestamps"]):
+            # if (phone.lower() not in ARPABET_TO_IPA) or phone in (
+            #     "IVER",
+            #     "VOCNOISE",
+            #     "{B_TRANS}",
+            # ):
+            #     continue
+            phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))
+            phone_pointstamps.append(
+                (int(start * self.target_sr), int(end * self.target_sr))
+            )
+        target = self.tokenizer.tokens2ids(phone_ipa)
+        assert (
+            len(target) != 0
+        ), f"No valid phones for {item['segment_id']} with transcript: {item['phones']}"
         return {
             "speech": waveform.squeeze(0),  # Shape: (T,)
             "speech_length": waveform.shape[1],
-            "phones": item["phones"],
-            "phone_ids": torch.tensor(phone_ids, dtype=torch.long),
+            "target": torch.tensor(target, dtype=torch.long),
+            "target_length": len(target),
             "phone_pointstamps": phone_pointstamps,
             "phone_timestamps": item["phone_timestamps"],
+            "phones": phone_ipa,
             "text": item["text"],
-            "segment_id": item["segment_id"],
+            "utt_id": item["segment_id"],
             "duration": item["duration"],
             "speaker_id": item["speaker_id"],
         }
@@ -235,7 +254,7 @@ def collate_fn(batch):
     """
     # Find max lengths
     max_speech_length = max(item["speech_length"] for item in batch)
-    max_target_length = max(len(item["phone_ids"]) for item in batch)
+    max_target_length = max(len(item["target"]) for item in batch)
 
     # Initialize tensors with -1 padding
     batch_size = len(batch)
@@ -243,24 +262,24 @@ def collate_fn(batch):
     speech_length = torch.zeros(batch_size, dtype=torch.long)
     phone_id = torch.full((batch_size, max_target_length), -1, dtype=torch.long)
     target_length = torch.zeros(batch_size, dtype=torch.long)
-    target_start = torch.full(
-        (batch_size, max_target_length), -1.0, dtype=torch.float32
-    )
-    target_end = torch.full((batch_size, max_target_length), -1.0, dtype=torch.float32)
+    target_start = torch.full((batch_size, max_target_length), -1, dtype=torch.float32)
+    target_end = torch.full((batch_size, max_target_length), -1, dtype=torch.float32)
+    # NOTE(shikhar): init with -1 in target_end is good in downstream loss computation
+    # since it helps ignore padding
 
     # Fill tensors
     for i, item in enumerate(batch):
         speech_len = item["speech_length"]
-        phone_len = len(item["phone_ids"])
+        phone_len = len(item["target"])
 
         speech[i, :speech_len] = item["speech"]
         speech_length[i] = speech_len
-        phone_id[i, :phone_len] = item["phone_ids"]
+        phone_id[i, :phone_len] = item["target"]
         target_length[i] = phone_len
 
         # Extract phone start and end times in points
-        timestamps = item["phone_pointstamps"]
-        for j, (start, end) in enumerate(timestamps[:phone_len]):
+        pointstamps = item["phone_pointstamps"]
+        for j, (start, end) in enumerate(pointstamps[:phone_len]):
             target_start[i, j] = start
             target_end[i, j] = end
 
@@ -268,9 +287,12 @@ def collate_fn(batch):
         "speech": speech,
         "speech_length": speech_length,
         "target": phone_id,
+        "target_text": [item["phones"] for item in batch],
         "target_length": target_length,
         "target_start": target_start,
         "target_end": target_end,
+        "ground_truth_timestamps": [item["phone_timestamps"] for item in batch],
+        "utt_id": [item["utt_id"] for item in batch],
     }
 
 
@@ -278,10 +300,8 @@ class BuckeyeAlignment(L.LightningDataModule):
     def __init__(
         self,
         buckeye_root: str,
-        train_metadata: str,
-        val_metadata: str,
-        test_metadata: str,
-        model_tokenizer,
+        local_cache_path: str,
+        tokenizer,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -290,10 +310,11 @@ class BuckeyeAlignment(L.LightningDataModule):
     ):
         super().__init__()
         self.buckeye_root = buckeye_root
-        self.train_metadata = train_metadata
-        self.val_metadata = val_metadata
-        self.test_metadata = test_metadata
-        self.model_tokenizer = model_tokenizer
+        self.local_cache_path = local_cache_path
+        self.train_metadata = Path(local_cache_path) / "train_metadata.json"
+        self.val_metadata = Path(local_cache_path) / "val_metadata.json"
+        self.test_metadata = Path(local_cache_path) / "test_metadata.json"
+        self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -304,21 +325,24 @@ class BuckeyeAlignment(L.LightningDataModule):
         self.train_dataset = BuckeyeAlignmentDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.train_metadata,
-            model_tokenizer=self.model_tokenizer,
+            cache_path=self.local_cache_path,
+            tokenizer=self.tokenizer,
             target_sr=self.target_sr,
             max_speech_length=self.max_speech_length,
         )
         self.val_dataset = BuckeyeAlignmentDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.val_metadata,
-            model_tokenizer=self.model_tokenizer,
+            cache_path=self.local_cache_path,
+            tokenizer=self.tokenizer,
             target_sr=self.target_sr,
             max_speech_length=self.max_speech_length,
         )
         self.test_dataset = BuckeyeAlignmentDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.test_metadata,
-            model_tokenizer=self.model_tokenizer,
+            tokenizer=self.tokenizer,
+            cache_path=self.local_cache_path,
             target_sr=self.target_sr,
             max_speech_length=self.max_speech_length,
         )
@@ -364,8 +388,88 @@ class BuckeyeAlignment(L.LightningDataModule):
         )
 
 
+def _naive_baseline_equal_segmentation(test_loader: DataLoader):
+    """
+    Naive baseline that divides the speech into equal segments for each target unit.
+    """
+    print("===" * 20)
+    print("Naive baseline - equal segmentation")
+    from src.metrics.forced_alignment import AlignmentEvaluator, ForceAlignedUnit
+    from tqdm import tqdm
+
+    evaluator = AlignmentEvaluator(tolerance_ms=20)
+    naive_predictions = {}
+    ground_truth = {}
+    for batch_id, test_batch in tqdm(
+        enumerate(test_loader), desc="Evaluating naive baseline", total=len(test_loader)
+    ):
+        # if batch_id > 2:
+        #     break
+        for i in tqdm(
+            range(len(test_batch["speech_length"])),
+            desc="Building predictions",
+            leave=False,
+        ):
+            n_phones = test_batch["target_length"][i].item()
+            duration = test_batch["speech_length"][i].item() / 16000  # assuming 16kHz
+            phone_duration = duration / n_phones
+            boundaries = [
+                ForceAlignedUnit(
+                    j * phone_duration,
+                    (j + 1) * phone_duration,
+                    test_batch["target_text"][i][j],
+                )
+                for j in range(n_phones)
+            ]
+            naive_predictions[f"segment_{batch_id}_{i}"] = boundaries
+        for i in tqdm(
+            range(len(test_batch["speech_length"])),
+            desc="Building ground truth",
+            leave=False,
+        ):
+            n_phones = test_batch["target_length"][i].item()
+            boundaries = [
+                ForceAlignedUnit(
+                    test_batch["target_start"][i, j].item() / 16000,
+                    test_batch["target_end"][i, j].item() / 16000,
+                    test_batch["target_text"][i][j],
+                )
+                for j in range(n_phones)
+                if test_batch["target_start"][i, j].item() >= 0
+            ]
+            ground_truth[f"segment_{batch_id}_{i}"] = boundaries
+
+    # Evaluate
+    metrics = evaluator.evaluate_batch(naive_predictions, ground_truth)
+    print("\nEvaluation metrics:")
+    evaluator.pretty_print(metrics, verbosity=2)
+    LOG_METRICS = sorted(
+        [
+            "f1",
+            "precision",
+            "recall",
+            "pbe_median",
+            "start_err_median",
+            "end_err_median",
+            "dur_err_median",
+            "pred_dur_mean",
+            "gt_dur_mean",
+        ]
+    )
+    print("==" * 20)
+    for key in LOG_METRICS:
+        print(key, end=",")
+    print()
+    for key in LOG_METRICS:
+        print(evaluator._get_metric(metrics, key), end=",")
+    print()
+
+
 if __name__ == "__main__":
     """Example usage"""
+    from src.data.buckeye.forced_alignment import BuckeyeAlignment
+    from src.model.powsm.token_id_converter import build_powsm_tokenizer
+    from src.model.wav2vec2phoneme.builders import build_wav2vec2phoneme_tokenizer
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -380,30 +484,28 @@ if __name__ == "__main__":
         required=True,
         help="Path to Buckeye root",
     )
-    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=1)
 
     args = parser.parse_args()
 
-    # Paths to metadata files
-    train_meta = Path(args.data_dir) / "train_metadata.json"
-    val_meta = Path(args.data_dir) / "val_metadata.json"
-    test_meta = Path(args.data_dir) / "test_metadata.json"
-
-    from src.model.powsm.token_id_converter import build_powsm_tokenizer
-
-    model_tokenizer = build_powsm_tokenizer(
-        work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
-        hf_repo="espnet/powsm",
-    )
+    # MODEL = "w2v2ph"
+    MODEL = "powsm"
+    if MODEL == "powsm":
+        tokenizer = build_powsm_tokenizer(
+            work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
+            hf_repo="espnet/powsm",
+        )
+    elif MODEL == "w2v2ph":
+        tokenizer = build_wav2vec2phoneme_tokenizer(
+            hf_repo="ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns",
+        )
 
     # Create dataloaders
     data_module = BuckeyeAlignment(
         buckeye_root=args.buckeye_root,
-        train_metadata=str(train_meta),
-        val_metadata=str(val_meta),
-        test_metadata=str(test_meta),
-        model_tokenizer=model_tokenizer,
+        local_cache_path=args.data_dir,
+        tokenizer=tokenizer,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
     )
@@ -412,44 +514,4 @@ if __name__ == "__main__":
     train_loader = data_module.train_dataloader()
     val_loader = data_module.val_dataloader()
     test_loader = data_module.test_dataloader()
-
-    # Test loading a batch
-    for batch in train_loader:
-        for k, v in batch.items():
-            print(f"{k}: {v.shape if isinstance(v, torch.Tensor) else len(v)}")
-        break
-
-    # Test evaluator
-    print("===" * 20)
-    print("Naive baseline - equal segmentation")
-    from src.metrics.forced_alignment import AlignmentEvaluator
-
-    evaluator = AlignmentEvaluator(tolerance_ms=20)
-    test_batch = next(iter(test_loader))
-    dummy_predictions = {}
-    for i in range(len(test_batch["speech_length"])):
-        n_phones = test_batch["target_length"][i].item()
-        duration = test_batch["speech_length"][i].item() / 16000  # assuming 16kHz
-        phone_duration = duration / n_phones
-        boundaries = [
-            (j * phone_duration, (j + 1) * phone_duration) for j in range(n_phones)
-        ]
-        dummy_predictions[f"segment_{i}"] = boundaries
-
-    ground_truth = {}
-    for i in range(len(test_batch["speech_length"])):
-        n_phones = test_batch["target_length"][i].item()
-        boundaries = [
-            (
-                test_batch["target_start"][i, j].item(),
-                test_batch["target_end"][i, j].item(),
-            )
-            for j in range(n_phones)
-            if test_batch["target_start"][i, j].item() >= 0
-        ]
-        ground_truth[f"segment_{i}"] = boundaries
-
-    # Evaluate
-    metrics = evaluator.evaluate_batch(dummy_predictions, ground_truth)
-    print("\nEvaluation metrics:")
-    evaluator.pretty_print(metrics, verbosity=2)
+    _naive_baseline_equal_segmentation(test_loader)

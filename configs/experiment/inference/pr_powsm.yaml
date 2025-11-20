@@ -1,0 +1,29 @@
+# @package _global_
+
+# This config executes phoneme recognition inference with powsm
+# python src/main.py experiment=inference/pr_powsm
+
+defaults:
+  - override /logger: csv
+  - override /data: vaani_geolocation
+  - override /data/tokenizer: powsm
+
+task_name: "pr_powsm"
+tags: ["pr_powsm"]
+
+seed: 42
+
+train: false
+test: false
+distributed_predict: True
+
+inference:
+  num_workers: 15 # number of parallel workers for distributed inference
+  passthrough_keys: ["latitude","longitude", "split", "metadata_idx"]
+  out_file: ${paths.output_dir}/pr_powsm.json
+  inference_runner:
+    _target_: src.model.wav2vec2phoneme.builders.build_wav2vec2phoneme_inference
+  inference_call_args: 
+    text_prev: <na>
+    lang_sym: <unk>
+    task_sym: <pr>

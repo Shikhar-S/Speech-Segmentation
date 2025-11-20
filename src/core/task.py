@@ -1,7 +1,4 @@
-"""Main task class that controls execution flow for all stages.
-
-# TODO(shikhar): For api based models, do we still need to create logger inside trainer?
-"""
+"""Main task class that controls execution flow for all stages."""
 
 from typing import Any, Dict, List, Tuple
 
@@ -48,10 +45,10 @@ class Task:
     ) -> Dict[str, Any]:
         if self.task_cfg.get("ckpt_path") is not None:
             ckpt_path = self.task_cfg.ckpt_path
-        if not ckpt_path:
-            log.error("Testing ckpt not provided!")
-        else:
-            log.info(f"Ckpt path: {ckpt_path}")
+        # if not ckpt_path:
+        #     log.error("Testing ckpt not provided!")
+        # else:
+        log.info(f"Ckpt path: {ckpt_path}")
         trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path or None)
         return dict(trainer.callback_metrics)
 
@@ -115,7 +112,7 @@ class Task:
         }
 
         if logger:
-            log.info("Logging hyperparameters!")
+            log.info("logging hyperparameters!")
             log_hyperparameters(object_dict)
 
         metrics: Dict[str, Any] = {}

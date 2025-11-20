@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
 @dataclass
-class AlignmentSegment:
+class BuckeyeAlignmentSegment:
     segment_id: str
     speaker_id: str
     track_id: str
@@ -31,9 +31,6 @@ class AlignmentSegment:
     phones: List[str]
     phone_timestamps: List[Tuple[float, float]]
     speaker_id: str
-
-
-# ----------------------------- core helpers ----------------------------- #
 
 
 def pause_segments(words, min_pause: float) -> List[Tuple[float, float]]:
@@ -95,9 +92,10 @@ def segment_track(
     track, spk: str, min_pause: float, max_seg: float, min_seg: float
 ) -> List[Tuple[Tuple[float, float], str, List[str], List[Tuple[float, float]], str]]:
     segs = []
+    track_duration = track.wav.getnframes() / float(track.wav.getframerate())
     for i, (a, b) in enumerate(pause_segments(track.words, min_pause)):
         for j, (t0, t1) in enumerate(split_if_long(a, b, max_seg)):
-            if (t1 - t0) < min_seg:
+            if (t1 - t0) < min_seg or t0 >= track_duration or t1 > track_duration:
                 continue
             ph, ph_t = clip_phones(track.phones, t0, t1)
             tx = clip_words(track.words, t0, t1)
@@ -116,8 +114,8 @@ def segment_track(
 
 def process_corpus(
     root: Path, min_pause: float, min_seg: float, max_seg: float
-) -> List[AlignmentSegment]:
-    all_segments: List[AlignmentSegment] = []
+) -> List[BuckeyeAlignmentSegment]:
+    all_segments: List[BuckeyeAlignmentSegment] = []
     for spk in tqdm(buckeye.corpus(str(root), load_wavs=True), desc="speakers"):
         spk_id = spk.name
         log.info(f"Speaker {spk_id} ({spk.sex}, {spk.age})")
@@ -128,10 +126,8 @@ def process_corpus(
             for (t0, t1), txt, ph, ph_t, seg_stub in tqdm(
                 seg_list, desc=f"{spk_id}:{tr.name}", leave=False
             ):
-                # wav_path = out_dir / "audio" / f"{seg_stub}.wav"
-                # if extract_wav_from_track(tr, t0, t1, wav_path, sr):
                 all_segments.append(
-                    AlignmentSegment(
+                    BuckeyeAlignmentSegment(
                         segment_id=seg_stub,
                         speaker_id=spk_id,
                         track_id=tr_idx,
@@ -148,9 +144,9 @@ def process_corpus(
 
 
 def speaker_disjoint_splits(
-    segments: List[AlignmentSegment], ratio: Dict[str, float]
-) -> Dict[str, List[AlignmentSegment]]:
-    spk2segs: Dict[str, List[AlignmentSegment]] = {}
+    segments: List[BuckeyeAlignmentSegment], ratio: Dict[str, float]
+) -> Dict[str, List[BuckeyeAlignmentSegment]]:
+    spk2segs: Dict[str, List[BuckeyeAlignmentSegment]] = {}
     for s in segments:
         spk2segs.setdefault(s.speaker_id, []).append(s)
     spks = np.array(sorted(spk2segs.keys()))
@@ -172,7 +168,9 @@ def speaker_disjoint_splits(
     }
 
 
-def save_metadata(out_dir: Path, name: str, segs: List[AlignmentSegment]) -> None:
+def save_metadata(
+    out_dir: Path, name: str, segs: List[BuckeyeAlignmentSegment]
+) -> None:
     with open(out_dir / f"{name}_metadata.json", "w") as f:
         json.dump(
             [asdict(s) | {"duration": s.end_time - s.start_time} for s in segs],
@@ -198,9 +196,6 @@ def save_metadata(out_dir: Path, name: str, segs: List[AlignmentSegment]) -> Non
     log.info(f"Saved {name}: {len(segs)} segments")
 
 
-# ----------------------------- cli ----------------------------- #
-
-
 def main():
     p = argparse.ArgumentParser(description="Prepare Buckeye corpus for CTC alignment")
     p.add_argument(
@@ -217,7 +212,7 @@ def main():
         help="Pause ≥ this (s) defines a boundary",
     )
     p.add_argument("--min_segment", type=float, default=0.5)
-    p.add_argument("--max_segment", type=float, default=30.0)
+    p.add_argument("--max_segment", type=float, default=20.0)
     args = p.parse_args()
 
     out = args.output_dir

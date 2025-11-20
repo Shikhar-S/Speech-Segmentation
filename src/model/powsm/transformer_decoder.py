@@ -95,7 +95,7 @@ class BaseTransformerDecoder(
 
         # For gradient checkpointing, start from 1 (not 0)
         self.gradient_checkpoint_layers = gradient_checkpoint_layers
-        logging.info(f"Gradient checkpoint layers: {self.gradient_checkpoint_layers}")
+        # logging.info(f"Gradient checkpoint layers: {self.gradient_checkpoint_layers}")
 
     def forward(
         self,

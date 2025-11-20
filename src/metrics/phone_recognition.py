@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from typing import Dict, Tuple, Any
 
 import panphon.distance
-import logging
+from src.utils import RankedLogger
 
-logger = logging.getLogger(__name__)
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 @dataclass
@@ -208,7 +208,7 @@ if __name__ == "__main__":
 
     # Load predictions
     test_data = _load_powsm_predictions(args.prediction_file)
-    logging.info(f"Loaded predictions for {len(test_data)} utterances.")
+    log.info(f"Loaded predictions for {len(test_data)} utterances.")
 
     # Evaluate
     evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)

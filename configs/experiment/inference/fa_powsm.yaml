@@ -1,0 +1,41 @@
+# @package _global_
+
+# This config executes inference with powsm on buckeye dataset:
+# python src/main.py experiment=inference/buckeye_powsmpr
+
+defaults:
+  - override /data: buckeye
+  - override /logger: csv
+  - override /model: null
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+task_name: "inf_fa_powsm"
+tags: ["inf_fa_powsm"]
+
+seed: 42
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  model_tokenizer:
+    _target_: src.model.powsm.token_id_converter.build_powsm_tokenizer
+    work_dir: ${paths.exp_dir}/powsm_cache
+    hf_repo: espnet/powsm
+
+inference:
+  num_workers: 25 # for 97GB
+  out_file: ${paths.output_dir}/fa_powsm_out.json
+  passthrough_keys:
+    - "utt_id"
+    - "text"
+    - "ground_truth_timestamps"
+  inference_runner:
+    _target_: src.recipe.forced_alignment.inference.ForcedAlignmentInference
+    model:
+      _target_: src.model.powsm.powsm_model.build_powsm
+      work_dir: ${paths.exp_dir}/powsm_cache
+      hf_repo: espnet/powsm

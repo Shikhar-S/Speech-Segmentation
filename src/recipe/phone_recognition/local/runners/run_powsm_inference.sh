@@ -24,8 +24,12 @@ source setup_uv.sh .venv_dai
 # for w2v2ph
 export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
-python src/main.py experiment=inference/powsmpreval "$@"
 
+# Phone recognition
+# python src/main.py experiment=inference/powsmpreval "$@"
+
+# Forced Alignment
+python src/main.py experiment=inference/fa_powsm "$@" # inference/fa_w2v2ph
 
 # Dataset options:
 #  --gpus-per-node=2 inference.num_workers=38 experiment=inference/vaani_powsmpr

@@ -4,8 +4,10 @@
 # all configs can be overridden from command line, e.g. `python src/main.py debug=default)
 defaults:
   - _self_
-  - data: ??? # must be defined in experiment config
-  - model: powsm_geolocation
+  - model: ??? # must be defined in experiment config
+  - model/net: ???
+  - data: ???
+  - optional data/tokenizer: null # some exp do not need a tokenizer
   - trainer: default
   - paths: default
   - logger: csv

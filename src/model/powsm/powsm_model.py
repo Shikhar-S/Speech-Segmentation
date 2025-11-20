@@ -1,8 +1,6 @@
 from pathlib import Path
-import token
 from huggingface_hub import snapshot_download
 
-import logging
 from typing import Dict, List, Optional, Tuple, Union, Any
 import yaml
 import torch
@@ -22,7 +20,9 @@ from src.model.powsm.frontend import DefaultFrontend, GlobalMVN
 from src.model.powsm.specaug import SpecAug
 from src.model.powsm.e_branchformer import EBranchformerEncoder
 from src.model.powsm.transformer_decoder import TransformerDecoder
-from src.model.powsm.sentencepiece_tokenizer import SentencepiecesTokenizer
+from src.utils import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=False)
 
 
 class PowsmModel(torch.nn.Module):
@@ -94,7 +94,7 @@ class PowsmModel(torch.nn.Module):
             ), "decoder should not be None when attention is used"
         else:
             decoder = None
-            logging.warning("Set decoder to none as ctc_weight==1.0")
+            log.warning("Set decoder to none as ctc_weight==1.0")
 
         self.decoder = decoder
 
@@ -124,19 +124,12 @@ class PowsmModel(torch.nn.Module):
             ), "frontend should be None when using full Whisper model"
 
         # Fixed!
-        self.frames2points_ratio = None
         self.sampling_rate = self.frontend.fs if self.frontend is not None else 16_000
 
     @torch.no_grad()
-    def frames2points(self) -> int:
+    def points_by_frames(self) -> int:
         """Get the ratio of input points to output frames."""
-        if self.frames2points_ratio is None:
-            dummy_input = torch.randn(1, 16000)
-            dummy_length = torch.tensor([16000])
-            with torch.no_grad():
-                feats, feat_lengths = self.encode(dummy_input, dummy_length)
-                self.frames2points_ratio = 16000 // feat_lengths.item()
-        return self.frames2points_ratio
+        return 640
 
     def forward(
         self,
@@ -277,7 +270,8 @@ class PowsmModel(torch.nn.Module):
         self, speech: torch.Tensor, speech_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Frontend + Encoder. Note that this method is used by s2t_inference.py"""
-        with autocast(False):
+        # with autocast(False):
+        with torch.amp.autocast("cuda", enabled=False):
             # 1. Extract feats
             feats, feats_lengths = self._extract_feats(speech, speech_lengths)
 
@@ -450,15 +444,16 @@ class PowsmModel(torch.nn.Module):
         return logits, encoder_out_lens
 
     @torch.no_grad()
-    def forced_align(self, speech, speech_lengths, text, text_lengths):
+    def forced_align(self, speech, speech_lengths, text, text_lengths, utt_id=None):
         """Calculate frame-wise alignment from CTC probabilities.
-        Only an inference function that uses the ctc posteriors.
+        Only works with batch size 1.
 
         Args:
             speech: (Batch, Length, ...)
             speech_lengths: (Batch,)
             text: (Batch, Length)
             text_lengths: (Batch,)
+            utt_id: Optional[str], utterance identifier for logging
         Returns:
             Tuple(tensor, tensor):
                 - Label for each time step in the alignment path computed
@@ -489,14 +484,23 @@ class PowsmModel(torch.nn.Module):
         text = torch.where(text == -1, self.ignore_id, text)
         text = text[:, : text_lengths.max()]  # for data-parallel
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
-
         log_probs = self.ctc.log_softmax(encoder_out)  # (B, Tmax, odim)
         assert log_probs.size(0) == 1, "Forced alignment needs batch size 1"
         assert not (text == self.blank_id).any(), "Target has blank tokens."
+        if text_lengths.item() > encoder_out_lens.item():
+            log.error(
+                f"Target length {text_lengths.item()} is longer than "
+                f"encoder output length {encoder_out_lens.item()}."
+                f"Utterance id is :{utt_id}"
+            )
         align_label, align_prob = torchaudio.functional.forced_align(
             log_probs, text, encoder_out_lens, text_lengths, blank=self.blank_id
         )
         return align_label, align_prob
+
+    def get_blank_id(self) -> int:
+        """Get blank id for CTC"""
+        return self.blank_id
 
 
 def build_powsm_from_files(
@@ -519,7 +523,7 @@ def build_powsm_from_files(
         raise RuntimeError("token_list must be str or list")
 
     vocab_size = len(token_list)
-    logging.info(f"Vocabulary size: {vocab_size}")
+    log.info(f"Vocabulary size: {vocab_size}")
 
     # 1. frontend
     assert args.input_size is None, "Set frontend in the powsm config."
@@ -569,7 +573,7 @@ def build_powsm_from_files(
     # 8. Load weights
     state_dict = torch.load(model_file, map_location="cpu", weights_only=False)
     load_info = model.load_state_dict(state_dict, strict=True)
-    logging.info(f"Model loaded: {model_file} with info: {load_info}")
+    log.info(f"Model loaded: {model_file} with info: {load_info}")
     model.training_args = args
     return model
 
@@ -607,7 +611,7 @@ def build_powsm(
             repo_id=hf_repo,
             force_download=force,
             local_dir=work_dir,
-            local_dir_use_symlinks=False,  # materialize files under work_dir
+            # local_dir_use_symlinks=False,  # materialize files under work_dir
         )
 
     root = Path(work_dir)
