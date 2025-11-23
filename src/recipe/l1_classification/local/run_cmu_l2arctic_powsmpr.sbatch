@@ -6,7 +6,7 @@
 #       [additional hydra overrides...]
 #
 # Customize SBATCH directives below as needed for the Babel partition/account you use.
-# The defaults target a single GPU job in the "general" partition.
+# The defaults target a 4-GPU job in the "general" partition.
 
 #SBATCH --job-name=cmu_l1_inf
 #SBATCH --partition=general
@@ -14,7 +14,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
 #SBATCH --output=/home/%u/slurm_logs/cmu_l2arctic_powsmpr_%j.out
@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-LOG_DIR=/home/"$USER"/slurm_logs
+LOG_DIR="/home/$USER/slurm_logs"
 mkdir -p "$LOG_DIR"
 
 # -----------------------------
@@ -37,15 +37,14 @@ export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 # -----------------------------
 # Project & Python environment
 # -----------------------------
-PROJECT_ROOT=${PROJECT_ROOT:-/data/user_data/$USER/PhoneBench}
-VENV_DIR=${VENV_DIR:-.venv_babel}
+PROJECT_ROOT=${PROJECT_ROOT:-/home/$USER/PhoneBench}
+VENV_DIR=${VENV_DIR:-.venv}
 
 if [ ! -d "$PROJECT_ROOT" ]; then
   echo "Project root not found: $PROJECT_ROOT" >&2
   exit 1
 fi
 
-source ~/.bashrc
 cd "$PROJECT_ROOT"
 
 if [ ! -d "$VENV_DIR" ]; then
@@ -57,7 +56,7 @@ else
 fi
 
 export PYTHONUNBUFFERED=1
-export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+export PYTHONPATH="$PROJECT_ROOT"
 
 # -----------------------------
 # Run inference

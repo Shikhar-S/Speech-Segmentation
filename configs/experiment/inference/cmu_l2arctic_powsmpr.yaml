@@ -19,7 +19,7 @@ seed: 42
 distributed_predict: True
 
 inference:
-  num_workers: 1 # number of parallel workers for distributed inference
+  num_workers: 4 # number of parallel workers for distributed inference
   passthrough_keys: ["l1_label", "metadata_idx", "speaker_id", "split", "utt_id"]
   out_file: ${paths.output_dir}/cmu_l2arctic_powsm_out.json
   # an object (or fn that creates such an object) with __call__ method to transcribe single speech
