@@ -1,5 +1,6 @@
 # @package _global_
 
+# Special config to reproduce results from powsm paper.
 # This config executes phoneme recognition inference 
 # with powsm on any eval dataset from the powsm paper:
 # python src/main.py experiment=inference/powsmpreval [data.dataset_name=<dataset_name>]

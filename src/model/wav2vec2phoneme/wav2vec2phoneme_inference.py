@@ -27,10 +27,14 @@ class Wav2Vec2PhonemeInference:
         logits, _ = self.inference_model.ctc_logits(speech, speech_length)
         predicted_ids = torch.argmax(logits, dim=-1)
         transcription = self.tokenizer.ids2tokens(predicted_ids[0].tolist())
-        transcription = (
-            "".join(transcription)
-            .replace(self.tokenizer.unk_symbol, "")
-            .replace(self.tokenizer.pad_symbol, "")
-        )
+        transcription = "".join(transcription)
+        processed_transcription = transcription.replace(
+            self.tokenizer.unk_symbol, ""
+        ).replace(self.tokenizer.pad_symbol, "")
         print("Transcription:", transcription)
-        return {"processed_transcript": transcription}
+        return [
+            {
+                "processed_transcript": processed_transcription,
+                "predicted_transcript": transcription,
+            }
+        ]

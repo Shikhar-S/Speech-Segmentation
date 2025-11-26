@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH -A bbjs-dtai-gh
+#SBATCH -J bulk_inference
 #SBATCH -p ghx4
-#SBATCH -J train
 #SBATCH -N 1
 #SBATCH --gpus-per-node=1
 #SBATCH -c 72
 #SBATCH --mem=120G
 #SBATCH -t 48:00:00
-#SBATCH -o exp/inf_%x/%j.out
-#SBATCH -e exp/inf_%x/%j.out
+#SBATCH -o exp/inference_logs/%j.out
+#SBATCH -e exp/inference_logs/%j.out
 
 # run with
 # sbatch -J inf scripts/inference.sh 
@@ -16,7 +16,7 @@
 
 # === Directory Setup ===
 cd /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench
-mkdir -p "exp/inf_${SLURM_JOB_NAME}"
+mkdir -p "exp/inference_logs"
 # === Environment setup ===
 source ~/.bashrc
 conda deactivate
@@ -26,9 +26,9 @@ export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependenc
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
 ###########################
 
-python src/main.py experiment=inference/pr_powsm "$@"
+python src/main.py experiment=inference/buckeye_pr_powsm "$@"
 
 # W2v2ph model options:
-# experiment=inference/pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
-# experiment=inference/pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
-# experiment=inference/pr_w2v2ph inference.inference_runner.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns

@@ -8,11 +8,10 @@ Usage:
         --buckeye_root /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye
 """
 
-from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Tuple, Dict
-import argparse, json, logging, numpy as np, pandas as pd, torch, torchaudio
+import argparse, json, logging, numpy as np, pandas as pd
 import buckeye
 from tqdm import tqdm
 

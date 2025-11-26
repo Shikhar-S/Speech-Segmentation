@@ -1,32 +1,33 @@
 # @package _global_
 
 # This config executes inference with powsm on buckeye dataset:
-# python src/main.py experiment=inference/buckeye_powsmpr
+# python src/main.py experiment=inference/buckeye_pr_powsm
 
 defaults:
   - override /data: buckeye
   - override /logger: csv
+  - model: powsm_pr # do not matter, only to satisfy requirement
+  - model/net: powsm # do not matter, only to satisfy requirement
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-task_name: "inf_buckeye_powsm"
-tags: ["inf_buckeye_powsm"]
+task_name: "inf_buckeye_pr_powsm"
+tags: ["inf_buckeye_pr_powsm"]
 
 seed: 42
 
 distributed_predict: True
 
 data:
-  model_tokenizer:
-    _target_: src.model.powsm.token_id_converter.build_powsm_tokenizer
-    work_dir: ${paths.exp_dir}/powsm_cache
-    hf_repo: espnet/powsm
+  tokenizer:
+    _target_: src.core.ipa_utils.IPATokenizer
+  mask_probability: 0.0
 
 inference:
-  num_workers: 1 # number of parallel workers for distributed inference
-  out_file: ${paths.output_dir}/buckeye_powsm_out.json
-  # an object (or fn that creates such an object) with __call__ method to transcribe single speech
+  num_workers: 15 # number of parallel workers for distributed inference
+  passthrough_keys: ["target_text","utt_id", "split"] # keys from dataset to be passed to output
+  out_file: ${paths.output_dir}/buckeye_powsm_${data.mask_probability}.json
   inference_runner:
     _target_: src.model.powsm.powsm_inference.build_powsm_inference
     work_dir: ${paths.exp_dir}/powsm_cache
@@ -47,5 +48,5 @@ inference:
   # additional args to pass to the __call__ method of inference_runner, but can be overridden by keys from dataset
   inference_call_args: 
     text_prev: <na>
-    lang_sym: <unk>
+    lang_sym: <eng>
     task_sym: <pr>

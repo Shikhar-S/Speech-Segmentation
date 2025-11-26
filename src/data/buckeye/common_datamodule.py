@@ -1,16 +1,15 @@
-"""
-Buckeye Dataset and DataLoader for forced alignment
+"""Buckeye Dataset and DataLoader for forced alignment
 srun -A bbjs-dtai-gh --gpus=1 \
     --cpus-per-task=8 \
     --mem=32G --time=02:00:00 \
     --pty /bin/bash -c "cd /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench \
       && source setup_uv.sh .venv_dai \
-    && python -m src.data.buckeye.forced_alignment \
+    && python -m src.data.buckeye.common_datamodule \
     --buckeye_root /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye \
     --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache \
     --batch_size 32 --num_workers 4"
 Usage:
-    python -m src.data.buckeye.forced_alignment \
+    python -m src.data.buckeye.common_datamodule \
         --buckeye_root /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye \
         --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache \
         --batch_size 32 --num_workers 4
@@ -21,70 +20,16 @@ import json
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 import torchaudio
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import logging
 import buckeye
 import lightning as L
+from src.core.ipa_utils import ARPABET_TO_IPA
 
 logger = logging.getLogger(__name__)
-
-IPA_TO_ARPABET = {
-    "aʊ": "AW",
-    "aɪ": "AY",
-    "eɪ": "EY",
-    "oʊ": "OW",
-    "ɔɪ": "OY",  # until this points not included in powsm vocab
-    "t͡ʃ": "CH",
-    "d͡ʒ": "JH",
-    "ɑ": "AA",
-    "æ": "AE",
-    "ʌ": "AH",  # unstressed “uh”; schwa is AX
-    "ɔ": "AO",
-    "ə˞": "ER",
-    "b": "B",
-    "d": "D",
-    "ð": "DH",
-    "ɛ": "EH",
-    "ɚ": "AXR",  # r-colored schwa
-    "ɝ": "ER",  # stressed r-colored vowel
-    "f": "F",
-    "ɡ": "G",
-    "h": "HH",
-    "ɪ": "IH",
-    "i": "IY",
-    "k": "K",
-    "l": "L",
-    "m": "M",
-    "n": "N",
-    "ŋ": "NG",
-    "p": "P",
-    "ɹ": "R",
-    "s": "S",
-    "ʃ": "SH",
-    "t": "T",
-    "θ": "TH",
-    "ʊ": "UH",
-    "u": "UW",
-    "v": "V",
-    "w": "W",
-    "j": "Y",
-    "z": "Z",
-    "ʒ": "ZH",
-    "ə": "AX",
-    "ɨ": "IX",
-    "l̩": "EL",  # syllabic consonants
-    "m̩": "EM",
-    "n̩": "EN",
-    "ŋ̩": "NX",
-    "ɾ̃": "NX",
-    "ɾ": "DX",
-    "ʔ": "Q",
-    "ɚ": "ER",
-    "ɝ": "ER",
-}
-ARPABET_TO_IPA = {v.lower(): k for k, v in IPA_TO_ARPABET.items()}
 
 
 def extract_buckeye_clip(
@@ -109,30 +54,7 @@ def extract_buckeye_clip(
         return False
 
 
-class IPATokenizer:
-    """Tokenizer mapping IPA phones to indices."""
-
-    def __init__(self):
-        self.blank_id = 0
-        self.blank_token = "<blank>"
-        self.unk_token = "<unk>"
-        VOCAB = [self.blank_token] + sorted(IPA_TO_ARPABET.keys()) + [self.unk_token]
-        self.phone2id = {phone: idx for idx, phone in enumerate(VOCAB)}
-        self.id2phone = {idx: phone for phone, idx in self.phone2id.items()}
-        self.unk_id = self.phone2id[self.unk_token]
-
-    def tokens2ids(self, tokens):
-        return [self.phone2id.get(token, self.unk_id) for token in tokens]
-
-    def ids2tokens(self, ids):
-        return [self.id2phone.get(idx, self.unk_token) for idx in ids]
-
-    @staticmethod
-    def vocab_size():
-        return len(IPA_TO_ARPABET) + 2
-
-
-class BuckeyeAlignmentDataset(Dataset):
+class BuckeyeDataset(Dataset):
     """
     PyTorch dataset for Buckeye corpus alignment evaluation.
     """
@@ -144,6 +66,8 @@ class BuckeyeAlignmentDataset(Dataset):
         cache_path: str,
         tokenizer,
         target_sr: int = 16000,
+        mask_probability: float = 0.0,
+        split: str = "train",
         max_speech_length: Optional[float] = None,  # in seconds
     ):
         """
@@ -153,12 +77,16 @@ class BuckeyeAlignmentDataset(Dataset):
             cache_path: Path to cache directory for storing extracted audio clips
             tokenizer: Tokenizer for converting phonemes to indices, dependent on model
             target_sr: Target sample rate
+            mask_probability: Percentage of phones to mask with noise
             max_speech_length: Maximum speech length in seconds (for truncation)
+            split: Dataset split (e.g., "train", "test", "validation")
         """
         self.buckeye_root = buckeye_root
         self.cache_path = cache_path
         self.target_sr = target_sr
         self.max_speech_length = max_speech_length
+        self.split = split
+        self.mask_probability = mask_probability
 
         # Load metadata
         with open(metadata_path, "r") as f:
@@ -232,13 +160,18 @@ class BuckeyeAlignmentDataset(Dataset):
                 waveform = waveform[:, :max_samples]
 
         phone_ipa, phone_pointstamps = [], []
+        atleast_one = False
         for phone, (start, end) in zip(item["phones"], item["phone_timestamps"]):
-            # if (phone.lower() not in ARPABET_TO_IPA) or phone in (
-            #     "IVER",
-            #     "VOCNOISE",
-            #     "{B_TRANS}",
-            # ):
-            #     continue
+            if np.random.rand() < self.mask_probability and atleast_one:
+                # Replace the segment with noise
+                waveform = waveform.clone()
+                waveform[:, int(start * self.target_sr) : int(end * self.target_sr)] = (
+                    torch.randn(
+                        1, int(end * self.target_sr) - int(start * self.target_sr)
+                    )
+                )
+                masked_duration += end - start
+            atleast_one = True
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))
             phone_pointstamps.append(
                 (int(start * self.target_sr), int(end * self.target_sr))
@@ -259,6 +192,7 @@ class BuckeyeAlignmentDataset(Dataset):
             "utt_id": item["segment_id"],
             "duration": item["duration"],
             "speaker_id": item["speaker_id"],
+            "split": self.split,
         }
 
 
@@ -316,10 +250,11 @@ def collate_fn(batch):
         "target_end": target_end,
         "ground_truth_timestamps": [item["phone_timestamps"] for item in batch],
         "utt_id": [item["utt_id"] for item in batch],
+        "split": [item.get("split", "unknown") for item in batch],
     }
 
 
-class BuckeyeAlignment(L.LightningDataModule):
+class BuckeyeDataModule(L.LightningDataModule):
     def __init__(
         self,
         buckeye_root: str,
@@ -329,6 +264,7 @@ class BuckeyeAlignment(L.LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         target_sr: int = 16000,
+        mask_probability: float = 0.0,
         max_speech_length: Optional[float] = None,
     ):
         super().__init__()
@@ -342,32 +278,39 @@ class BuckeyeAlignment(L.LightningDataModule):
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.target_sr = target_sr
+        self.mask_probability = mask_probability
         self.max_speech_length = max_speech_length
 
     def setup(self, stage: Optional[str] = None):
-        self.train_dataset = BuckeyeAlignmentDataset(
+        self.train_dataset = BuckeyeDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.train_metadata,
             cache_path=self.local_cache_path,
             tokenizer=self.tokenizer,
             target_sr=self.target_sr,
+            mask_probability=self.mask_probability,
             max_speech_length=self.max_speech_length,
+            split="train",
         )
-        self.val_dataset = BuckeyeAlignmentDataset(
+        self.val_dataset = BuckeyeDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.val_metadata,
             cache_path=self.local_cache_path,
             tokenizer=self.tokenizer,
             target_sr=self.target_sr,
+            mask_probability=self.mask_probability,
             max_speech_length=self.max_speech_length,
+            split="validation",
         )
-        self.test_dataset = BuckeyeAlignmentDataset(
+        self.test_dataset = BuckeyeDataset(
             buckeye_root=self.buckeye_root,
             metadata_path=self.test_metadata,
             tokenizer=self.tokenizer,
             cache_path=self.local_cache_path,
             target_sr=self.target_sr,
+            mask_probability=self.mask_probability,
             max_speech_length=self.max_speech_length,
+            split="test",
         )
 
     def train_dataloader(self):
@@ -490,7 +433,7 @@ def _naive_baseline_equal_segmentation(test_loader: DataLoader):
 
 if __name__ == "__main__":
     """Example usage"""
-    from src.data.buckeye.forced_alignment import BuckeyeAlignment
+    from src.data.buckeye.common_datamodule import BuckeyeDataModule
     from src.model.powsm.token_id_converter import build_powsm_tokenizer
     from src.model.wav2vec2phoneme.builders import build_wav2vec2phoneme_tokenizer
 
@@ -525,7 +468,7 @@ if __name__ == "__main__":
         )
 
     # Create dataloaders
-    data_module = BuckeyeAlignment(
+    data_module = BuckeyeDataModule(
         buckeye_root=args.buckeye_root,
         local_cache_path=args.data_dir,
         tokenizer=tokenizer,

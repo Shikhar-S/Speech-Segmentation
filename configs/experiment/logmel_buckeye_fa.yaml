@@ -35,7 +35,7 @@ model:
     hop_length: 160
     hidden_sizes: []
     output_vocabsz:
-      _target_: src.data.buckeye.forced_alignment.IPATokenizer.vocab_size
+      _target_: src.core.ipa_utils.IPATokenizer.vocab_size
 
 data:
   batch_size: 24

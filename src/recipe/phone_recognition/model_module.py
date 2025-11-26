@@ -160,7 +160,7 @@ if __name__ == "__main__":
     from functools import partial
     from pathlib import Path
 
-    from src.data.buckeye.forced_alignment import BuckeyeAlignment
+    from src.data.buckeye.common_datamodule import BuckeyeDataModule
     from src.model.powsm.powsm_inference import build_powsm_inference
     from src.model.powsm.token_id_converter import build_powsm_tokenizer
 
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     )
     tokenizer = build_powsm_tokenizer(work_dir=WORK_DIR, hf_repo="espnet/powsm")
 
-    data_module = BuckeyeAlignment(
+    data_module = BuckeyeDataModule(
         buckeye_root=BUCKEYE_ROOT,
         train_metadata=str(Path(DATA_DIR) / "train_metadata.json"),
         val_metadata=str(Path(DATA_DIR) / "val_metadata.json"),

@@ -2,14 +2,14 @@
 
 Usage:
     python -m src.metrics.phone_recognition \
-        --prediction_file /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_evals/runs/20251115_193559/l2arctic_perceived_powsm_out.json \
-        --workers 4
+        --prediction_file /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_evals/runs/20251115_193559/l2arctic_perceived_powsm_out.json
 """
 
 import string
 import unicodedata
 from dataclasses import dataclass
 from typing import Dict, Tuple, Any
+from tqdm import tqdm
 
 import panphon.distance
 from src.utils import RankedLogger
@@ -123,7 +123,9 @@ class PhoneRecognitionEvaluator:
         phones_sum = 0
         n_utts = 0
 
-        for utt_id, sample in test_data.items():
+        for utt_id, sample in tqdm(
+            test_data.items(), total=len(test_data), desc="Evaluating"
+        ):
             hyp = sample.get("prediction", "")
             ref = sample.get("transcription", "")
 
@@ -192,10 +194,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--prediction_file", required=True)
-    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
-    def _load_powsm_predictions(pred_file: str) -> Dict[str, Dict[str, str]]:
+    def _load_predictions(pred_file: str) -> Dict[str, Dict[str, str]]:
         with open(pred_file, "r") as f:
             data = json.load(f)
         return {
@@ -207,7 +208,7 @@ if __name__ == "__main__":
         }
 
     # Load predictions
-    test_data = _load_powsm_predictions(args.prediction_file)
+    test_data = _load_predictions(args.prediction_file)
     log.info(f"Loaded predictions for {len(test_data)} utterances.")
 
     # Evaluate

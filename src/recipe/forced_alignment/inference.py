@@ -168,10 +168,10 @@ if __name__ == "__main__":
     # speech_length = torch.tensor(16000 * 5)
     # target = torch.randint(0, 100, (50,))  # random tokenized target
     # target_length = torch.tensor(50)
-    from src.data.buckeye.forced_alignment import BuckeyeAlignment
+    from src.data.buckeye.common_datamodule import BuckeyeDataModule
 
     # Create dataloaders
-    data_module = BuckeyeAlignment(
+    data_module = BuckeyeDataModule(
         buckeye_root="/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye",
         local_cache_path="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache",
         model_tokenizer=model_tokenizer,

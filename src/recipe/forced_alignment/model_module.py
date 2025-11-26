@@ -275,7 +275,7 @@ class ForcedAlignmentModel(LightningModule):
 if __name__ == "__main__":
     from pathlib import Path
     from src.model.powsm.powsm_model import build_powsm
-    from src.data.buckeye.forced_alignment import BuckeyeAlignment
+    from src.data.buckeye.common_datamodule import BuckeyeDataModule
     from src.model.powsm.token_id_converter import build_powsm_tokenizer
     from src.model.wav2vec2phoneme.builders import (
         build_wav2vec2phoneme_model,
@@ -319,7 +319,7 @@ if __name__ == "__main__":
     )
     # print(model.net.points_by_frames(), "points by frame ratio")
 
-    data_module = BuckeyeAlignment(
+    data_module = BuckeyeDataModule(
         buckeye_root="/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye",
         local_cache_path="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache",
         model_tokenizer=tokenizer,

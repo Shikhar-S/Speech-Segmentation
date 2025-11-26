@@ -1,5 +1,6 @@
 """Lightning style Geolocation Model.
 
+# TODO(shikhar): Fix metric updates
 This module works with both powsm and wav2vec2phoneme encoders.
 Run main:
     python -m src.recipe.geolocation.model_module

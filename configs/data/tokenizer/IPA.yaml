@@ -1,1 +1,1 @@
-_target_: src.data.buckeye.forced_alignment.IPATokenizer
+_target_: src.core.ipa_utils.IPATokenizer

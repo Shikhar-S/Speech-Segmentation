@@ -41,6 +41,7 @@ class FrontendModel(torch.nn.Module):
     ):
         super().__init__()
         # Use the requested config for the *default* frontend
+        self.sampling_rate = fs
         self.frontend = DefaultFrontend(
             fs=fs,
             n_fft=n_fft,
