@@ -12,8 +12,8 @@ from src.main import run_task
 def test_train_eval(
     tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig
 ) -> None:
-    """Tests training and evaluation by training for 1 epoch with `train.py` then evaluating with
-    `eval.py`.
+    """Tests training and evaluation by training for 1 epoch with `src/main.py` then evaluating with
+    `src/main.py` using test=True and ckpt_path.
 
     :param tmp_path: The temporary logging path.
     :param cfg_train: A DictConfig containing a valid training configuration.

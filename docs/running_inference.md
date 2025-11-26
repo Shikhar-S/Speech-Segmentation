@@ -63,7 +63,7 @@ inference:
 Your datamodule must:
 - Extend `LightningDataModule`
 - Implement `predict_dataloader()` that returns a DataLoader
-- Return dataset items with a `speech` key (waveform tensor) and `speech_length` key
+- Return dataset items with a `speech` key (waveform tensor)
 
 **Example structure:**
 
@@ -75,8 +75,9 @@ class MyDataset(Dataset):
     def __getitem__(self, idx):
         # Load audio and return dict with required keys
         return {
-            "speech": waveform,  # torch.Tensor, shape: (T,)
-            "speech_length": len(waveform),  # int
+            "speech": waveform,  # torch.Tensor, shape: (T,) - REQUIRED
+            # Optional: additional keys that can override inference_call_args
+            # (e.g., text_prev, lang_sym, task_sym for PoWSM)
             # ... other keys you want to passthrough
         }
 
@@ -106,10 +107,10 @@ num_workers: 4
 
 ## How It Works
 
-1. **Config Loading**: `main.py` loads your experiment config via Hydra
+1. **Config Loading**: `src/main.py` loads your experiment config via Hydra
 2. **Task Instantiation**: `Task` class (in `src/core/task.py`) instantiates the datamodule and inference runner
-3. **Distributed Inference**: `run_distributed_inference()` splits the dataset across workers
-4. **Processing**: Each worker loads the model and processes its chunk of data
+3. **Distributed Inference**: `run_distributed_inference()` (in `src/core/distributed_inference.py`) splits the dataset across workers
+4. **Processing**: Each worker loads the model and processes its chunk of data. Dataset items are unpacked and passed to the inference object's `__call__` method
 5. **Output**: Results are saved as JSON with predictions and passthrough keys
 
 ## Example: Running PoWSM Inference

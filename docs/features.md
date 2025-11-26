@@ -173,10 +173,11 @@ python src/main.py ckpt_path="/path/to/ckpt/name.ckpt"
 <summary><b>Evaluate checkpoint on test dataset</b></summary>
 
 ```bash
-python eval.py ckpt_path="/path/to/ckpt/name.ckpt"
+python src/main.py test=True train=False ckpt_path="/path/to/ckpt/name.ckpt" experiment=your_experiment
 ```
 
 > **Note**: Checkpoint can be either path or URL.
+> **Note**: You need to specify the experiment config that matches your training configuration.
 
 </details>
 

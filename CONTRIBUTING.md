@@ -23,8 +23,7 @@ The directory structure of this project looks like this:
 │   ├── paths                    <- Project paths configs
 │   ├── trainer                  <- Trainer configs
 │   │
-│   ├── eval.yaml             <- Main config for evaluation
-│   └── train.yaml            <- Main config for training
+│   └── main.yaml             <- Main config for training/testing/inference
 │
 ├── scripts                <- Shell scripts
 │
