@@ -23,7 +23,7 @@ def test_train_config(cfg_train: DictConfig) -> None:
 def test_eval_config(cfg_eval: DictConfig) -> None:
     """Tests the evaluation configuration provided by the `cfg_eval` pytest fixture.
 
-    :param cfg_train: A DictConfig containing a valid evaluation configuration.
+    :param cfg_eval: A DictConfig containing a valid evaluation configuration.
     """
     assert cfg_eval
     assert cfg_eval.data
