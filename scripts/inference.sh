@@ -32,3 +32,13 @@ python src/main.py experiment=inference/buckeye_pr_powsm "$@"
 # experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
 # experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
 # experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+
+# with masking
+# data.mask_probability=0.x
+# for mp in 0.2 0.4 0.6 0.8; do sbatch scripts/inference.sh data.mask_probability=$mp ; done
+
+# on buckeye
+# experiment=inference/timit_pr_powsm
+# experiment=inference/timit_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# experiment=inference/timit_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# experiment=inference/timit_pr_w2v2ph inference.inference_runner.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns

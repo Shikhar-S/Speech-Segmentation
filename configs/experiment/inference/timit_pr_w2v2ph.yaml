@@ -1,16 +1,16 @@
 # @package _global_
 
 # This config executes phoneme recognition inference with wav2vec2-phoneme
-# python src/main.py experiment=inference/buckeye_pr_w2v2ph
+# python src/main.py experiment=inference/timit_pr_w2v2ph
 
 defaults:
   - override /model: powsm_pr # do not matter, only to satisfy requirement
   - override /model/net: powsm # do not matter, only to satisfy requirement
   - override /logger: csv
-  - override /data: buckeye
-
-task_name: "inf_buckeye_pr_w2v2ph"
-tags: ["inf_buckeye_pr_w2v2ph"]
+  - override /data: timit
+  
+task_name: "inf_timit_pr_w2v2ph"
+tags: ["inf_timit_pr_w2v2ph"]
 
 seed: 42
 
@@ -26,7 +26,7 @@ data:
 inference:
   num_workers: 15 # number of parallel workers for distributed inference
   passthrough_keys: ["target_text", "utt_id", "split", "masked_target_text"] # keys from dataset to be passed to output
-  out_file: ${paths.output_dir}/buckeye_w2v2ph_${data.mask_probability}.json
+  out_file: ${paths.output_dir}/timit_w2v2ph_${data.mask_probability}.json
   inference_runner:
     _target_: src.model.wav2vec2phoneme.builders.build_wav2vec2phoneme_inference
     hf_repo: ???

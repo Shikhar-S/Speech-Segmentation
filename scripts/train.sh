@@ -32,3 +32,10 @@ python src/main.py experiment=powsm_buckeye_fa logger.wandb.tags=['forced_alignm
 # experiment=w2v2ph_buckeye_fa +logger.wandb.name=lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
 # experiment=w2v2ph_buckeye_fa +logger.wandb.name=xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
 # experiment=w2v2ph_buckeye_fa +logger.wandb.name=ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+
+
+# timit options:
+# experiment=powsm_timit_fa + logger.wandb.name=timit.fa.powsm
+# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns

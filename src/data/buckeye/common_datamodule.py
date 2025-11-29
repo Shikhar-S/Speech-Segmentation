@@ -160,9 +160,13 @@ class BuckeyeDataset(Dataset):
                 waveform = waveform[:, :max_samples]
 
         phone_ipa, phone_pointstamps = [], []
-        atleast_one = False
+        masked_phone_ipa = []
+        atleast_one_unmasked = False
         for phone, (start, end) in zip(item["phones"], item["phone_timestamps"]):
-            if np.random.rand() < self.mask_probability and atleast_one:
+            should_mask = (
+                np.random.rand() < self.mask_probability and atleast_one_unmasked
+            )
+            if should_mask:
                 # Replace the segment with noise
                 waveform = waveform.clone()
                 waveform[:, int(start * self.target_sr) : int(end * self.target_sr)] = (
@@ -171,8 +175,9 @@ class BuckeyeDataset(Dataset):
                     )
                 )
                 masked_duration += end - start
-            atleast_one = True
+            atleast_one_unmasked = True
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))
+            masked_phone_ipa.append(phone_ipa[-1] if not should_mask else "[NOISE]")
             phone_pointstamps.append(
                 (int(start * self.target_sr), int(end * self.target_sr))
             )
@@ -188,6 +193,7 @@ class BuckeyeDataset(Dataset):
             "phone_pointstamps": phone_pointstamps,
             "phone_timestamps": item["phone_timestamps"],
             "phones": phone_ipa,
+            "masked_phones": masked_phone_ipa,
             "text": item["text"],
             "utt_id": item["segment_id"],
             "duration": item["duration"],
@@ -245,6 +251,7 @@ def collate_fn(batch):
         "speech_length": speech_length,
         "target": phone_id,
         "target_text": [item["phones"] for item in batch],
+        "masked_target_text": [item["masked_phones"] for item in batch],
         "target_length": target_length,
         "target_start": target_start,
         "target_end": target_end,

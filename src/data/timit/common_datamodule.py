@@ -108,30 +108,34 @@ class TimitDataset(Dataset):
                 waveform = waveform[:, :max_samples]
 
         # Convert timestamps (sec) -> pointstamps (samples)
-        phone_pointstamps: List[Tuple[int, int]] = []
-        phone_ipa: List[str] = []
+        phone_pointstamps = []
+        phone_ipa = []
 
         # metadata stores phone_timestamps in seconds
+        masked_duration = 0.0
+        atleast_one_unmasked = False
+        masked_phone_ipa = []
         for phone, (start_sec, end_sec) in zip(
             item["phones"], item["phone_timestamps"]
         ):
             start_idx = int(start_sec * self.target_sr)
             end_idx = int(end_sec * self.target_sr)
-
+            should_mask = (
+                np.random.rand() < self.mask_probability and atleast_one_unmasked
+            )
+            if should_mask:
+                # Replace the segment with noise
+                waveform = waveform.clone()
+                waveform[
+                    :, int(start_sec * self.target_sr) : int(end_sec * self.target_sr)
+                ] = torch.randn(
+                    1, int(end_sec * self.target_sr) - int(start_sec * self.target_sr)
+                )
+                masked_duration += end_sec - start_sec
+            atleast_one_unmasked = True
             phone_pointstamps.append((start_idx, end_idx))
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))
-            print(phone, " --> ", phone_ipa[-1])
-
-        masked_duration = 0.0
-        atleast_one = False
-        if self.mask_probability > 0.0:
-            for start_idx, end_idx in phone_pointstamps:
-                if np.random.rand() < self.mask_probability and atleast_one:
-                    waveform = waveform.clone()
-                    seg_len = end_idx - start_idx
-                    waveform[:, start_idx:end_idx] = torch.randn(1, seg_len)
-                    masked_duration += seg_len / self.target_sr
-                atleast_one = True
+            masked_phone_ipa.append(phone_ipa[-1] if not should_mask else "[NOISE]")
 
         target = self.tokenizer.tokens2ids(phone_ipa)
         assert len(target) != 0, f"No valid phones for {segment_id}."
@@ -144,6 +148,7 @@ class TimitDataset(Dataset):
             "phone_pointstamps": phone_pointstamps,
             "phone_timestamps": item["phone_timestamps"],
             "phones": phone_ipa,
+            "masked_phones": masked_phone_ipa,
             "text": item["text"],
             "utt_id": segment_id,
             "duration": item.get("duration", item["end_time"] - item["start_time"]),
@@ -200,6 +205,7 @@ def collate_fn(batch):
         "speech_length": speech_length,
         "target": phone_id,
         "target_text": [item["phones"] for item in batch],
+        "masked_target_text": [item["masked_phones"] for item in batch],
         "target_length": target_length,
         "target_start": target_start,
         "target_end": target_end,
@@ -350,6 +356,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        mask_probability=0.3,
     )
     dm.setup()
 
