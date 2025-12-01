@@ -18,7 +18,7 @@ from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.nets.scorers.length_bonus import LengthBonus
 
 from src.utils import RankedLogger
-from src.model.powsm.sentencepiece_tokenizer import SentencepiecesTokenizer
+from src.model.sentencepieces_tokenizer import SentencepiecesTokenizer
 from src.model.powsm.token_id_converter import TokenIDConverter
 from src.model.powsm.utils import to_device
 from src.model.powsm.powsm_model import build_powsm

@@ -611,7 +611,6 @@ def build_powsm(
             repo_id=hf_repo,
             force_download=force,
             local_dir=work_dir,
-            # local_dir_use_symlinks=False,  # materialize files under work_dir
         )
 
     root = Path(work_dir)

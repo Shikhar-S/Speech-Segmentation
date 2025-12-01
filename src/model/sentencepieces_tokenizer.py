@@ -35,3 +35,15 @@ class SentencepiecesTokenizer(AbsTokenizer):
     def tokens2text(self, tokens: Iterable[str]) -> str:
         self._build_sentence_piece_processor()
         return self.sp.DecodePieces(list(tokens))
+
+    def ids2tokens(self, ids: Iterable[int]) -> List[str]:
+        self._build_sentence_piece_processor()
+        return self.sp.IdToPiece(list(ids))
+
+    def tokens2ids(self, tokens: Iterable[str]) -> List[int]:
+        self._build_sentence_piece_processor()
+        return self.sp.PieceToId(list(tokens))
+
+    def ids2text(self, ids: Iterable[int]) -> str:
+        self._build_sentence_piece_processor()
+        return self.sp.DecodeIds(list(ids))
