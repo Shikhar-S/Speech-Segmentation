@@ -29,13 +29,13 @@ export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espea
 python src/main.py experiment=powsm_buckeye_fa logger.wandb.tags=['forced_alignment'] "$@"
 
 # W2v2ph model options:
-# experiment=w2v2ph_buckeye_fa +logger.wandb.name=lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
-# experiment=w2v2ph_buckeye_fa +logger.wandb.name=xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
-# experiment=w2v2ph_buckeye_fa +logger.wandb.name=ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# experiment=w2v2ph_buckeye_fa +logger.wandb.name=lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# experiment=w2v2ph_buckeye_fa +logger.wandb.name=xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# experiment=w2v2ph_buckeye_fa +logger.wandb.name=ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns data.tokenizer.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
 
 
 # timit options:
-# experiment=powsm_timit_fa + logger.wandb.name=timit.fa.powsm
-# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
-# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
-# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# experiment=powsm_timit_fa +logger.wandb.name=timit.fa.powsm
+# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns data.tokenizer.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
