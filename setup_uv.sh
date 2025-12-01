@@ -2,6 +2,15 @@
 echo $1
 
 virtual_env_dir=${1:-".venv"}
+requirements_file=${2:-"requirements.txt"}
+
+# if requirements_file contains 'dai', set a variable
+if [[ "$requirements_file" == *"dai"* ]]; then
+    is_delta_ai=true
+else
+    is_delta_ai=false
+fi
+
 # Check pixi
 if ! command -v pixi >/dev/null 2>&1; then
     echo "pixi not found. Installing pixi..."
@@ -35,4 +44,21 @@ echo "Activating $virtual_env_dir..."
 . $virtual_env_dir/bin/activate
 
 
-uv pip install -r requirements.txt
+uv pip install -r $requirements_file
+
+# install icefall only if is_delta_ai is false
+# must be installed after the main requirements to 
+# avoid conflicts with espnet
+if [[ "$is_delta_ai" == false ]]; then
+    if [ ! -d "icefall" ]; then
+        echo "Installing icefall..."
+        git clone https://github.com/k2-fsa/icefall
+    fi
+    cd icefall
+    rm -rf .git
+    uv pip install -r requirements.txt
+    export PYTHONPATH=$(pwd):$PYTHONPATH
+    cd ..
+fi
+
+echo "Setup complete."
