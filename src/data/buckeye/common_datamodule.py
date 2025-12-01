@@ -174,7 +174,6 @@ class BuckeyeDataset(Dataset):
                         1, int(end * self.target_sr) - int(start * self.target_sr)
                     )
                 )
-                masked_duration += end - start
             atleast_one_unmasked = True
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))
             masked_phone_ipa.append(phone_ipa[-1] if not should_mask else "[NOISE]")

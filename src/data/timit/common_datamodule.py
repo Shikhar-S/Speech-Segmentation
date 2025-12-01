@@ -112,7 +112,6 @@ class TimitDataset(Dataset):
         phone_ipa = []
 
         # metadata stores phone_timestamps in seconds
-        masked_duration = 0.0
         atleast_one_unmasked = False
         masked_phone_ipa = []
         for phone, (start_sec, end_sec) in zip(
@@ -131,7 +130,6 @@ class TimitDataset(Dataset):
                 ] = torch.randn(
                     1, int(end_sec * self.target_sr) - int(start_sec * self.target_sr)
                 )
-                masked_duration += end_sec - start_sec
             atleast_one_unmasked = True
             phone_pointstamps.append((start_idx, end_idx))
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))

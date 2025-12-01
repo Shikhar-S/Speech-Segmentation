@@ -89,6 +89,7 @@ def run_distributed_inference_(
     if os.path.exists(out_file):
         log.error(f"Output file {out_file} already exists.")
     else:
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         open(out_file, "w").close()
 
     device = inference_config.get("device", "auto")

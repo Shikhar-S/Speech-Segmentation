@@ -26,7 +26,7 @@ data:
 
 inference:
   num_workers: 15 # number of parallel workers for distributed inference
-  passthrough_keys: ["target_text", "utt_id", "split", "masked_target_text"] # keys from dataset to be passed to output
+  passthrough_keys: ["phones", "utt_id", "split", "masked_phones"] # keys from dataset to be passed to output
   out_file: ${paths.output_dir}/timit_powsm_${data.mask_probability}.json
   inference_runner:
     _target_: src.model.powsm.powsm_inference.build_powsm_inference

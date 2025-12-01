@@ -25,8 +25,8 @@ data:
 
 inference:
   num_workers: 15 # number of parallel workers for distributed inference
-  passthrough_keys: ["target_text", "utt_id", "split", "masked_target_text"] # keys from dataset to be passed to output
-  out_file: ${paths.output_dir}/timit_w2v2ph_${data.mask_probability}.json
+  passthrough_keys: ["phones", "utt_id", "split", "masked_phones"] # keys from dataset to be passed to output
+  out_file: ${paths.output_dir}/timit_${inference.inference_runner.hf_repo}${data.mask_probability}.json
   inference_runner:
     _target_: src.model.wav2vec2phoneme.builders.build_wav2vec2phoneme_inference
     hf_repo: ???
