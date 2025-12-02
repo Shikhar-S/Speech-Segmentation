@@ -111,14 +111,14 @@ class GeolocationHead(nn.Module):
 class GeolocationModel(LightningModule):
     def __init__(
         self,
-        model: nn.Module,
+        net: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         freeze_encoder: bool = True,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
-        self.net = model
+        self.net = net
         self.encoder_dim = self.net.encoder_output_size()
         self.query_vector = nn.Parameter(torch.randn(1, 1, self.encoder_dim))
         self.attentive_pooling = nn.MultiheadAttention(
@@ -133,8 +133,6 @@ class GeolocationModel(LightningModule):
         else:
             self.net.train()
             self.net.requires_grad_(True)
-        # self.criterion = GeolocationRegressionLoss()
-        # self.criterion = GeolocationRadianRegressionLoss()
 
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -245,7 +243,7 @@ if __name__ == "__main__":
     from src.model.wav2vec2phoneme.wav2vec2phoneme_model import Wav2Vec2PhonemeModel
 
     model = GeolocationModel(
-        model=Wav2Vec2PhonemeModel(
+        net=Wav2Vec2PhonemeModel(
             "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
         ),
         # model=build_powsm(
@@ -256,18 +254,3 @@ if __name__ == "__main__":
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
         freeze_encoder=True,
     )
-    # print(model.freeze_encoder)
-    # model.configure_optimizers()
-    # dummy_input = torch.randn(2, 16000 * 5)  # batch of 2, 5 seconds of audio at 16kHz
-    # dummy_lengths = torch.tensor([16000 * 5, 16000 * 5])
-    # output = model.training_step(
-    #     {
-    #         "speech": dummy_input,
-    #         "speech_length": dummy_lengths,
-    #         "latitude": torch.tensor([0.0, 0.0]),
-    #         "longitude": torch.tensor([0.0, 0.0]),
-    #     },
-    #     0,
-    # )
-    # print(output)
-    # print("Model forward pass successful!")

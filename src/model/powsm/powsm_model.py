@@ -1,5 +1,5 @@
 from pathlib import Path
-from huggingface_hub import snapshot_download
+from src.core.utils import download_hf_snapshot
 
 from typing import Dict, List, Optional, Tuple, Union, Any
 import yaml
@@ -607,10 +607,10 @@ def build_powsm(
     REL_STATS = "exp/s2t_stats_raw_bpe40000/train/feats_stats.npz"
 
     if hf_repo:
-        snapshot_download(
+        download_hf_snapshot(
             repo_id=hf_repo,
             force_download=force,
-            local_dir=work_dir,
+            work_dir=work_dir,
         )
 
     root = Path(work_dir)

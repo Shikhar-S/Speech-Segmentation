@@ -163,16 +163,16 @@ class BuckeyeDataset(Dataset):
         masked_phone_ipa = []
         atleast_one_unmasked = False
         for phone, (start, end) in zip(item["phones"], item["phone_timestamps"]):
+            start_idx = int(start * self.target_sr)
+            end_idx = int(end * self.target_sr)
             should_mask = (
                 np.random.rand() < self.mask_probability and atleast_one_unmasked
             )
             if should_mask:
                 # Replace the segment with noise
                 waveform = waveform.clone()
-                waveform[:, int(start * self.target_sr) : int(end * self.target_sr)] = (
-                    torch.randn(
-                        1, int(end * self.target_sr) - int(start * self.target_sr)
-                    )
+                waveform[:, start_idx:end_idx] = torch.zeros(
+                    end_idx - start_idx, dtype=waveform.dtype
                 )
             atleast_one_unmasked = True
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))

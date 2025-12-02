@@ -20,7 +20,7 @@
 # limitations under the License.
 
 import warnings
-from huggingface_hub import snapshot_download
+from src.core.utils import download_hf_snapshot
 from pathlib import Path
 from typing import Union
 
@@ -261,17 +261,18 @@ def build_zipactc_model(
         force: Whether to force re-download from hf repo.
     Returns: ZipaCtcModel instance.
     """
-    snapshot_download(
+    download_dir = f"{work_dir}/{hf_repo.replace('/', '_')}"
+    download_hf_snapshot(
         repo_id=hf_repo,
         force_download=force,
-        local_dir=work_dir,
+        work_dir=download_dir,
     )
-    root = Path(work_dir)
+    root = Path(download_dir)
     model_path = list(root.glob("*.pth"))
     if len(model_path) == 0:
-        raise FileNotFoundError(f"No model file found under {work_dir}")
+        raise FileNotFoundError(f"No model file found under {root}")
     if len(model_path) > 1:
-        raise RuntimeError(f"Multiple model files found under {work_dir}: {model_path}")
+        raise RuntimeError(f"Multiple model files found under {root}: {model_path}")
     model_path = str(model_path[0])
 
     if "small" in model_path:
@@ -293,11 +294,11 @@ def build_zipactc_model(
 
 
 def build_zipactc_inference(
-    *, work_dir: str, hf_repo: str, bpe_model, force: bool = False
+    *, work_dir: str, hf_repo: str, bpe_model, force: bool = False, device="cpu"
 ):
     model = build_zipactc_model(work_dir=work_dir, hf_repo=hf_repo, force=force)
     tokenizer = SentencepiecesTokenizer(model=bpe_model)
     inference = ZipaCtcInference(
-        inference_model=model, tokenizer=tokenizer, device="cpu"
+        inference_model=model, tokenizer=tokenizer, device=device
     )
     return inference

@@ -127,9 +127,7 @@ class TimitDataset(Dataset):
                 waveform = waveform.clone()
                 waveform[
                     :, int(start_sec * self.target_sr) : int(end_sec * self.target_sr)
-                ] = torch.randn(
-                    1, int(end_sec * self.target_sr) - int(start_sec * self.target_sr)
-                )
+                ] = torch.zeros(end_idx - start_idx, dtype=waveform.dtype)
             atleast_one_unmasked = True
             phone_pointstamps.append((start_idx, end_idx))
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))

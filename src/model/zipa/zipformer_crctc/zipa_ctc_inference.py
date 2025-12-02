@@ -11,6 +11,7 @@ class ZipaCtcInference:
         self.device = device
         self.inference_model = inference_model.to(device)
         self.tokenizer = tokenizer
+        self.inference_model.to(device)
         self.inference_model.eval()
 
     def batchify(self, speech):
@@ -48,7 +49,7 @@ class ZipaCtcInference:
         predicted_ids = torch.argmax(logits, dim=-1)  # (B, T)
         collapsed_preds = []
         for b in range(predicted_ids.size(0)):
-            collapsed = self.ctc_collapse(predicted_ids[b].tolist())
+            collapsed = self.ctc_collapse(predicted_ids[b].cpu().tolist())
             collapsed_preds.append(collapsed)
         transcription = self.tokenizer.ids2text(collapsed_preds[0])  # list of tokens
         return [

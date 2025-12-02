@@ -16,15 +16,15 @@ from lightning.pytorch.utilities import grad_norm
 class PhoneRecognitionModel(LightningModule):
     def __init__(
         self,
-        model: nn.Module,
+        net: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         inference: Optional[Any] = None,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(logger=False, ignore=["model", "inference"])
+        self.save_hyperparameters(logger=False, ignore=["net", "inference"])
 
-        self.net = model
+        self.net = net
         self.inference = inference
         self.blank_id: Optional[int] = getattr(self.net, "blank_id", None)
         # Loss tracking
@@ -190,7 +190,7 @@ if __name__ == "__main__":
     sample_batch = next(iter(data_module.test_dataloader()))
 
     model = PhoneRecognitionModel(
-        model=inference_obj.model,
+        net=inference_obj.model,
         optimizer=partial(torch.optim.Adam, lr=1e-4),
         scheduler=None,
         inference=inference_obj,

@@ -1752,8 +1752,9 @@ class RelPositionMultiheadAttentionWeights(nn.Module):
 
         if torch.jit.is_scripting() or torch.jit.is_tracing():
             pass
-        elif random.random() < 0.001 and not self.training:
-            self._print_attn_entropy(attn_weights)
+        # NOTE(shikhar): turned off
+        # elif random.random() < 0.001 and not self.training:
+        #     self._print_attn_entropy(attn_weights)
 
         attn_weights = nn.functional.dropout(
             attn_weights, p=self.dropout, training=self.training

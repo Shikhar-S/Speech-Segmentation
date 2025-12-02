@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 from typing import Any, Tuple
+import numpy as np
 
 from lhotse.features.kaldi.extractors import Fbank
 
@@ -38,12 +39,15 @@ class ZipaCtcModel(nn.Module):
     def _extract_feats(self, speech, speech_lengths):
         features = self.fbank.extract_batch(
             speech, lengths=speech_lengths, sampling_rate=self.sampling_rate
-        )
-        features = torch.tensor(features, dtype=torch.float32)
-        if features.dim() == 2:
-            features = features.unsqueeze(0)  # lhotse collapses single utterance batch
+        )  # ragged
         feature_lens = torch.tensor([len(feature) for feature in features])
+        if isinstance(features, np.ndarray) and features.ndim == 2:
+            # bs=1
+            features = [features]
+        features = [torch.tensor(f, dtype=torch.float32) for f in features]
         features = torch.nn.utils.rnn.pad_sequence(features, batch_first=True)
+        features = features.to(speech.device)
+        feature_lens = feature_lens.to(speech.device)
         return features, feature_lens
 
     def encode(self, speech, speech_lengths) -> Tuple[torch.Tensor, torch.Tensor]:

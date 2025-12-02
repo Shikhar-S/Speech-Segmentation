@@ -32,6 +32,8 @@ python src/main.py experiment=inference/buckeye_pr_powsm "$@"
 # experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
 # experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
 # experiment=inference/buckeye_pr_w2v2ph inference.inference_runner.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# experiment=inference/buckeye_pr_zipactc inference.inference_runner.hf_repo=anyspeech/zipa-large-crctc-500k
+# experiment=inference/buckeye_pr_zipactc inference.inference_runner.hf_repo=anyspeech/zipa-large-crctc-ns-800k
 
 # with masking
 # data.mask_probability=0.x
@@ -42,3 +44,5 @@ python src/main.py experiment=inference/buckeye_pr_powsm "$@"
 # experiment=inference/timit_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
 # experiment=inference/timit_pr_w2v2ph inference.inference_runner.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
 # experiment=inference/timit_pr_w2v2ph inference.inference_runner.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# experiment=inference/timit_pr_zipactc inference.inference_runner.hf_repo=anyspeech/zipa-large-crctc-500k
+# experiment=inference/timit_pr_zipactc inference.inference_runner.hf_repo=anyspeech/zipa-large-crctc-ns-800k
