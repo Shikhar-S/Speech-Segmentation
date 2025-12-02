@@ -1,20 +1,18 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=vaani_geolocation
+# python src/main.py experiment=powsm_vaani_geolocation
 
 defaults:
   - override /data: vaani_geolocation
-  - override /model: powsm_geolocation
+  - override /model: geolocation
+  - override /model/net: powsm
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
-
-task_name: "vaani_geolocation"
-tags: ["vaani_geolocation"]
+task_name: "powsm_vaani_geolocation"
+tags: ["powsm_vaani_geolocation"]
 
 seed: 42
 
@@ -29,7 +27,6 @@ trainer:
 model:
   optimizer:
     lr: 0.0002
-  freeze_encoder: true
 
 data:
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
@@ -37,6 +34,6 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "vaani_geolocation"
+    group: "powsm_vaani_geolocation"
   aim:
-    experiment: "vaani_geolocation"
+    experiment: "powsm_vaani_geolocation"

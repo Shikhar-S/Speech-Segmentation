@@ -4,10 +4,10 @@
 # python src/main.py experiment=inference/buckeye_pr_w2v2ph
 
 defaults:
-  - override /model: powsm_pr # do not matter, only to satisfy requirement
+  - override /model: phone_recognition # do not matter, only to satisfy requirement
   - override /model/net: powsm # do not matter, only to satisfy requirement
-  - override /logger: csv
   - override /data: buckeye
+  - override /logger: csv
 
 task_name: "inf_buckeye_pr_w2v2ph"
 tags: ["inf_buckeye_pr_w2v2ph"]

@@ -4,13 +4,10 @@
 # python src/main.py experiment=inference/buckeye_pr_powsm
 
 defaults:
-  - override /model: powsm_pr # do not matter, only to satisfy requirement
+  - override /model: phone_recognition # do not matter, only to satisfy requirement
   - override /model/net: powsm # do not matter, only to satisfy requirement
   - override /data: buckeye
   - override /logger: csv
-
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
 
 task_name: "inf_buckeye_pr_powsm"
 tags: ["inf_buckeye_pr_powsm"]
