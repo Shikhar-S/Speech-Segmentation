@@ -21,6 +21,6 @@ model:
   model_file: null
   stats_file: null
 
-num_classes: 102  # FLEURS has 102 languages. This will be automatically set from datamodule if available.
+num_classes: null  # Will be automatically detected from datamodule (5 languages with current subset config)
 freeze_encoder: true
 

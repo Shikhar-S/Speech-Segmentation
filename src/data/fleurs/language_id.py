@@ -38,6 +38,8 @@ class FleursLanguageIdDataset(Dataset):
         target_sr: Optional[int] = 16000,
         max_audio_length: Optional[float] = 20.0,  # seconds
         config_name: str = "all",  # "all" for all languages, or specific language config
+        max_samples: Optional[int] = None,  # Limit number of samples (useful for testing)
+        language_subset: Optional[list] = None,  # List of language codes to use (e.g., ["en_us", "hi_in"])
     ):
         """
         Initialize FLEURS Language Identification Dataset.
@@ -47,34 +49,165 @@ class FleursLanguageIdDataset(Dataset):
             target_sr: Target sampling rate
             max_audio_length: Maximum audio length in seconds
             config_name: FLEURS config name. Use "all" to load all languages for LangID task.
+                        Or use specific language codes like "en_us", "hi_in", etc. for subset.
+            max_samples: Maximum number of samples to use (None = use all). Useful for testing.
+            language_subset: List of language codes to filter (e.g., ["en_us", "hi_in"]).
+                           If provided, filters dataset to only these languages.
         """
         self.target_sr = target_sr
         self.max_audio_length = max_audio_length
         self.split = split
         
         # Load FLEURS dataset
-        # For language identification, we use "all" config to get all languages merged
-        # According to FLEURS docs: "We simply create a single train/valid/test for LangID by merging all"
-        # When split is specified, load_dataset returns just that split's Dataset
-        # trust_remote_code=True is required because FLEURS uses a dataset script (fleurs.py)
-        # Use streaming=False for now, but can be set to True for memory efficiency
-        self.dataset = load_dataset(
-            "google/fleurs", 
-            config_name, 
-            split=split, 
-            streaming=False,
-            trust_remote_code=True  # Required for FLEURS dataset script
-        )
-        
-        # Get language names for mapping
-        # According to FLEURS docs, lang_id is a ClassLabel with names attribute
-        if hasattr(self.dataset.features["lang_id"], "names"):
-            self.lang_names = self.dataset.features["lang_id"].names
+        # If language_subset is provided, load individual language configs and concatenate
+        # IMPORTANT: We apply max_samples per language BEFORE concatenating to minimize downloads
+        if language_subset is not None:
+            print(f"Loading individual language configs: {language_subset}")
+            from datasets import concatenate_datasets
+            
+            # Calculate samples per language if max_samples is specified
+            # Distribute max_samples evenly across languages
+            samples_per_lang = None
+            if max_samples is not None:
+                samples_per_lang = max(1, max_samples // len(language_subset))
+                print(f"Limiting to ~{samples_per_lang} samples per language (total target: {max_samples})")
+            
+            datasets_list = []
+            for lang in language_subset:
+                try:
+                    print(f"Loading {lang}...")
+                    # Try streaming first to minimize downloads
+                    try:
+                        ds_streaming = load_dataset(
+                            "google/fleurs", 
+                            lang, 
+                            split=split, 
+                            streaming=True,
+                            trust_remote_code=True
+                        )
+                        # Take only what we need if max_samples is specified
+                        if samples_per_lang is not None:
+                            ds_streaming = ds_streaming.take(samples_per_lang)
+                        # Convert streaming dataset to regular dataset
+                        ds = ds_streaming.to_list()
+                        from datasets import Dataset
+                        ds = Dataset.from_list(ds)
+                        print(f"Successfully loaded {lang} (streaming): {len(ds)} samples")
+                    except Exception as stream_e:
+                        # Fallback to non-streaming if streaming fails
+                        print(f"Streaming failed for {lang}, using regular load: {stream_e}")
+                        ds = load_dataset(
+                            "google/fleurs", 
+                            lang, 
+                            split=split, 
+                            streaming=False,
+                            trust_remote_code=True
+                        )
+                        # Apply limit after loading if not using streaming
+                        if samples_per_lang is not None and len(ds) > samples_per_lang:
+                            ds = ds.select(range(samples_per_lang))
+                        print(f"Successfully loaded {lang} (regular): {len(ds)} samples")
+                    
+                    datasets_list.append(ds)
+                except Exception as lang_e:
+                    print(f"Warning: Failed to load {lang}: {lang_e}")
+                    continue
+            
+            if not datasets_list:
+                raise RuntimeError(f"Could not load any FLEURS language configs from {language_subset}")
+            
+            # Concatenate all language datasets
+            self.dataset = concatenate_datasets(datasets_list)
+            print(f"Loaded {len(self.dataset)} total samples from {len(datasets_list)} languages")
+            
+            # Apply final max_samples limit if we have more than requested
+            # (This can happen if samples_per_lang * num_langs > max_samples)
+            if max_samples is not None and len(self.dataset) > max_samples:
+                print(f"Applying final limit: {len(self.dataset)} -> {max_samples} samples")
+                self.dataset = self.dataset.select(range(max_samples))
+        elif config_name == "all":
+            # Load all languages (large download)
+            print("Loading FLEURS 'all' config (this will download all 102 languages - large dataset!)")
+            print("WARNING: This will download a very large dataset. Consider using language_subset instead.")
+            # Try streaming first to minimize downloads
+            try:
+                ds_streaming = load_dataset(
+                    "google/fleurs", 
+                    config_name, 
+                    split=split, 
+                    streaming=True,
+                    trust_remote_code=True
+                )
+                if max_samples is not None:
+                    ds_streaming = ds_streaming.take(max_samples)
+                ds_list = ds_streaming.to_list()
+                from datasets import Dataset
+                self.dataset = Dataset.from_list(ds_list)
+                print(f"Loaded {len(self.dataset)} samples using streaming")
+            except Exception as stream_e:
+                print(f"Streaming failed, using regular load: {stream_e}")
+                self.dataset = load_dataset(
+                    "google/fleurs", 
+                    config_name, 
+                    split=split, 
+                    streaming=False,
+                    trust_remote_code=True
+                )
+                if max_samples is not None and len(self.dataset) > max_samples:
+                    print(f"Limiting to {max_samples} samples (from {len(self.dataset)})")
+                    self.dataset = self.dataset.select(range(max_samples))
+        elif config_name is not None:
+            # Load a specific language config
+            print(f"Loading FLEURS config: {config_name}")
+            # Try streaming first to minimize downloads
+            try:
+                ds_streaming = load_dataset(
+                    "google/fleurs", 
+                    config_name, 
+                    split=split, 
+                    streaming=True,
+                    trust_remote_code=True
+                )
+                if max_samples is not None:
+                    ds_streaming = ds_streaming.take(max_samples)
+                ds_list = ds_streaming.to_list()
+                from datasets import Dataset
+                self.dataset = Dataset.from_list(ds_list)
+                print(f"Loaded {len(self.dataset)} samples using streaming")
+            except Exception as stream_e:
+                print(f"Streaming failed, using regular load: {stream_e}")
+                self.dataset = load_dataset(
+                    "google/fleurs", 
+                    config_name, 
+                    split=split, 
+                    streaming=False,
+                    trust_remote_code=True
+                )
+                if max_samples is not None and len(self.dataset) > max_samples:
+                    print(f"Limiting to {max_samples} samples (from {len(self.dataset)})")
+                    self.dataset = self.dataset.select(range(max_samples))
         else:
-            # Fallback: get unique languages from the dataset
-            # This should not happen with FLEURS, but handle gracefully
-            self.lang_names = sorted(list(set(self.dataset["language"])))
-            print(f"Warning: lang_id names not found, using {len(self.lang_names)} unique languages")
+            raise ValueError("Either config_name or language_subset must be provided")
+        
+        # Get unique languages and create a mapping to 0-indexed lang_ids
+        # This is important when using language_subset, as lang_ids might not be consecutive
+        unique_languages = sorted(list(set(self.dataset["language"])))
+        self.lang_to_id = {lang: idx for idx, lang in enumerate(unique_languages)}
+        self.lang_names = unique_languages
+        self.num_classes = len(unique_languages)
+        
+        print(f"Found {self.num_classes} unique languages: {unique_languages}")
+        
+        # Remap lang_ids to be 0-indexed (0, 1, 2, ...)
+        def remap_lang_id(example):
+            lang = example["language"]
+            example["lang_id"] = self.lang_to_id[lang]
+            return example
+        
+        self.dataset = self.dataset.map(remap_lang_id)
+        
+        # Note: max_samples limit is already applied per-language before concatenation
+        # This minimizes disk usage by downloading only what we need
 
     def __len__(self):
         return len(self.dataset)
@@ -122,7 +255,9 @@ class FleursLanguageId(LightningDataModule):
         pin_memory=True,
         target_sr=16000,
         max_audio_length=20.0,
-        config_name="all",  # "all" for all languages
+        config_name="all",  # "all" for all languages, or specific language codes
+        max_samples: Optional[int] = None,  # Limit samples per split (useful for testing)
+        language_subset: Optional[list] = None,  # List of language codes to use
     ):
         """
         FLEURS Language Identification DataModule.
@@ -134,6 +269,10 @@ class FleursLanguageId(LightningDataModule):
             target_sr: Target sampling rate
             max_audio_length: Maximum audio length in seconds
             config_name: FLEURS config name. Use "all" to load all languages for LangID task.
+                        Or use specific language codes like "en_us", "hi_in", etc.
+            max_samples: Maximum number of samples per split (None = use all). Useful for testing.
+            language_subset: List of language codes to filter (e.g., ["en_us", "hi_in"]).
+                           If provided, filters dataset to only these languages.
         """
         super().__init__()
         self.save_hyperparameters()
@@ -152,29 +291,29 @@ class FleursLanguageId(LightningDataModule):
                 target_sr=self.hparams.target_sr,
                 max_audio_length=self.hparams.max_audio_length,
                 config_name=self.hparams.config_name,
+                max_samples=self.hparams.get("max_samples"),
+                language_subset=self.hparams.get("language_subset"),
             )
             self.ds_val = FleursLanguageIdDataset(
                 split="validation",
                 target_sr=self.hparams.target_sr,
                 max_audio_length=self.hparams.max_audio_length,
                 config_name=self.hparams.config_name,
+                max_samples=self.hparams.get("max_samples"),
+                language_subset=self.hparams.get("language_subset"),
             )
             self.ds_test = FleursLanguageIdDataset(
                 split="test",
                 target_sr=self.hparams.target_sr,
                 max_audio_length=self.hparams.max_audio_length,
                 config_name=self.hparams.config_name,
+                max_samples=self.hparams.get("max_samples"),
+                language_subset=self.hparams.get("language_subset"),
             )
             
             # Get number of classes from training set
-            if hasattr(self.ds_train.dataset.features["lang_id"], "names"):
-                self.num_classes = len(self.ds_train.dataset.features["lang_id"].names)
-            else:
-                # Fallback: count unique lang_ids
-                unique_lang_ids = set()
-                for i in range(len(self.ds_train)):
-                    unique_lang_ids.add(self.ds_train[i]["lang_id"])
-                self.num_classes = len(unique_lang_ids)
+            # The dataset already has num_classes set after remapping
+            self.num_classes = self.ds_train.num_classes
             
             print(
                 f"Dataset split into train: {len(self.ds_train)}, val: {len(self.ds_val)}, test: {len(self.ds_test)}"
