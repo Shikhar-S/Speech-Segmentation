@@ -1,0 +1,19 @@
+# CMU L2Arctic IPA DataModule config for L1 Classification
+# Uses pre-extracted IPA transcripts from JSON files (e.g., PoWSM or Wav2Vec2Phoneme output)
+
+_target_: src.data.cmu_l2arctic.ipa_data.CmuL2ArcticIPADataModule
+
+# Path to JSON file with IPA transcripts
+# Override in experiment config to use different encoder outputs:
+#   - data.json_path=${paths.data_dir}/l1/cmu_l2arctic_powsm_out.json
+#   - data.json_path=${paths.data_dir}/l1/cmu_l2arctic_w2v2ph_out.json
+json_path: ???
+
+# Path to vocabulary file (required)
+vocab_path: ???
+
+batch_size: 32
+num_workers: 4
+pin_memory: True
+min_vocab_freq: 1  # Minimum frequency for a character to be included in vocabulary
+
