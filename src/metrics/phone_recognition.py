@@ -13,6 +13,7 @@ from typing import Dict, Tuple, Any, Union
 from tqdm import tqdm
 
 import panphon.distance
+
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
@@ -330,7 +331,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     def _load_predictions(pred_file: str) -> Dict[str, Dict[str, str]]:
-        # TODO(shikhar): Not general enough
         with open(pred_file, "r") as f:
             data = json.load(f)
         D = {
