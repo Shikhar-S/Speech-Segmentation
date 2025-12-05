@@ -4,7 +4,7 @@
 # python src/main.py experiment=inference/timit_pr_powsm
 
 defaults:
-  - override /model: powsm_pr # do not matter, only to satisfy requirement
+  - override /model: phone_recognition # do not matter, only to satisfy requirement
   - override /model/net: powsm # do not matter, only to satisfy requirement
   - override /data: timit
   - override /logger: csv
