@@ -20,7 +20,7 @@ mkdir -p "exp/inference_logs"
 # === Environment setup ===
 source ~/.bashrc
 conda deactivate
-source setup_uv.sh .venv_dai
+source setup_uv.sh .venv_dai requirements-dai.txt
 # for w2v2ph these must be pre-built
 export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
