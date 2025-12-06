@@ -11,7 +11,7 @@ from src.utils import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-class PowsmDataset(Dataset):
+class KaldiDataset(Dataset):
     def __init__(self, wav_scp_file, text_file, lang_file, sampling_rate=16000):
         self.sampling_rate = sampling_rate
         self.wav_scp = self._load_wav_scp(wav_scp_file)
@@ -92,7 +92,7 @@ class PowsmDataset(Dataset):
         }
 
 
-class PowsmDataModule(L.LightningDataModule):
+class KaldiDataModule(L.LightningDataModule):
     def __init__(
         self,
         wav_scp_file,
@@ -114,7 +114,7 @@ class PowsmDataModule(L.LightningDataModule):
         self.num_workers = num_workers
 
     def setup(self, stage=None):
-        self.dataset = PowsmDataset(
+        self.dataset = KaldiDataset(
             self.wav_scp_file,
             self.text_file,
             self.lang_file,
@@ -169,7 +169,7 @@ class PowsmDataModule(L.LightningDataModule):
         }
 
 
-def build_powsm_datamodule(
+def build_kaldi_datamodule(
     dataset_name,
     dataset_config_path="configs/data/powsm_evalset_index.yaml",
     sampling_rate=16000,
@@ -187,7 +187,7 @@ def build_powsm_datamodule(
     text_file = ds_config["text_phoneme"]
     lang_file = ds_config["language"]
 
-    return PowsmDataModule(
+    return KaldiDataModule(
         wav_scp_file=wav_scp_file,
         text_file=text_file,
         lang_file=lang_file,
