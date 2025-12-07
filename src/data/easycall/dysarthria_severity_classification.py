@@ -1,4 +1,4 @@
-"""EasyCall Dataset and DataLoader for forced alignment
+"""EasyCall Dataset and DataModule
 
 Usage:
     python -m src.data.easycall.common_datamodule \
@@ -30,24 +30,19 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-def extract_easycall_clip(
-    easycall_root: Path,
-    item: dict,
-    out: Path,
-    sr: int
-) -> bool:
+def extract_easycall_clip(easycall_root: Path, item: dict, out: Path, sr: int) -> bool:
     """
     Extract and cache EasyCall audio clip.
-    
+
     Supports both regular .wav files and .zip files containing audio.
     If the source is a zip file, extracts the specific audio file from it.
-    
+
     Args:
         easycall_root: Path to EasyCall root directory
         item: Metadata item with 'path', 'zip_path', 'file', or 'zip_file' keys
         out: Output path for cached audio
         sr: Target sample rate
-        
+
     Returns:
         bool: True if successful, False otherwise
     """
@@ -55,41 +50,44 @@ def extract_easycall_clip(
         # Check if we're dealing with a zip file
         zip_path = item.get("zip_path") or item.get("zip_file")
         file_in_zip = item.get("file")
-        
+
         if zip_path:
             # Extract from zip file
             if isinstance(zip_path, str):
                 zip_path = Path(zip_path)
             if not zip_path.is_absolute():
                 zip_path = easycall_root / zip_path
-            
+
             if not zip_path.exists():
                 logger.warning(f"Zip file not found: {zip_path}")
                 return False
-            
+
             # Extract the specific file from zip
             zip_entry = item.get("zip_entry")
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 # Use zip_entry if available, otherwise search for the file
                 file_to_extract = zip_entry
                 if file_to_extract is None:
                     # Find the file in the zip (handle different path formats)
                     for name in zip_ref.namelist():
-                        if name.endswith(file_in_zip) or os.path.basename(name) == file_in_zip:
+                        if (
+                            name.endswith(file_in_zip)
+                            or os.path.basename(name) == file_in_zip
+                        ):
                             file_to_extract = name
                             break
-                
+
                 if file_to_extract is None or file_to_extract not in zip_ref.namelist():
                     logger.warning(f"File {file_in_zip} not found in zip {zip_path}")
                     return False
-                
+
                 # Extract to temporary directory
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     # Extract the file (preserves directory structure if any)
                     zip_ref.extract(file_to_extract, tmp_dir)
                     # Construct full path to extracted file
                     extracted_path = os.path.join(tmp_dir, file_to_extract)
-                    
+
                     # Load and process audio
                     wav, s = torchaudio.load(extracted_path)
         else:
@@ -99,38 +97,36 @@ def extract_easycall_clip(
                 source_path = Path(source_path)
             if not source_path.is_absolute():
                 source_path = easycall_root / source_path
-            
+
             if not source_path.exists():
                 logger.warning(f"Audio file not found: {source_path}")
                 return False
-            
+
             # Load and process audio
             wav, s = torchaudio.load(str(source_path))
-        
+
         # Resample if necessary
         if s != sr:
             resampler = torchaudio.transforms.Resample(s, sr)
             wav = resampler(wav)
             s = sr
-        
+
         # Ensure mono
         if wav.shape[0] > 1:
             wav = wav.mean(dim=0, keepdim=True)
-        
+
         # Save cached version
         out.parent.mkdir(parents=True, exist_ok=True)
         torchaudio.save(str(out), wav, sr)
         return True
     except Exception as e:
-        logger.warning(
-            f"speech extraction failed [{item.get('file', 'unknown')}]: {e}"
-        )
+        logger.warning(f"speech extraction failed [{item.get('file', 'unknown')}]: {e}")
         return False
 
 
 class EasyCallDataset(Dataset):
     """
-    PyTorch dataset for EasyCall corpus alignment evaluation.
+    PyTorch dataset for EasyCall corpus.
     """
 
     def __init__(
@@ -165,64 +161,72 @@ class EasyCallDataset(Dataset):
 
         # Load speaker-level metadata from CSV
         df_meta = pd.read_csv(easycall_meta_csv)
-        df_meta = df_meta[df_meta['label'].notna()]  # Filter missing labels
-        self.speaker_to_label = dict(zip(df_meta['speaker'], df_meta['label']))
-        self.speaker_to_split = dict(zip(df_meta['speaker'], df_meta['split']))
-        self.speaker_to_sex = dict(zip(df_meta['speaker'], df_meta['sex']))
-        self.speaker_to_severity = dict(zip(df_meta['speaker'], df_meta['severity']))
-        
+        df_meta = df_meta[df_meta["label"].notna()]  # Filter missing labels
+        self.speaker_to_label = dict(zip(df_meta["speaker"], df_meta["label"]))
+        self.speaker_to_split = dict(zip(df_meta["speaker"], df_meta["split"]))
+        self.speaker_to_sex = dict(zip(df_meta["speaker"], df_meta["sex"]))
+        self.speaker_to_severity = dict(zip(df_meta["speaker"], df_meta["severity"]))
+
         self.split = split
-        
+
         # Check if easycall_root is a zip file and extract if needed
         easycall_path = Path(self.easycall_root)
-        if easycall_path.is_file() and easycall_path.suffix.lower() == '.zip':
+        if easycall_path.is_file() and easycall_path.suffix.lower() == ".zip":
             # Extract directly to cache_path (single folder)
             self.cache_path.mkdir(parents=True, exist_ok=True)
-            
+
             # Check if cache directory already has wav files (already extracted)
             extracted_files = list(self.cache_path.glob("**/*.wav"))
             if len(extracted_files) == 0:
-                logger.info(f"Extracting zip file {easycall_path} to {self.cache_path}...")
+                logger.info(
+                    f"Extracting zip file {easycall_path} to {self.cache_path}..."
+                )
                 try:
-                    with zipfile.ZipFile(easycall_path, 'r') as zip_ref:
+                    with zipfile.ZipFile(easycall_path, "r") as zip_ref:
                         zip_ref.extractall(self.cache_path)
-                    logger.info(f"Extraction complete. Extracted {len(list(self.cache_path.glob('**/*.wav')))} wav files.")
+                    logger.info(
+                        f"Extraction complete. Extracted {len(list(self.cache_path.glob('**/*.wav')))} wav files."
+                    )
                 except Exception as e:
                     logger.error(f"Failed to extract zip file {easycall_path}: {e}")
                     raise
             else:
-                logger.info(f"Using existing extracted files in {self.cache_path} ({len(extracted_files)} wav files found)")
-            
+                logger.info(
+                    f"Using existing extracted files in {self.cache_path} ({len(extracted_files)} wav files found)"
+                )
+
             # Use cache_path as root (where files are extracted)
             self.easycall_root = self.cache_path
-        
+
         # Scan EasyCall directory for audio files and create metadata
         self.metadata = []
-        
+
         # Now easycall_root is always a directory (either original or extracted)
         # Scan directory for audio files
         for r, d, files in os.walk(self.easycall_root):
             for file in files:
                 if file.endswith(".wav"):
-                    speaker = file.split("_")[0].strip()  # Extract speaker from filename
-                    
+                    speaker = file.split("_")[
+                        0
+                    ].strip()  # Extract speaker from filename
+
                     # Skip f04 (label unknown)
                     if speaker.lower() == "f04":
                         continue
-                    
+
                     # Get split from speaker mapping
                     speaker_split = self.speaker_to_split.get(speaker)
                     if not speaker_split:
                         continue
-                    
+
                     # Filter by split
                     if speaker_split != split:
                         continue
-                    
+
                     # Extract text from filename (everything after speaker_session)
                     parts = file.replace(".wav", "").split("_")
                     text = " ".join(parts[2:]) if len(parts) > 2 else ""
-                    
+
                     # Create metadata item with regular file path
                     item = {
                         "file": file,
@@ -236,21 +240,24 @@ class EasyCallDataset(Dataset):
                         "text": text,
                     }
                     self.metadata.append(item)
-        
+
         logger.info(f"Loaded {len(self.metadata)} items for split '{split}'")
 
         self.clip_paths_cache = {}
-        
+
         # Initialize epitran if needed
         self.epitran_transliterator = None
         if self.use_epitran:
             try:
                 import epitran
+
                 # Use Italian for EasyCall (based on text examples)
-                self.epitran_transliterator = epitran.Epitran('ita-Latn')
+                self.epitran_transliterator = epitran.Epitran("ita-Latn")
                 logger.info("Initialized epitran transliterator for Italian")
             except ImportError:
-                logger.warning("epitran not installed. Install with: pip install epitran")
+                logger.warning(
+                    "epitran not installed. Install with: pip install epitran"
+                )
                 self.use_epitran = False
             except Exception as e:
                 logger.warning(f"Failed to initialize epitran: {e}")
@@ -270,13 +277,13 @@ class EasyCallDataset(Dataset):
         cache_key = item.get("file", item.get("utt_id", f"item_{hash(str(item))}"))
         if cache_key in self.clip_paths_cache:
             return self.clip_paths_cache[cache_key]
-        
+
         # Get path from metadata (already set during scanning)
         path = Path(item.get("path"))
-        
+
         if not path.exists():
             raise FileNotFoundError(f"Audio file not found: {path}")
-        
+
         # Cache the path
         self.clip_paths_cache[cache_key] = path
         return path
@@ -285,10 +292,10 @@ class EasyCallDataset(Dataset):
         """
         Convert text to phonemes using epitran and ipatok.
         Epitran converts text to IPA string, ipatok segments it into individual phonemes.
-        
+
         Args:
             text: Input text string
-            
+
         Returns:
             List of phoneme strings (IPA)
         """
@@ -296,26 +303,30 @@ class EasyCallDataset(Dataset):
             try:
                 # Convert text to IPA phonemes using epitran
                 ipa_string = self.epitran_transliterator.transliterate(text)
-                
+
                 # Use ipatok to segment IPA string into individual phonemes
                 phonemes_list = ipatok_tokenise(ipa_string)
-                
+
                 if not phonemes_list:
-                    logger.debug(f"Epitran/ipatok returned empty phonemes for text '{text}', ipa_string: '{ipa_string}'")
+                    logger.debug(
+                        f"Epitran/ipatok returned empty phonemes for text '{text}', ipa_string: '{ipa_string}'"
+                    )
                     return []
-                
+
                 # Join phonemes as space-separated text
                 phonemes = " ".join(phonemes_list)
                 return phonemes
             except Exception as e:
-                logger.warning(f"Epitran/ipatok conversion failed for text '{text}': {e}")
+                logger.warning(
+                    f"Epitran/ipatok conversion failed for text '{text}': {e}"
+                )
                 return []
         else:
             if not self.use_epitran:
                 logger.debug(f"Epitran not enabled")
             if not self.epitran_transliterator:
                 logger.debug(f"Epitran transliterator not initialized")
-        
+
         return []
 
     def __getitem__(self, idx):
@@ -358,34 +369,48 @@ class EasyCallDataset(Dataset):
         # Process phones/phonemes
         phone_ipa: List[str] = []
         text = item.get("text", "")
-        
+
         # Convert text to phonemes using epitran
         if text:
             if self.use_epitran:
                 phone_ipa = self._text_to_phonemes(text)
                 if not phone_ipa:
-                    logger.warning(f"Epitran returned empty phones for {item.get('file', 'unknown')}, text: '{text}'")
+                    logger.warning(
+                        f"Epitran returned empty phones for {item.get('file', 'unknown')}, text: '{text}'"
+                    )
             else:
                 # If epitran not enabled, log warning
-                logger.warning(f"No phones available for {item.get('file', 'unknown')}, text: {text}. Enable epitran with use_epitran=True")
+                logger.warning(
+                    f"No phones available for {item.get('file', 'unknown')}, text: {text}. Enable epitran with use_epitran=True"
+                )
                 phone_ipa = []
         else:
             logger.warning(f"No text available for {item.get('file', 'unknown')}")
             phone_ipa = []
-        
+
         # Tokenize phones using tokenizer
         # phone_ipa is a space-separated string, split it back to list for tokenization
         phone_list = phone_ipa.split() if isinstance(phone_ipa, str) else phone_ipa
         target = self.tokenizer.tokens2ids(phone_list) if phone_list else []
         if phone_list and len(target) == 0:
-            logger.warning(f"Tokenization returned empty target for {item.get('file', 'unknown')}, phones: {phone_ipa}")
+            logger.warning(
+                f"Tokenization returned empty target for {item.get('file', 'unknown')}, phones: {phone_ipa}"
+            )
 
         return {
             "speech": waveform.squeeze(0),  # Shape: (T,)
             "speech_length": waveform.shape[1],
-            "target": torch.tensor(target, dtype=torch.long) if target else torch.tensor([], dtype=torch.long),
+            "target": (
+                torch.tensor(target, dtype=torch.long)
+                if target
+                else torch.tensor([], dtype=torch.long)
+            ),
             "target_length": len(target),
-            "phones": phone_ipa if isinstance(phone_ipa, str) else " ".join(phone_ipa) if phone_ipa else "",  # Space-separated string of phones
+            "phones": (
+                phone_ipa
+                if isinstance(phone_ipa, str)
+                else " ".join(phone_ipa) if phone_ipa else ""
+            ),  # Space-separated string of phones
             "text": text,
             "utt_id": item.get("file", item.get("utt_id", f"utt_{idx}")),
             "duration": item.get("duration", 0.0),
@@ -478,7 +503,7 @@ class EasyCallDataModule(L.LightningDataModule):
         self.local_cache_path = Path(local_cache_path)
         self.local_cache_path.mkdir(parents=True, exist_ok=True)
         self.easycall_meta_csv = easycall_meta_csv
-        
+
         self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -533,7 +558,9 @@ class EasyCallDataModule(L.LightningDataModule):
 
     def train_dataloader(self):
         if self.train_dataset is None:
-            raise ValueError("Train dataset not available. Check train_metadata.json exists.")
+            raise ValueError(
+                "Train dataset not available. Check train_metadata.json exists."
+            )
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -545,7 +572,9 @@ class EasyCallDataModule(L.LightningDataModule):
 
     def val_dataloader(self):
         if self.val_dataset is None:
-            raise ValueError("Validation dataset not available. Check val_metadata.json exists.")
+            raise ValueError(
+                "Validation dataset not available. Check val_metadata.json exists."
+            )
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -557,7 +586,9 @@ class EasyCallDataModule(L.LightningDataModule):
 
     def test_dataloader(self):
         if self.test_dataset is None:
-            raise ValueError("Test dataset not available. Check test_metadata.json exists.")
+            raise ValueError(
+                "Test dataset not available. Check test_metadata.json exists."
+            )
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
@@ -575,10 +606,10 @@ class EasyCallDataModule(L.LightningDataModule):
             datasets.append(self.val_dataset)
         if self.test_dataset is not None:
             datasets.append(self.test_dataset)
-        
+
         if not datasets:
             raise ValueError("No datasets available for prediction.")
-        
+
         return DataLoader(
             ConcatDataset(datasets),
             batch_size=self.batch_size,
@@ -591,7 +622,7 @@ class EasyCallDataModule(L.LightningDataModule):
 
 if __name__ == "__main__":
     """Example usage"""
-    from src.data.easycall.common_datamodule import EasyCallDataModule
+    from src.data.easycall.dysarthria_severity_classification import EasyCallDataModule
     from src.model.wav2vec2phoneme.builders import build_wav2vec2phoneme_tokenizer
 
     parser = argparse.ArgumentParser()
@@ -615,10 +646,19 @@ if __name__ == "__main__":
     )
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=1)
-    parser.add_argument("--extract_all", action="store_true", help="Extract all audio files upfront")
-    parser.add_argument("--extract_split", type=str, nargs="+", choices=["train", "valid", "test", "validation"], 
-                       help="Extract specific split(s): train, valid, test (can specify multiple)")
-    parser.add_argument("--show_examples", action="store_true", help="Show 5 examples from test_loader")
+    parser.add_argument(
+        "--extract_all", action="store_true", help="Extract all audio files upfront"
+    )
+    parser.add_argument(
+        "--extract_split",
+        type=str,
+        nargs="+",
+        choices=["train", "valid", "test", "validation"],
+        help="Extract specific split(s): train, valid, test (can specify multiple)",
+    )
+    parser.add_argument(
+        "--show_examples", action="store_true", help="Show 5 examples from test_loader"
+    )
 
     args = parser.parse_args()
 
@@ -638,42 +678,46 @@ if __name__ == "__main__":
         num_workers=args.num_workers,
     )
     data_module.setup()
-    
+
     train_loader = data_module.train_dataloader()
     val_loader = data_module.val_dataloader()
     test_loader = data_module.test_dataloader()
 
     # Print 5 examples if requested
     if args.show_examples:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("Printing 5 examples from test_loader:")
-        print("="*60)
-        
+        print("=" * 60)
+
         example_count = 0
         for batch_idx, batch in enumerate(test_loader):
-            batch_size = len(batch['utt_id'])
+            batch_size = len(batch["utt_id"])
             for i in range(batch_size):
                 if example_count >= 5:
                     break
-                
+
                 example_dict = {
-                    "utt_id": batch['utt_id'][i],
-                    "text": batch.get('text', [''])[i] if 'text' in batch else '',
-                    "label": batch['label'][i],
-                    "split": batch['split'][i],
-                    "speech_length": batch['speech_length'][i].item(),
-                    "target_length": batch['target_length'][i].item(),
-                    "phones": batch['target_text'][i],
-                    "target": batch['target'][i][:batch['target_length'][i]].tolist() if batch['target_length'][i] > 0 else [],
-                    "speech_shape": tuple(batch['speech'][i].shape),
-                    "target_shape": tuple(batch['target'][i].shape),
+                    "utt_id": batch["utt_id"][i],
+                    "text": batch.get("text", [""])[i] if "text" in batch else "",
+                    "label": batch["label"][i],
+                    "split": batch["split"][i],
+                    "speech_length": batch["speech_length"][i].item(),
+                    "target_length": batch["target_length"][i].item(),
+                    "phones": batch["target_text"][i],
+                    "target": (
+                        batch["target"][i][: batch["target_length"][i]].tolist()
+                        if batch["target_length"][i] > 0
+                        else []
+                    ),
+                    "speech_shape": tuple(batch["speech"][i].shape),
+                    "target_shape": tuple(batch["target"][i].shape),
                 }
                 print(f"\nExample {example_count + 1}:")
                 print(example_dict)
-                
+
                 example_count += 1
-            
+
             if example_count >= 5:
                 break
-        
-        print("\n" + "="*60 + "\n")
+
+        print("\n" + "=" * 60 + "\n")

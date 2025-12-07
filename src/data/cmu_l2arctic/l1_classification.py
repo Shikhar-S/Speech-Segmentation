@@ -5,9 +5,9 @@ using the combined CMU Arctic and L2-ARCTIC corpora.
 
 Usage:
     python -m src.data.cmu_l2arctic.l1_classification \
-        --data_dir /path/to/data_root \
-        --metadata_path /path/to/metadata.csv \
-        --batch_size 32
+        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic \
+        --metadata_path /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic_cache/metadata.csv \
+        --batch_size 2
 """
 
 import logging
@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 def pad_collate(batch):
     """
     Collate function for batching variable-length audio sequences.
-    
+
     Args:
         batch: List of dicts from CmuL2ArcticL1Dataset.__getitem__
-        
+
     Returns:
         dict with batched tensors:
             - speech: (B, T_max) padded audio
@@ -43,13 +43,13 @@ def pad_collate(batch):
     # Get maximum length in batch
     L = [b["speech"].shape[-1] for b in batch]
     M = max(L)
-    
+
     # Pad all sequences to max length
     A = [
         torch.nn.functional.pad(b["speech"], (0, M - b["speech"].shape[-1]))
         for b in batch
     ]
-    
+
     return {
         "speech": torch.stack(A, 0),  # (B, T_max)
         "speech_length": torch.tensor(L, dtype=torch.long),  # (B,)
@@ -64,7 +64,7 @@ def pad_collate(batch):
 class CmuL2ArcticL1Dataset(Dataset):
     """
     PyTorch Dataset for CMU + L2Arctic L1 classification.
-    
+
     Loads audio and metadata from a CSV file with the following columns:
         - audio_path: relative path from data_dir
         - l1_label: L1 class (e.g., 'en', 'ko', 'zh', 'ar', 'hi', 'es', 'vi')
@@ -72,7 +72,7 @@ class CmuL2ArcticL1Dataset(Dataset):
         - speaker_id: speaker identifier
         - utt_id: utterance identifier
     """
-    
+
     def __init__(
         self,
         metadata_path: str,
@@ -93,7 +93,7 @@ class CmuL2ArcticL1Dataset(Dataset):
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
         self.split = split
-        
+
         # Load metadata and filter by split
         metadata = (
             pd.read_csv(metadata_path)
@@ -101,12 +101,12 @@ class CmuL2ArcticL1Dataset(Dataset):
             .rename(columns={"index": "metadata_idx"})
         )
         self.metadata = metadata[metadata["split"] == split].reset_index(drop=True)
-        
+
         logger.info("Loaded %d samples for split '%s'", len(self.metadata), split)
-    
+
     def __len__(self):
         return len(self.metadata)
-    
+
     def __getitem__(self, idx):
         """
         Returns:
@@ -120,30 +120,30 @@ class CmuL2ArcticL1Dataset(Dataset):
                 - utt_id: str, utterance identifier
         """
         row = self.metadata.iloc[idx]
-        
+
         # Load audio
         audio_path = os.path.join(self.data_dir, row["audio_path"])
         waveform, sr = torchaudio.load(audio_path)
-        
+
         # Resample if necessary
         if sr != self.target_sr:
             resampler = torchaudio.transforms.Resample(sr, self.target_sr)
             waveform = resampler(waveform)
             sr = self.target_sr
-        
+
         # Convert to mono if necessary
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
-        
+
         # Truncate if necessary
         if self.max_duration_sec is not None:
             max_samples = int(self.max_duration_sec * sr)
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
-        
+
         # Squeeze to (T,)
         waveform = waveform.squeeze(0)
-        
+
         return {
             "speech": waveform,
             "speech_length": waveform.shape[0],
@@ -158,14 +158,14 @@ class CmuL2ArcticL1Dataset(Dataset):
 class CmuL2ArcticL1Classification(LightningDataModule):
     """
     LightningDataModule for CMU + L2Arctic L1 classification.
-    
+
     This DataModule:
         1. Loads metadata from a CSV file
         2. Creates train/val/test datasets based on the 'split' column
         3. Provides dataloaders with proper batching (zero-padding)
         4. Supports distributed training (batch_size is divided by world_size)
     """
-    
+
     def __init__(
         self,
         data_dir: str,
@@ -190,7 +190,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         self.save_hyperparameters()
         self.ds_train = self.ds_val = self.ds_test = None
         self.bs_dev = batch_size
-    
+
     def setup(self, stage: Optional[str] = None):
         """Setup datasets for train/val/test splits."""
         # Adjust batch size for distributed training
@@ -201,7 +201,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
                     f"world_size ({self.trainer.world_size})"
                 )
             self.bs_dev = self.hparams.batch_size // self.trainer.world_size
-        
+
         # Create datasets if not already created
         if self.ds_train is None:
             self.ds_train = CmuL2ArcticL1Dataset(
@@ -231,7 +231,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
                 len(self.ds_val),
                 len(self.ds_test),
             )
-    
+
     def _dl(self, ds, shuffle):
         """Helper to create DataLoader with common settings."""
         return DataLoader(
@@ -243,23 +243,23 @@ class CmuL2ArcticL1Classification(LightningDataModule):
             collate_fn=pad_collate,
             persistent_workers=self.hparams.num_workers > 0,
         )
-    
+
     def train_dataloader(self):
         """Return training dataloader."""
         return self._dl(self.ds_train, shuffle=True)
-    
+
     def val_dataloader(self):
         """Return validation dataloader."""
         return self._dl(self.ds_val, shuffle=False)
-    
+
     def test_dataloader(self):
         """Return test dataloader."""
         return self._dl(self.ds_test, shuffle=False)
-    
+
     def predict_dataloader(self):
         """
         Return prediction dataloader.
-        
+
         Concatenates all splits for inference, allowing the inference runner
         to transcribe all data at once. The metadata_idx field allows tracking
         which split each sample came from.
@@ -273,7 +273,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
 def _test_datamodule():
     """Simple test to verify DataModule works."""
     import argparse
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data_dir",
@@ -289,9 +289,9 @@ def _test_datamodule():
     )
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_workers", type=int, default=2)
-    
+
     args = parser.parse_args()
-    
+
     # Create DataModule
     dm = CmuL2ArcticL1Classification(
         data_dir=args.data_dir,
@@ -301,10 +301,10 @@ def _test_datamodule():
         pin_memory=False,
         target_sr=16000,
     )
-    
+
     # Setup and test
     dm.setup()
-    
+
     print("\n=== Testing train_dataloader ===")
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
@@ -316,18 +316,16 @@ def _test_datamodule():
     print(f"split: {batch['split']}")
     print(f"metadata_idx: {batch['metadata_idx']}")
     print(f"speaker_id: {batch['speaker_id']}")
-    
+
     print("\n=== Testing predict_dataloader ===")
     predict_loader = dm.predict_dataloader()
     print(f"Total batches in predict_dataloader: {len(predict_loader)}")
     batch = next(iter(predict_loader))
     print(f"First batch - l1_label: {batch['l1_label']}")
     print(f"First batch - split: {batch['split']}")
-    
+
     print("\n=== Sanity check passed! ===")
 
 
 if __name__ == "__main__":
     _test_datamodule()
-
-
