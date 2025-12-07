@@ -35,4 +35,4 @@ echo "Activating $virtual_env_dir..."
 . $virtual_env_dir/bin/activate
 
 
-uv pip install --index-strategy unsafe-best-match -r requirements.txt
+uv pip install -r requirements.txt
