@@ -1,13 +1,12 @@
-_target_: src.data.fleurs.language_id.FleursLanguageId
+_target_: src.data.fleurs.common_datamodule.FleursLanguageId
+cache_dir: ${paths.exp_dir}/fleurs_cache
 target_sr: 16000
 max_audio_length: 20.0
 # Use individual language configs instead of "all" to download less data
 # This will load only these 5 languages (much smaller than all 102 languages)
-config_name: null  # Set to null to use language_subset instead
 language_subset: ["en_us", "hi_in", "es_419", "fr_fr", "de_de"]  # Only 5 languages for small dataset
 # Limit samples per split to keep dataset small
 max_samples: 500  # Use only 500 samples per split (train/val/test) = 1500 total samples
 batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 num_workers: 10
 pin_memory: False
-

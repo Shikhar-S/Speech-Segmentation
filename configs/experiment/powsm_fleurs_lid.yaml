@@ -1,10 +1,10 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=fleurs_language_id
+# python src/main.py experiment=powsm_fleurs_lid
 
 defaults:
-  - override /data: fleurs_language_id
+  - override /data: fleurs
   - override /model: powsm_language_id
   - override /model/net: powsm  # Required by main.yaml, but model uses 'model' field instead
   - override /trainer: gpu
@@ -14,8 +14,8 @@ defaults:
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-task_name: "fleurs_language_id"
-tags: ["fleurs_language_id"]
+task_name: "powsm_fleurs_lid"
+tags: ["powsm_fleurs_lid"]
 
 seed: 42
 
@@ -38,7 +38,7 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "fleurs_language_id"
+    group: "powsm_fleurs_lid"
   aim:
-    experiment: "fleurs_language_id"
+    experiment: "powsm_fleurs_lid"
 
