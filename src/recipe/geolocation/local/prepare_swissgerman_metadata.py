@@ -27,6 +27,9 @@ def read_df_with_location(
     metadata_df.rename(columns=column_map, inplace=True)
     metadata_df = metadata_df[list(column_map.values())]
     metadata_df["dataset"] = dataset_name
+    metadata_df["audio_path"] = metadata_df.apply(
+        lambda row: f"{data_root}/{dataset_name}/{row['path']}", axis=1
+    )
     return metadata_df
 
 

@@ -113,13 +113,13 @@ class VaaniGeolocation(LightningDataModule):
         super().__init__()
         self.save_hyperparameters()
         self.ds_train = self.ds_val = self.ds_test = None
-        self.bs_dev = batch_size
+        self.batch_size = batch_size
 
     def setup(self, stage: Optional[str] = None):
         if self.trainer:
             if self.hparams.batch_size % self.trainer.world_size:
                 raise RuntimeError("batch_size not divisible by world_size")
-            self.bs_dev = self.hparams.batch_size // self.trainer.world_size
+            self.batch_size = self.hparams.batch_size // self.trainer.world_size
 
         if self.ds_train is None:
             self.ds_train = VaaniParquetDataset(
@@ -147,7 +147,7 @@ class VaaniGeolocation(LightningDataModule):
     def _dl(self, ds, shuffle):
         return DataLoader(
             ds,
-            batch_size=self.bs_dev,
+            batch_size=self.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             shuffle=shuffle,

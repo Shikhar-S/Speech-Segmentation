@@ -1,3 +1,7 @@
+import os
+import torch
+import torchaudio
+from tqdm import tqdm
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import LocalEntryNotFoundError
 import logging
@@ -47,3 +51,47 @@ def download_hf_snapshot(
         )
         logging.info(f"Downloaded snapshot for {repo_id} to {path}")
         return path
+
+
+def resample_dataset(
+    metadata_df,
+    path_key,
+    src_data_dir,
+    src_sr,
+    tgt_data_dir,
+    tgt_sr,
+    force_resample=False,
+):
+    """Resample all audio in `metadata_df[path_key]` from src_sr -> tgt_sr into tgt_data_dir on GPU, if available."""
+    if os.path.exists(tgt_data_dir) and not force_resample:
+        logging.info(f"Found existing resampled data at {tgt_data_dir}, skipping.")
+        return
+
+    os.makedirs(tgt_data_dir, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    resampler = torchaudio.transforms.Resample(orig_freq=src_sr, new_freq=tgt_sr).to(
+        device
+    )
+    logging.info(
+        f"Resampling audio from {src_sr} Hz to {tgt_sr} Hz into {tgt_data_dir}..."
+    )
+
+    for _, row in tqdm(
+        metadata_df.iterrows(), total=len(metadata_df), desc="Resampling"
+    ):
+        rel_path = row[path_key]
+        src = os.path.join(src_data_dir, rel_path)
+        dst = os.path.join(tgt_data_dir, rel_path)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+
+        if os.path.exists(dst) and not force_resample:
+            continue
+
+        wav, src_sr_actual = torchaudio.load(src)
+        if src_sr_actual != src_sr:
+            logging.warning(f"Expected {src_sr} Hz, got {src_sr_actual} Hz for {src}")
+        wav = wav.to(device)
+        with torch.no_grad():
+            wav_resampled = resampler(wav).cpu()
+
+        torchaudio.save(dst, wav_resampled, tgt_sr)

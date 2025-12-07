@@ -14,6 +14,8 @@ from lightning import LightningDataModule
 import pandas as pd
 import math
 
+from src.core.utils import resample_dataset
+
 
 def pad_collate(batch):
     L = [b["speech"].shape[-1] for b in batch]
@@ -44,7 +46,7 @@ class SwissGermanDataset(Dataset):
         self.data_dir = data_dir
         self.target_sr = target_sr
         self.metadata = metadata_df
-        self.audio_column = "path"
+        self.path_key = "audio_path"
         self.max_output_audio_length = 20  # seconds
         self._pf_cache = {}  # Cache ParquetFile objects
 
@@ -53,21 +55,15 @@ class SwissGermanDataset(Dataset):
 
     def __getitem__(self, i):
         row = self.metadata.iloc[i]
-        # Process audio
-        rel_audio_path = row[self.audio_column]
-        dataset = row["dataset"]
-        full_audio_path = os.path.join(self.data_dir, dataset, "audio", rel_audio_path)
+        full_audio_path = os.path.join(
+            self.data_dir, f"resampled_{self.target_sr}Hz", row[self.path_key]
+        )
         assert os.path.exists(
             full_audio_path
         ), f"Audio file not found: {full_audio_path}"
         wav, sr = torchaudio.load(full_audio_path)  # (1, T)
         # for mp3 files, decoding can result in overshooting beyond [-1, 1]
         wav = wav.clamp(-1.0, 1.0)
-        if self.target_sr and sr != self.target_sr:
-            # some audios in this dataset are resampled from 44.1khz to 16khz
-            wav = torchaudio.functional.resample(wav, sr, self.target_sr)
-            sr = self.target_sr
-
         # Trim
         max_len = sr * self.max_output_audio_length
         if wav.shape[-1] > max_len:
@@ -109,6 +105,21 @@ class SwissGermanGeolocation(LightningDataModule):
         self.metadata_df = pd.read_csv(metadata_path)
         self.ds_train = self.ds_val = self.ds_test = None
         self.bs_dev = batch_size
+
+    def prepare_data(self):
+        """Prepare data by resampling audio."""
+        tgt_dir = os.path.join(
+            self.hparams.data_dir, f"resampled_{self.hparams.target_sr}Hz"
+        )
+        resample_dataset(
+            metadata_df=pd.read_csv(self.hparams.metadata_path),
+            path_key="audio_path",
+            src_data_dir=self.hparams.data_dir,
+            src_sr=44100,
+            tgt_data_dir=tgt_dir,
+            tgt_sr=self.hparams.target_sr,
+            force_resample=False,
+        )
 
     def setup(self, stage: Optional[str] = None):
         if self.trainer:

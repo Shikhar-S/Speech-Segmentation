@@ -14,6 +14,9 @@ from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from torchmetrics.classification import Accuracy
 from lightning.pytorch.utilities import grad_norm
+from src.utils import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def get_kv_pooling_mask(lengths):
@@ -48,7 +51,9 @@ class LanguageIdModel(LightningModule):
         scheduler: torch.optim.lr_scheduler,
         num_classes: Optional[int] = None,
         freeze_encoder: bool = True,
-        net: Optional[nn.Module] = None,  # Ignored - kept for Hydra config compatibility
+        net: Optional[
+            nn.Module
+        ] = None,  # Ignored - kept for Hydra config compatibility
         **kwargs,  # Accept any extra kwargs to avoid errors
     ) -> None:
         super().__init__()
@@ -79,7 +84,7 @@ class LanguageIdModel(LightningModule):
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
         self.val_loss_best = MinMetric()
-        
+
         # Accuracy metrics - will be initialized when num_classes is known
         self.train_acc = None
         self.val_acc = None
@@ -102,8 +107,11 @@ class LanguageIdModel(LightningModule):
             # Lightning will handle device placement automatically
 
     def forward(self, x: torch.Tensor, x_lengths: torch.Tensor) -> torch.Tensor:
+        log.info(f"Forward pass with input shape: {x.shape}")
         if self.langid_head is None:
-            raise RuntimeError("num_classes not set. Call setup_num_classes() first or provide num_classes in config.")
+            raise RuntimeError(
+                "num_classes not set. Call setup_num_classes() first or provide num_classes in config."
+            )
         h, h_len = self.net.encode(x, x_lengths)  # (B, T, D), (B,)
         h = F.normalize(h, dim=-1, eps=1e-8)
         b, t, d = h.size()
@@ -126,7 +134,7 @@ class LanguageIdModel(LightningModule):
         speech = batch["speech"]
         speech_length = batch["speech_length"]
         y_lang_id = batch["lang_id"]
-        
+
         # Auto-detect num_classes from batch if not set
         if self.langid_head is None:
             max_class = y_lang_id.max().item() + 1
@@ -134,11 +142,12 @@ class LanguageIdModel(LightningModule):
             # Log a warning that we're using auto-detected num_classes
             if self.trainer and self.trainer.is_global_zero:
                 import warnings
+
                 warnings.warn(
                     f"num_classes was not set in config. Auto-detected {max_class} classes from batch. "
                     f"Consider setting num_classes: {max_class} in your model config for better performance."
                 )
-        
+
         logits = self(speech, speech_length)
         loss = self.criterion(logits, y_lang_id)
         return {
@@ -186,7 +195,9 @@ class LanguageIdModel(LightningModule):
         self.val_loss(batch["loss"])
         if self.val_acc is not None:
             self.val_acc(batch["preds"], batch["targets"])
-            self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+            self.log(
+                "val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True
+            )
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
@@ -238,7 +249,7 @@ if __name__ == "__main__":
 
     # Test with dummy data
     num_classes = 102  # FLEURS has 102 languages
-    
+
     model = LanguageIdModel(
         model=Wav2Vec2PhonemeModel(
             "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
@@ -252,12 +263,12 @@ if __name__ == "__main__":
         num_classes=num_classes,
         freeze_encoder=True,
     )
-    
+
     # Test forward pass
     dummy_input = torch.randn(2, 16000 * 5)  # batch of 2, 5 seconds of audio at 16kHz
     dummy_lengths = torch.tensor([16000 * 5, 16000 * 5])
     dummy_lang_ids = torch.tensor([0, 1])
-    
+
     output = model.training_step(
         {
             "speech": dummy_input,
@@ -267,4 +278,3 @@ if __name__ == "__main__":
         0,
     )
     print(f"Model forward pass successful! Loss: {output.item()}")
-

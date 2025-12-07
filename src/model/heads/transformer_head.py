@@ -14,7 +14,7 @@ References:
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -346,8 +346,10 @@ class TransformerHead(BaseHead):
         # Reference: PyTorch Transformer src_key_padding_mask convention
         # True = padding position (will be masked)
         batch_size = lengths.size(0)
-        mask = torch.arange(max_len, device=lengths.device).unsqueeze(0).expand(
-            batch_size, -1
+        mask = (
+            torch.arange(max_len, device=lengths.device)
+            .unsqueeze(0)
+            .expand(batch_size, -1)
         )
         mask = mask >= lengths.unsqueeze(1)
         return mask

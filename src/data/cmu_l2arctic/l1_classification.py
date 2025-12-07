@@ -12,13 +12,13 @@ Usage:
 
 import logging
 import os
-from typing import Optional
+from typing import Dict, Optional, List
 import pandas as pd
 import torch
 import torchaudio
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from lightning import LightningDataModule
-
+from src.core.utils import resample_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def pad_collate(batch):
         dict with batched tensors:
             - speech: (B, T_max) padded audio
             - speech_length: (B,) actual lengths
-            - l1_label: List[str] of length B
+            - label: List[str] of length B
             - split: List[str] of length B
             - metadata_idx: List[int] of length B
             - speaker_id: List[str] of length B
@@ -49,11 +49,13 @@ def pad_collate(batch):
         torch.nn.functional.pad(b["speech"], (0, M - b["speech"].shape[-1]))
         for b in batch
     ]
+    T = torch.tensor([b["target"] for b in batch], dtype=torch.long)
 
     return {
         "speech": torch.stack(A, 0),  # (B, T_max)
         "speech_length": torch.tensor(L, dtype=torch.long),  # (B,)
-        "l1_label": [b["l1_label"] for b in batch],  # List[str]
+        "target": T,  # (B,)
+        "label": [b["label"] for b in batch],  # List[str]
         "split": [b["split"] for b in batch],  # List[str]
         "metadata_idx": [b["metadata_idx"] for b in batch],  # List[int]
         "speaker_id": [b["speaker_id"] for b in batch],  # List[str]
@@ -67,7 +69,7 @@ class CmuL2ArcticL1Dataset(Dataset):
 
     Loads audio and metadata from a CSV file with the following columns:
         - audio_path: relative path from data_dir
-        - l1_label: L1 class (e.g., 'en', 'ko', 'zh', 'ar', 'hi', 'es', 'vi')
+        - label: L1 class (e.g., 'en', 'ko', 'zh', 'ar', 'hi', 'es', 'vi')
         - split: 'train', 'val', or 'test'
         - speaker_id: speaker identifier
         - utt_id: utterance identifier
@@ -78,6 +80,7 @@ class CmuL2ArcticL1Dataset(Dataset):
         metadata_path: str,
         split: str,  # 'train', 'val', or 'test'
         data_dir: str,
+        label_to_ids: Dict[str, int],
         target_sr: int = 16000,
         max_duration_sec: Optional[float] = None,
     ):
@@ -93,6 +96,7 @@ class CmuL2ArcticL1Dataset(Dataset):
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
         self.split = split
+        self.label_to_ids = label_to_ids
 
         # Load metadata and filter by split
         metadata = (
@@ -113,24 +117,22 @@ class CmuL2ArcticL1Dataset(Dataset):
             dict with:
                 - speech: Tensor of shape (T,), float32
                 - speech_length: int, actual audio length in samples
-                - l1_label: str, L1 class label
+                - label: str, L1 class label
                 - split: str, data split
                 - metadata_idx: int, index in metadata CSV
                 - speaker_id: str, speaker identifier
                 - utt_id: str, utterance identifier
         """
         row = self.metadata.iloc[idx]
-
-        # Load audio
-        audio_path = os.path.join(self.data_dir, row["audio_path"])
+        # Load audio from resampled data!!
+        audio_path = os.path.join(
+            self.data_dir, f"resampled_{self.target_sr}Hz", row["audio_path"]
+        )
         waveform, sr = torchaudio.load(audio_path)
-
         # Resample if necessary
-        if sr != self.target_sr:
-            resampler = torchaudio.transforms.Resample(sr, self.target_sr)
-            waveform = resampler(waveform)
-            sr = self.target_sr
-
+        assert (
+            sr == self.target_sr
+        ), f"Expected sample rate {self.target_sr}, but got {sr}"
         # Convert to mono if necessary
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
@@ -147,7 +149,8 @@ class CmuL2ArcticL1Dataset(Dataset):
         return {
             "speech": waveform,
             "speech_length": waveform.shape[0],
-            "l1_label": row["l1_label"],
+            "label": row["l1_label"],
+            "target": self.label_to_ids[row["l1_label"]],
             "split": row["split"],
             "metadata_idx": row["metadata_idx"],
             "speaker_id": row["speaker_id"],
@@ -172,8 +175,10 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         metadata_path: str,
         batch_size: int = 32,
         num_workers: int = 4,
-        pin_memory: bool = True,
+        pin_memory: bool = False,
         target_sr: int = 16000,
+        num_classes: int = 7,
+        id_to_label: List[str] = None,
         max_duration_sec: Optional[float] = None,
     ):
         """
@@ -184,12 +189,30 @@ class CmuL2ArcticL1Classification(LightningDataModule):
             num_workers: Number of dataloader workers
             pin_memory: Whether to pin memory for GPU transfer
             target_sr: Target sample rate
+            num_classes: Number of L1 classes
             max_duration_sec: Maximum audio duration in seconds
         """
         super().__init__()
         self.save_hyperparameters()
+        self.id_to_label = id_to_label
+        self.label_to_ids = {label: i for i, label in enumerate(id_to_label)}
         self.ds_train = self.ds_val = self.ds_test = None
-        self.bs_dev = batch_size
+        self.batch_size = batch_size
+
+    def prepare_data(self):
+        """Prepare data by resampling audio."""
+        tgt_dir = os.path.join(
+            self.hparams.data_dir, f"resampled_{self.hparams.target_sr}Hz"
+        )
+        resample_dataset(
+            metadata_df=pd.read_csv(self.hparams.metadata_path),
+            path_key="audio_path",
+            src_data_dir=self.hparams.data_dir,
+            src_sr=44100,
+            tgt_data_dir=tgt_dir,
+            tgt_sr=self.hparams.target_sr,
+            force_resample=False,
+        )
 
     def setup(self, stage: Optional[str] = None):
         """Setup datasets for train/val/test splits."""
@@ -200,7 +223,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
                     f"batch_size ({self.hparams.batch_size}) not divisible by "
                     f"world_size ({self.trainer.world_size})"
                 )
-            self.bs_dev = self.hparams.batch_size // self.trainer.world_size
+            self.batch_size = self.hparams.batch_size // self.trainer.world_size
 
         # Create datasets if not already created
         if self.ds_train is None:
@@ -209,6 +232,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
                 split="train",
                 data_dir=self.hparams.data_dir,
                 target_sr=self.hparams.target_sr,
+                label_to_ids=self.label_to_ids,
                 max_duration_sec=self.hparams.max_duration_sec,
             )
             self.ds_val = CmuL2ArcticL1Dataset(
@@ -216,6 +240,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
                 split="val",
                 data_dir=self.hparams.data_dir,
                 target_sr=self.hparams.target_sr,
+                label_to_ids=self.label_to_ids,
                 max_duration_sec=self.hparams.max_duration_sec,
             )
             self.ds_test = CmuL2ArcticL1Dataset(
@@ -223,6 +248,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
                 split="test",
                 data_dir=self.hparams.data_dir,
                 target_sr=self.hparams.target_sr,
+                label_to_ids=self.label_to_ids,
                 max_duration_sec=self.hparams.max_duration_sec,
             )
             logger.info(
@@ -234,9 +260,12 @@ class CmuL2ArcticL1Classification(LightningDataModule):
 
     def _dl(self, ds, shuffle):
         """Helper to create DataLoader with common settings."""
+        logger.info(
+            'Constructing DataLoader for split="%s", shuffle=%s', ds.split, shuffle
+        )
         return DataLoader(
             ds,
-            batch_size=self.bs_dev,
+            batch_size=self.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             shuffle=shuffle,
@@ -312,7 +341,7 @@ def _test_datamodule():
     print(f"speech shape: {batch['speech'].shape}")
     print(f"speech_length shape: {batch['speech_length'].shape}")
     print(f"speech_length values: {batch['speech_length']}")
-    print(f"l1_label: {batch['l1_label']}")
+    print(f"label: {batch['label']}")
     print(f"split: {batch['split']}")
     print(f"metadata_idx: {batch['metadata_idx']}")
     print(f"speaker_id: {batch['speaker_id']}")
@@ -321,7 +350,7 @@ def _test_datamodule():
     predict_loader = dm.predict_dataloader()
     print(f"Total batches in predict_dataloader: {len(predict_loader)}")
     batch = next(iter(predict_loader))
-    print(f"First batch - l1_label: {batch['l1_label']}")
+    print(f"First batch - label: {batch['label']}")
     print(f"First batch - split: {batch['split']}")
 
     print("\n=== Sanity check passed! ===")

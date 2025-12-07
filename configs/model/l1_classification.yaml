@@ -1,7 +1,7 @@
 # L1 Classification model config
 # Encoder is injected via model/net group (e.g., override /model/net: powsm or ipa_embedding)
 # Head is injected via model/head group (e.g., override /model/head: transformer or rnn)
-#
+# Head is built partially here. The input dimension for head is inferred dynamically based on the encoder.
 # Two input modes are supported:
 # 1. Audio mode (input_type: "audio"): Uses audio encoder (powsm, wav2vec2phoneme)
 #    - Data batch contains: speech, speech_length, label
@@ -25,21 +25,15 @@ scheduler:
   total_iters: 100
   last_epoch: -1
 
-# Encoder is provided via model/net group
-encoder: ${model.net}
-
+# Encoder must be provided via model/net group
+net: ???
 # Head configuration is loaded from configs/model/head/*.yaml
-# Override input_dim and output_dim here
+# Override output_dim here, input_dim is picked up 
+# dynamically based on the specified net in code
 head:
-  input_dim: ${model.encoder_output_dim}
-  output_dim: ${model.num_classes}
+  output_dim: ${data.num_classes}
 
-# Model parameters
-num_classes: 7  # L1 classes: ar, en, es, hi, ko, vi, zh
-encoder_output_dim: ???  # Must be specified based on encoder (e.g., 256 for powsm, 128 for ipa_embedding)
-freeze_encoder: true  # For audio mode; typically false for IPA mode
-id_to_label: ["ar", "en", "es", "hi", "ko", "vi", "zh"]  # Fixed L1 labels (alphabetical order)
-
-# Input mode: "audio" for audio encoder, "ipa" for IPA embedding
-input_type: "audio"
-
+num_classes: ${data.num_classes}
+id_to_label: ${data.id_to_label}
+freeze_encoder: false  # True/False for audio mode; false for IPA mode
+input_type: "audio" # Input mode: "audio" for audio encoder, "ipa" for IPA embedding

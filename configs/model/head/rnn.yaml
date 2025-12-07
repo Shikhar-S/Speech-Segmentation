@@ -2,6 +2,7 @@
 # Reference: src/model/heads/rnn_head.py
 
 _target_: src.model.heads.rnn_head.RNNHead
+_partial_: true
 
 # Required parameters (must be overridden)
 input_dim: ???  # Encoder output dimension (e.g., 256 for powsm)

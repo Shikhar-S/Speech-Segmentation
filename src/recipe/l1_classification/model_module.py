@@ -1,8 +1,7 @@
 """L1 Classification LightningModule.
 
 This module implements the training/evaluation recipe for L1 (native language)
-classification from speech or IPA text. It follows the pattern established in
-src/recipe/geolocation/model_module.py.
+classification from speech or IPA text.
 
 The recipe is responsible for:
 - Loss computation (CrossEntropyLoss)
@@ -16,17 +15,22 @@ Run main:
     python -m src.recipe.l1_classification.model_module
 """
 
-from typing import Any, Dict, List, Literal, Optional, Sequence, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 import torch
 import torch.nn as nn
 from lightning import LightningModule
 from torchmetrics import MeanMetric, MinMetric
-from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
+from torchmetrics.classification import (
+    MulticlassAccuracy,
+    MulticlassF1Score,
+)
 from lightning.pytorch.utilities import grad_norm
 
 from src.model.heads.base_head import BaseHead, TaskType
+from src.utils import RankedLogger
 
+log = RankedLogger(__name__, rank_zero_only=True)
 # Type alias for input modes
 InputType = Literal["audio", "ipa"]
 
@@ -34,7 +38,7 @@ InputType = Literal["audio", "ipa"]
 class L1ClassificationModel(LightningModule):
     """LightningModule for L1 (native language) classification.
 
-    This module supports two input modes:
+    This module supports two setups:
     1. Audio mode: Takes an audio encoder (e.g., powsm, wav2vec2phoneme) and a head.
     2. IPA mode: Takes an IPA embedding module and a head.
 
@@ -47,11 +51,11 @@ class L1ClassificationModel(LightningModule):
 
     def __init__(
         self,
-        encoder: nn.Module,
+        net: nn.Module,
         head: BaseHead,
+        num_classes: int,
         optimizer: torch.optim.Optimizer,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-        num_classes: int = 7,
         freeze_encoder: bool = True,
         id_to_label: Optional[Sequence[str]] = None,
         input_type: InputType = "audio",
@@ -59,22 +63,22 @@ class L1ClassificationModel(LightningModule):
         """Initialize the L1 Classification model.
 
         Args:
-            encoder: The encoder module. For audio mode, this is an audio encoder
+            net: The encoder module. For audio mode, this is an audio encoder
                 (e.g., powsm, wav2vec2phoneme). For IPA mode, this is an IPA embedding.
-            head: The classification head module.
+            head: Callable to the partially initialize classification head module.
+            num_classes: Number of L1 classes (7 for L2Arctic).
             optimizer: Optimizer class (partial).
             scheduler: Optional learning rate scheduler class (partial).
-            num_classes: Number of L1 classes (default: 7 for L2Arctic).
             freeze_encoder: Whether to freeze encoder weights during training.
                 For IPA mode, this is typically False since the embedding is trainable.
             id_to_label: Optional list of label strings for ID-to-label conversion.
             input_type: Input mode, either "audio" or "ipa".
         """
         super().__init__()
-        self.save_hyperparameters(logger=False, ignore=["encoder", "head"])
+        self.save_hyperparameters(logger=False, ignore=["net", "head"])
 
-        self.encoder = encoder
-        self.head = head
+        self.encoder = net
+        self.head = head(input_dim=self.encoder.encoder_output_size())
         self.num_classes = num_classes
         self.freeze_encoder = freeze_encoder
         self.input_type: InputType = input_type
@@ -85,10 +89,10 @@ class L1ClassificationModel(LightningModule):
         self._set_label_mappings(id_to_label)
 
         # Validate head task type
-        if head.task_type != TaskType.CLASSIFICATION:
+        if self.head.task_type != TaskType.CLASSIFICATION:
             raise ValueError(
                 f"L1ClassificationModel requires a classification head, "
-                f"got {head.task_type}"
+                f"got {self.head.task_type}"
             )
 
         # Loss function (recipe's responsibility)
@@ -115,9 +119,7 @@ class L1ClassificationModel(LightningModule):
         self.val_f1 = MulticlassF1Score(num_classes=num_classes, average="macro")
         self.test_f1 = MulticlassF1Score(num_classes=num_classes, average="macro")
 
-    def _set_label_mappings(
-        self, id_to_label: Optional[Sequence[str]]
-    ) -> None:
+    def _set_label_mappings(self, id_to_label: Optional[Sequence[str]]) -> None:
         """Register label/id mappings (optional)."""
         if id_to_label is None:
             self.id_to_label = None
@@ -159,7 +161,9 @@ class L1ClassificationModel(LightningModule):
             Logits tensor of shape (batch, num_classes).
         """
         # Encode input (both audio encoder and IPA embedding have .encode() method)
-        encoder_out, encoder_out_lengths = self.encoder.encode(input_tensor, input_lengths)
+        encoder_out, encoder_out_lengths = self.encoder.encode(
+            input_tensor, input_lengths
+        )
 
         # Pass through head to get logits
         logits = self.head(encoder_out, encoder_out_lengths)
@@ -169,13 +173,13 @@ class L1ClassificationModel(LightningModule):
     def _extract_batch_inputs(
         self, batch: Dict[str, torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Extract input tensor, lengths, and labels from batch based on input_type.
+        """Extract input tensor, lengths, and target from batch based on input_type.
 
         Args:
             batch: Input batch dictionary.
 
         Returns:
-            Tuple of (input_tensor, input_lengths, labels).
+            Tuple of (input_tensor, input_lengths, target).
         """
         if self.input_type == "audio":
             # Audio mode: batch contains 'speech' and 'speech_length'
@@ -186,8 +190,8 @@ class L1ClassificationModel(LightningModule):
             input_tensor = batch["ipa_ids"]
             input_lengths = batch["lengths"]
 
-        labels = batch["label"]
-        return input_tensor, input_lengths, labels
+        target = batch["target"]
+        return input_tensor, input_lengths, target
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Shared step for train/val/test.
@@ -200,13 +204,13 @@ class L1ClassificationModel(LightningModule):
         Returns:
             Dictionary with loss, logits, predictions, and targets.
         """
-        input_tensor, input_lengths, labels = self._extract_batch_inputs(batch)
+        input_tensor, input_lengths, targets = self._extract_batch_inputs(batch)
 
         # Forward pass
         logits = self(input_tensor, input_lengths)
 
         # Compute loss (recipe's responsibility)
-        loss = self.criterion(logits, labels)
+        loss = self.criterion(logits, targets)
 
         # Post-processing: argmax for predictions (recipe's responsibility)
         preds = torch.argmax(logits, dim=-1)
@@ -214,8 +218,8 @@ class L1ClassificationModel(LightningModule):
         return {
             "loss": loss,
             "logits": logits,
-            "preds": preds,
-            "targets": labels,
+            "preds": preds.detach(),
+            "targets": targets.detach(),
         }
 
     def on_before_optimizer_step(self, optimizer) -> None:
@@ -259,9 +263,7 @@ class L1ClassificationModel(LightningModule):
 
         return out["loss"]
 
-    def validation_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
-    ) -> None:
+    def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Validation step.
 
         Args:
@@ -276,15 +278,9 @@ class L1ClassificationModel(LightningModule):
         self.val_f1(out["preds"], out["targets"])
 
         # Log metrics
-        self.log(
-            "val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True
-        )
-        self.log(
-            "val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True
-        )
-        self.log(
-            "val/f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=False
-        )
+        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=False)
 
     def on_validation_epoch_end(self) -> None:
         """Log best validation loss at epoch end."""
@@ -297,9 +293,7 @@ class L1ClassificationModel(LightningModule):
             prog_bar=True,
         )
 
-    def test_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
-    ) -> None:
+    def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         """Test step.
 
         Args:
@@ -317,12 +311,8 @@ class L1ClassificationModel(LightningModule):
         self.log(
             "test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True
         )
-        self.log(
-            "test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True
-        )
-        self.log(
-            "test/f1", self.test_f1, on_step=False, on_epoch=True, prog_bar=False
-        )
+        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/f1", self.test_f1, on_step=False, on_epoch=True, prog_bar=False)
 
     def configure_optimizers(self) -> Dict[str, Any]:
         """Configure optimizers and schedulers.
@@ -333,8 +323,7 @@ class L1ClassificationModel(LightningModule):
         if self.freeze_encoder:
             # Only optimize non-encoder parameters
             optimizable_params = [
-                p for n, p in self.named_parameters()
-                if not n.startswith("encoder.")
+                p for n, p in self.named_parameters() if not n.startswith("encoder.")
             ]
         else:
             optimizable_params = list(self.parameters())
@@ -374,15 +363,17 @@ if __name__ == "__main__":
     seq_len = 20
 
     ipa_encoder = IPAEmbedding(vocab_size=vocab_size, embedding_dim=embedding_dim)
-    head = TransformerHead(
-        input_dim=embedding_dim,
-        output_dim=num_classes,
-        d_model=64,
-        nhead=2,
-        num_layers=1,
+    head = partial(
+        TransformerHead(
+            input_dim=embedding_dim,
+            output_dim=num_classes,
+            d_model=64,
+            nhead=2,
+            num_layers=1,
+        )
     )
     model = L1ClassificationModel(
-        encoder=ipa_encoder,
+        net=ipa_encoder,
         head=head,
         optimizer=partial(torch.optim.Adam, lr=1e-4),
         num_classes=num_classes,
@@ -404,4 +395,3 @@ if __name__ == "__main__":
     print(f"Predictions: {out['preds']}")
 
     print("\nSanity check passed!")
-

@@ -6,7 +6,7 @@ by providing an `encode` method that returns (encoder_out, encoder_out_lengths).
 
 Usage:
     embedding = IPAEmbedding(vocab_size=100, embedding_dim=128)
-    
+
     # Input: token IDs (B, T) and lengths (B,)
     encoder_out, encoder_out_lengths = embedding.encode(ipa_ids, lengths)
     # encoder_out: (B, T, embedding_dim)
@@ -100,7 +100,7 @@ class IPAEmbedding(nn.Module):
 
         return embedded, lengths
 
-    def output_size(self) -> int:
+    def encoder_output_size(self) -> int:
         """Return the output dimension of the encoder.
 
         This method is provided for compatibility with other encoders.
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     model = IPAEmbedding(vocab_size=vocab_size, embedding_dim=embedding_dim)
     print(f"Model: {model}")
-    print(f"Output size: {model.output_size()}")
+    print(f"Output size: {model.encoder_output_size()}")
 
     # Create dummy input
     ipa_ids = torch.randint(1, vocab_size, (batch_size, seq_len))
@@ -164,9 +164,3 @@ if __name__ == "__main__":
     assert torch.equal(encoder_out_lengths, lengths)
 
     print("\nSanity check passed!")
-
-
-
-
-
-

@@ -2,21 +2,22 @@
 
 # L1 Classification experiment with POWSM encoder
 # To execute this experiment run:
-# python src/main.py experiment=powsm_l1_classification
+# python src/main.py experiment=powsm_cmul2arctic_l1cls
 
 defaults:
+  - override /data: cmu_l2arctic_l1
   - override /model: l1_classification
+  - override /model/head: transformer
   - override /model/net: powsm
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-# TODO: Add data config once L1 classification dataset is prepared
-# - override /data: l1_classification
-# - override /data/tokenizer: ...
+# TODO(shikhar): add a nesting level to separate out experiment 
+# configs for probing, cascade, inference
 
-task_name: "powsm_l1_classification"
-tags: ["powsm", "l1_classification"]
+task_name: "powsm_cmul2arctic_l1cls"
+tags: ["powsm",'cmu_l2arctic' ,"l1_classification"]
 
 seed: 42
 
@@ -26,18 +27,15 @@ trainer:
   gradient_clip_val: 1.0
   val_check_interval: 0.25  # validate 4 times per epoch
 
+data:
+  batch_size: 32
+
 model:
-  num_classes: ???  # Must be specified based on dataset
-  freeze_encoder: true
+  freeze_encoder: false
   optimizer:
     lr: 0.0001
-
-# TODO: Add data config
-# data:
-#   batch_size: 32
 
 logger:
   wandb:
     tags: ${tags}
     group: "l1_classification"
-

@@ -2,9 +2,9 @@
 # Reference: src/model/heads/transformer_head.py
 
 _target_: src.model.heads.transformer_head.TransformerHead
+_partial_: true
 
 # Required parameters (must be overridden)
-input_dim: ???  # Encoder output dimension (e.g., 256 for powsm)
 output_dim: ???  # Number of classes for classification
 
 # Transformer architecture
