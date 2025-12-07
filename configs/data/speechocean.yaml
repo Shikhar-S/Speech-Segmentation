@@ -1,0 +1,9 @@
+_target_: src.data.speechocean.speechocean762.SpeechOceanDataModule
+
+data_dir: /data/user_data/hanyuzho/speechocean762
+metadata_path: /data/user_data/hanyuzho/speechocean762/metadata.csv
+
+target_sr: 16000
+batch_size: 32
+num_workers: 4
+pin_memory: False
