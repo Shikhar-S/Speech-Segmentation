@@ -5,9 +5,9 @@ To download the corpus, clone this git repo:
     https://github.com/jimbozhang/speechocean762
 
 Usage:
-    python -m src.recipe.l2_assessment.local.prepare_metadata_speechocean.py \
-        --corpus_root /path/to/speechocean762 \
-        --output_csv metadata.csv \
+    python -m src.recipe.l2_assessment.local.prepare_metadata_speechocean \
+        --corpus_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762 \
+        --output_csv /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762/cache/metadata.csv \
         --val_ratio 0.1 \
         --seed 42
 """
@@ -50,7 +50,7 @@ def extract_speaker_id(audio_rel_path):
     return speaker_dir.replace("SPEAKER", "")
 
 
-def create_val_split(df, val_ratio=0.1, seed=42, mode='speaker'):
+def create_val_split(df, val_ratio=0.1, seed=42, mode="speaker"):
     """
     Create val split from train split.
 
@@ -115,21 +115,23 @@ def main(args):
 
             rows.append(
                 {
-                    "audio_path": audio_path,               # relative audio path from corpus_root
-                    "split": split,                         # split: 'train' / 'val / 'test'
-                    "speaker_id": speaker_id,               # speaker id
-                    "utt_id": utt_id,                       # utterance id
-                    "text": score["text"],                  # transcript text
-                    "accuracy": score["accuracy"],          # sentence-level accuracy score
-                    "completeness": score["completeness"],  # sentence-level completeness score
-                    "fluency": score["fluency"],            # sentence-level fluency score
-                    "prosodic": score["prosodic"],          # sentence-level prosodic score
-                    "total": score["total"],                # sentence-level total score
+                    "audio_path": audio_path,  # relative audio path from corpus_root
+                    "split": split,  # split: 'train' / 'val / 'test'
+                    "speaker_id": speaker_id,  # speaker id
+                    "utt_id": utt_id,  # utterance id
+                    "text": score["text"],  # transcript text
+                    "accuracy": score["accuracy"],  # sentence-level accuracy score
+                    "completeness": score[
+                        "completeness"
+                    ],  # sentence-level completeness score
+                    "fluency": score["fluency"],  # sentence-level fluency score
+                    "prosodic": score["prosodic"],  # sentence-level prosodic score
+                    "total": score["total"],  # sentence-level total score
                 }
             )
 
     df = pd.DataFrame(rows)
-    
+
     df = create_val_split(
         df,
         val_ratio=args.val_ratio,
@@ -138,7 +140,7 @@ def main(args):
     )
 
     df = df.sort_values(["split", "speaker_id", "utt_id"]).reset_index(drop=True)
-
+    os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
     df.to_csv(args.output_csv, index=False)
     print(f"Wrote {len(df)} rows to {args.output_csv}")
     print(df.head())
