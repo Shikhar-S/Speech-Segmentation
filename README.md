@@ -59,6 +59,7 @@ python src/main.py trainer.max_epochs=20 data.batch_size=64
 
 - **[Features & Capabilities](docs/features.md)** - Look at this to train on multi-gpu, run hyper-param searches etc.
 - **[Running Inference](docs/running_inference.md)** - Guide for running phone recognition inference with pre-trained models
+- **[Tokenization Workflow](docs/tokenization.md)** - How to build vocabularies and use tokenizers for IPA transcripts
 - **[Contributing Guide](CONTRIBUTING.md)** - Project structure, workflow, and best practices for contributors
 
 ## ❤️ Acknowledgement

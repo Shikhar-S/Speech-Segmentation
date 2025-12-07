@@ -1,0 +1,23 @@
+# IPA Embedding config for text-based L1 classification
+# This is a simple embedding layer that converts IPA token IDs to dense vectors
+
+_target_: src.model.common.ipa_embedding.build_ipa_embedding
+
+# vocab_size will be injected from the DataModule after vocabulary is built
+# or can be overridden in experiment config
+vocab_size: ???
+
+# Embedding dimension (this becomes encoder_output_dim for the head)
+embedding_dim: 128
+
+# Padding token index (should match CharacterTokenizer.pad_id, which is 0 by default)
+padding_idx: 0
+
+# Dropout probability applied after embedding
+dropout: 0.1
+
+
+
+
+
+
