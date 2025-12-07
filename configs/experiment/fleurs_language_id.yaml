@@ -1,0 +1,44 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/main.py experiment=fleurs_language_id
+
+defaults:
+  - override /data: fleurs_language_id
+  - override /model: powsm_language_id
+  - override /model/net: powsm  # Required by main.yaml, but model uses 'model' field instead
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+task_name: "fleurs_language_id"
+tags: ["fleurs_language_id"]
+
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 10
+  gradient_clip_val: 1.0
+  val_check_interval: 0.25 # validate 4 times per epoch
+  callbacks:
+    - learning_rate_monitor
+
+model:
+  optimizer:
+    lr: 0.0002
+  freeze_encoder: true
+
+data:
+  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: "fleurs_language_id"
+  aim:
+    experiment: "fleurs_language_id"
+

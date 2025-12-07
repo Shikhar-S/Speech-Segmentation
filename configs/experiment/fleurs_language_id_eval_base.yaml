@@ -1,0 +1,37 @@
+# @package _global_
+
+# Evaluate base model (frozen encoder + random head) without training
+# Run with: python src/main.py experiment=fleurs_language_id_eval_base
+
+defaults:
+  - override /data: fleurs_language_id
+  - override /model: powsm_language_id
+  - override /model/net: powsm
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: csv  # Use CSV logger for eval-only runs
+
+task_name: "fleurs_language_id_eval_base"
+tags: ["fleurs_language_id", "eval_base"]
+
+seed: 42
+
+# Evaluation only - no training
+train: False
+test: True
+ckpt_path: null  # Use base model (no checkpoint)
+
+trainer:
+  # Minimal trainer config for eval
+  accelerator: gpu
+  devices: 1
+
+model:
+  freeze_encoder: true  # Use frozen pre-trained encoder
+
+data:
+  # Small samples for quick evaluation
+  max_samples: 500  # Limit to 500 samples per split
+  language_subset: ["en_us", "hi_in", "es_419", "fr_fr", "de_de"]  # 5 languages
+  batch_size: 32  # Smaller batch for eval
+
