@@ -10,10 +10,10 @@ Fields returned per sample:
     metadata_idx: int
 
 Usage:
-    python -m src.data.speechocean.speechocean762 \
-        --data_dir /path/to/data_root \
-        --metadata_path /path/to/metadata.csv \
-        --batch_size 32
+    python -m src.data.speechocean.l2_assessment \
+        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762 \
+        --metadata_path /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762/cache/metadata.csv \
+        --batch_size 2
 """
 
 import os
@@ -36,7 +36,7 @@ def pad_collate(batch: List[Dict[str, Any]]):
     ]
 
     return {
-        "speech": torch.stack(A, dim=0),   # (B, T_max)
+        "speech": torch.stack(A, dim=0),  # (B, T_max)
         "speech_length": torch.tensor(L, dtype=torch.long),
         "scores": [b["scores"] for b in batch],
         "speaker_id": [b["speaker_id"] for b in batch],
@@ -90,7 +90,7 @@ class SpeechOceanDataset(Dataset):
         if sr != self.target_sr:
             resampler = torchaudio.transforms.Resample(sr, self.target_sr)
             wav = resampler(wav)
-        
+
         if wav.shape[0] > 1:
             wav = torch.mean(wav, dim=0, keepdim=True)
 
@@ -146,19 +146,19 @@ class SpeechOceanDataModule(LightningDataModule):
                 metadata_path=self.hparams.metadata_path,
                 split="train",
                 data_dir=self.hparams.data_dir,
-                target_sr=self.hparams.target_sr
+                target_sr=self.hparams.target_sr,
             )
             self.ds_val = SpeechOceanDataset(
                 metadata_path=self.hparams.metadata_path,
                 split="val",
                 data_dir=self.hparams.data_dir,
-                target_sr=self.hparams.target_sr
+                target_sr=self.hparams.target_sr,
             )
             self.ds_test = SpeechOceanDataset(
                 metadata_path=self.hparams.metadata_path,
                 split="test",
                 data_dir=self.hparams.data_dir,
-                target_sr=self.hparams.target_sr
+                target_sr=self.hparams.target_sr,
             )
 
             print(
@@ -194,13 +194,15 @@ class SpeechOceanDataModule(LightningDataModule):
 
 def _test_datamodule():
     import argparse
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, required=True)
-    parser.add_argument("--metadata_path", type=str, required=True, help="Path to metadata CSV")
+    parser.add_argument(
+        "--metadata_path", type=str, required=True, help="Path to metadata CSV"
+    )
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_workers", type=int, default=2)
-    
+
     args = parser.parse_args()
 
     dm = SpeechOceanDataModule(
@@ -216,7 +218,7 @@ def _test_datamodule():
     print("=== Testing train_dataloader ===")
     train_loader = dm.train_dataloader()
     print("Total batches:", len(train_loader))
-    
+
     batch = next(iter(train_loader))
     print(f"batch 0 (size={len(batch)}): {batch.keys()}")
     print(f"speech shape: {batch['speech'].shape}")
@@ -231,7 +233,7 @@ def _test_datamodule():
     print("=== Testing predict_dataloader ===")
     predict_loader = dm.predict_dataloader()
     print("Total batches:", len(predict_loader))
-    
+
     batch = next(iter(predict_loader))
     print(f"batch 0 (size={len(batch)}): {batch.keys()}")
     print(f"speech shape: {batch['speech'].shape}")

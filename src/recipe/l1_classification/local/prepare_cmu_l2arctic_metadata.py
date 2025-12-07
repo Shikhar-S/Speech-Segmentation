@@ -16,11 +16,31 @@ Data Download Instructions:
          $ mkdir -p {data_dir}/l2arctic_release_v5.0
          $ gdown https://drive.google.com/uc?id=1ciCw_ttbw7a9r7d5DZzTJwoZq5rQB3TA -O l2arctic_release_v5.0.zip
          $ unzip l2arctic_release_v5.0.zip -d {data_dir}/l2arctic_release_v5.0
+         ```Since unzipping sometimes fails, use this snippet
+            # (change l2arctic to l2arctic_release_v5.0 if you want)
+            rm -rf l2arctic && mkdir l2arctic && \
+            files=$(unzip -Z1 l2arctic_release_v5.0.zip) && \
+            skipped="" && \
+            for f in $files; do
+                echo "Extracting $f"
+                ok=0
+                for i in $(seq 1 5); do
+                    unzip -o l2arctic_release_v5.0.zip "$f" -d l2arctic/ >/dev/null 2>&1 && {
+                        ok=1
+                        break
+                    }
+                    echo "Retry $f ($i/5)..."
+                    sleep 1
+                done
+                [ "$ok" -eq 0 ] && skipped="$skipped $f"
+            done && \
+            echo && echo "==== SKIPPED FILES ====" && echo "$skipped"
+            # PS: You can re-run the above snippet with the skipped files to extract them.
+            # Unzipping failed as the load on filesystem was large when I tried.
+        ```
          $ cd {data_dir}/l2arctic_release_v5.0
          $ # Extract each speaker (zip files already contain speaker folder, e.g., ABA/)
-         $ for file in *.zip; do
-             unzip -q "$file"
-           done
+         $ for file in *.zip; do echo "unzipping $file" && unzip -q "$file"; done
          $ rm *.zip
     
     2. CMU ARCTIC:
@@ -40,19 +60,19 @@ Test Speakers (fixed, from L2-classification project):
 
 Usage:
     python -m src.recipe.l1_classification.local.prepare_cmu_l2arctic_metadata \
-        --l2arctic_root /path/to/l2arctic_release_v5.0 \
-        --cmu_root /path/to/cmu_arctic \
-        --output_csv /path/to/metadata.csv \
-        --data_dir /path/to/common/root
+        --l2arctic_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic/l2arctic \
+        --cmu_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic/cmu \
+        --output_csv /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic_cache/metadata.csv \
+        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic
 """
 
 import argparse
 import csv
-import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import Counter
 import random
+from tqdm import tqdm
 
 
 # L2Arctic speaker to L1 mapping
@@ -60,25 +80,25 @@ import random
 L2ARCTIC_SPEAKER_L1 = {
     "ABA": "ar",  # Arabic
     "SKA": "ar",  # Arabic
-    "YBAA": "ar", # Arabic
-    "ZHAA": "ar", # Arabic
+    "YBAA": "ar",  # Arabic
+    "ZHAA": "ar",  # Arabic
     "BWC": "zh",  # Mandarin Chinese
     "LXC": "zh",  # Mandarin Chinese
     "NCC": "zh",  # Mandarin Chinese
-    "TXHC": "zh", # Mandarin Chinese
+    "TXHC": "zh",  # Mandarin Chinese
     "ASI": "hi",  # Hindi
-    "RRBI": "hi", # Hindi
-    "SVBI": "hi", # Hindi
+    "RRBI": "hi",  # Hindi
+    "SVBI": "hi",  # Hindi
     "TNI": "hi",  # Hindi
     "HJK": "ko",  # Korean
     "HKK": "ko",  # Korean
-    "YDCK": "ko", # Korean
-    "YKWK": "ko", # Korean
-    "EBVS": "es", # Spanish
-    "ERMS": "es", # Spanish
-    "MBMPS": "es",# Spanish
+    "YDCK": "ko",  # Korean
+    "YKWK": "ko",  # Korean
+    "EBVS": "es",  # Spanish
+    "ERMS": "es",  # Spanish
+    "MBMPS": "es",  # Spanish
     "NJS": "es",  # Spanish
-    "HQTV": "vi", # Vietnamese
+    "HQTV": "vi",  # Vietnamese
     "PNV": "vi",  # Vietnamese
     "THV": "vi",  # Vietnamese
     "TLV": "vi",  # Vietnamese
@@ -109,87 +129,87 @@ def _ensure_relative_to_data_dir(
         ) from exc
 
 
-def collect_l2arctic_files(
-    l2arctic_root: str, data_dir: str
-) -> List[Dict[str, str]]:
+def collect_l2arctic_files(l2arctic_root: str, data_dir: str) -> List[Dict[str, str]]:
     """
     Collect audio files from L2Arctic corpus.
-    
+
     Args:
         l2arctic_root: Path to L2Arctic root directory
         data_dir: Common data directory for relative path calculation
-        
+
     Returns:
         List of dicts with metadata
     """
     l2arctic_path = Path(l2arctic_root)
     data_dir_path = Path(data_dir).expanduser().resolve()
     samples = []
-    
-    for speaker_id, l1_label in L2ARCTIC_SPEAKER_L1.items():
+
+    for speaker_id, l1_label in tqdm(
+        L2ARCTIC_SPEAKER_L1.items(), desc="Processing L2Arctic speakers"
+    ):
         speaker_dir = l2arctic_path / speaker_id / "wav"
         if not speaker_dir.exists():
             print(f"Warning: Speaker directory not found: {speaker_dir}")
             continue
-            
+
         for wav_file in speaker_dir.glob("*.wav"):
             # Calculate relative path from data_dir
             abs_path = wav_file.resolve()
-            rel_path = _ensure_relative_to_data_dir(
-                abs_path, data_dir_path, "L2Arctic"
-            )
-            
+            rel_path = _ensure_relative_to_data_dir(abs_path, data_dir_path, "L2Arctic")
+
             utt_id = wav_file.stem
-            samples.append({
-                "audio_path": str(rel_path),
-                "l1_label": l1_label,
-                "speaker_id": speaker_id,
-                "utt_id": utt_id,
-            })
-    
+            samples.append(
+                {
+                    "audio_path": str(rel_path),
+                    "l1_label": l1_label,
+                    "speaker_id": speaker_id,
+                    "utt_id": utt_id,
+                }
+            )
+
     print(f"Collected {len(samples)} samples from L2Arctic")
     return samples
 
 
-def collect_cmu_arctic_files(
-    cmu_root: str, data_dir: str
-) -> List[Dict[str, str]]:
+def collect_cmu_arctic_files(cmu_root: str, data_dir: str) -> List[Dict[str, str]]:
     """
     Collect audio files from CMU Arctic corpus.
-    
+
     Args:
         cmu_root: Path to CMU Arctic root directory
         data_dir: Common data directory for relative path calculation
-        
+
     Returns:
         List of dicts with metadata
     """
     cmu_path = Path(cmu_root)
     data_dir_path = Path(data_dir).expanduser().resolve()
     samples = []
-    
-    for speaker_id in CMU_SPEAKERS:
+
+    for speaker_id in tqdm(CMU_SPEAKERS, desc="Processing CMU speakers"):
         # CMU Arctic directory names are lowercase (e.g., cmu_us_bdl_arctic)
         speaker_dir = cmu_path / f"cmu_us_{speaker_id.lower()}_arctic" / "wav"
         if not speaker_dir.exists():
             print(f"Warning: CMU speaker directory not found: {speaker_dir}")
             continue
-            
+
         for wav_file in speaker_dir.glob("*.wav"):
             # Calculate relative path from data_dir
             abs_path = wav_file.resolve()
             rel_path = _ensure_relative_to_data_dir(
                 abs_path, data_dir_path, "CMU Arctic"
             )
-            
+
             utt_id = wav_file.stem
-            samples.append({
-                "audio_path": str(rel_path),
-                "l1_label": "en",  # All CMU speakers are native English
-                "speaker_id": speaker_id,
-                "utt_id": utt_id,
-            })
-    
+            samples.append(
+                {
+                    "audio_path": str(rel_path),
+                    "l1_label": "en",  # All CMU speakers are native English
+                    "speaker_id": speaker_id,
+                    "utt_id": utt_id,
+                }
+            )
+
     print(f"Collected {len(samples)} samples from CMU Arctic")
     return samples
 
@@ -202,27 +222,27 @@ def split_data(
 ) -> List[Dict[str, str]]:
     """
     Split data into train/val/test sets by speaker.
-    
+
     Uses fixed test speakers from L2-classification project to ensure consistency.
     Validation speakers are randomly selected from remaining train speakers.
-    
+
     Args:
         samples: List of sample dicts
         test_speakers: Fixed list of test speaker IDs (default: TEST_SPEAKERS constant)
         val_ratio: Ratio of speakers for validation (from non-test speakers)
         seed: Random seed
-        
+
     Returns:
         List of samples with 'split' field added
     """
     if test_speakers is None:
         test_speakers = TEST_SPEAKERS
-    
+
     random.seed(seed)
-    
+
     # Normalize test speakers to uppercase for comparison
     test_speakers_upper = {s.upper() for s in test_speakers}
-    
+
     # Group samples by speaker
     speaker_samples = {}
     for sample in samples:
@@ -230,31 +250,31 @@ def split_data(
         if spk not in speaker_samples:
             speaker_samples[spk] = []
         speaker_samples[spk].append(sample)
-    
+
     # Separate test speakers and train speakers
     all_speakers = list(speaker_samples.keys())
     test_spk_found = []
     train_spk_pool = []
-    
+
     for spk in all_speakers:
         spk_upper = spk.upper()
         if spk_upper in test_speakers_upper:
             test_spk_found.append(spk)
         else:
             train_spk_pool.append(spk)
-    
+
     # Randomly select validation speakers from train pool
     random.shuffle(train_spk_pool)
     n_val = max(1, int(len(train_spk_pool) * val_ratio))
     val_speakers = train_spk_pool[:n_val]
     train_speakers = train_spk_pool[n_val:]
-    
+
     print(f"\nSplit statistics:")
     print(f"  Train speakers: {len(train_speakers)}")
     print(f"  Val speakers: {len(val_speakers)}")
     print(f"  Test speakers: {len(test_spk_found)} (fixed from L2-classification)")
     print(f"  Test speakers: {test_spk_found}")
-    
+
     # Assign split to each sample
     result = []
     for sample in samples:
@@ -266,46 +286,46 @@ def split_data(
         else:
             sample["split"] = "train"
         result.append(sample)
-    
+
     # Print split statistics by samples
     split_counts = {"train": 0, "val": 0, "test": 0}
     label_by_split = {"train": Counter(), "val": Counter(), "test": Counter()}
-    
+
     for sample in result:
         split = sample["split"]
         split_counts[split] += 1
         label_by_split[split][sample["l1_label"]] += 1
-    
+
     print(f"\nSample statistics:")
     print(f"  Train samples: {split_counts['train']}")
     print(f"  Val samples: {split_counts['val']}")
     print(f"  Test samples: {split_counts['test']}")
-    
+
     print(f"\nL1 label distribution:")
     for split in ["train", "val", "test"]:
         print(f"  {split.capitalize()}:")
         for label, count in sorted(label_by_split[split].items()):
             print(f"    {label}: {count}")
-    
+
     return result
 
 
 def write_metadata_csv(samples: List[Dict[str, str]], output_path: str):
     """
     Write samples to CSV file.
-    
+
     Args:
         samples: List of sample dicts
         output_path: Path to output CSV file
     """
     fieldnames = ["audio_path", "l1_label", "split", "speaker_id", "utt_id"]
-    
+
     with open(output_path, "w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for sample in samples:
             writer.writerow(sample)
-    
+
     print(f"\nMetadata CSV written to: {output_path}")
     print(f"Total samples: {len(samples)}")
 
@@ -357,20 +377,20 @@ def main():
         default=42,
         help="Random seed for splitting (default: 42)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Collect samples from both corpora
     print("Collecting L2Arctic samples...")
     l2arctic_samples = collect_l2arctic_files(args.l2arctic_root, args.data_dir)
-    
+
     print("\nCollecting CMU Arctic samples...")
     cmu_samples = collect_cmu_arctic_files(args.cmu_root, args.data_dir)
-    
+
     # Combine samples
     all_samples = l2arctic_samples + cmu_samples
     print(f"\nTotal samples collected: {len(all_samples)}")
-    
+
     # Split data
     print("\nSplitting data by speaker (using fixed test speakers)...")
     samples_with_split = split_data(
@@ -379,14 +399,14 @@ def main():
         val_ratio=args.val_ratio,
         seed=args.seed,
     )
-    
+
     # Write to CSV
     output_csv_path = Path(args.output_csv).expanduser()
     output_dir = output_csv_path.parent
     if str(output_dir) not in ("", "."):
         output_dir.mkdir(parents=True, exist_ok=True)
     write_metadata_csv(samples_with_split, str(output_csv_path))
-    
+
     # Print sample preview
     print("\n=== Sample preview (first 5 rows) ===")
     for i, sample in enumerate(samples_with_split[:5]):
@@ -395,5 +415,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
