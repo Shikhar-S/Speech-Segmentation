@@ -1,5 +1,5 @@
 _target_: src.data.fleurs.common_datamodule.FleursLanguageId
-cache_dir: ${paths.exp_dir}/fleurs_cache
+cache_dir: ${paths.cache_dir}/fleurs
 
 id_to_label: ["en_us", "hi_in", "es_419", "fr_fr", "de_de"]  # limit languages
 num_classes: 5  # Must match the number of languages in language_subset

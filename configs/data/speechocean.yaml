@@ -1,7 +1,7 @@
 _target_: src.data.speechocean.l2_assessment.SpeechOceanDataModule
 
-data_dir: ${paths.exp_dir}/speechocean762
-metadata_path: ${paths.exp_dir}/speechocean762/cache/metadata.csv
+data_dir: ${paths.download_dir}/speechocean762
+metadata_path: ${paths.cache_dir}/speechocean762/metadata.csv
 
 target_sr: 16000
 batch_size: 32
