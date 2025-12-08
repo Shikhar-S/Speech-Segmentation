@@ -26,27 +26,27 @@ export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependenc
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
 ###########################
 
-python src/main.py experiment=powsm_buckeye_fa "$@"
+python src/main.py experiment=probing/fa_buckeye_powsm "$@"
 
 ## Forced alignment
 # W2v2ph model options:
-# experiment=w2v2ph_buckeye_fa +logger.wandb.name=lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
-# experiment=w2v2ph_buckeye_fa +logger.wandb.name=xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
-# experiment=w2v2ph_buckeye_fa +logger.wandb.name=ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns data.tokenizer.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# experiment=probing/fa_buckeye_w2v2ph +logger.wandb.name=lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# experiment=probing/fa_buckeye_w2v2ph +logger.wandb.name=xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# experiment=probing/fa_buckeye_w2v2ph +logger.wandb.name=ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns data.tokenizer.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
 
 # timit options:
-# experiment=powsm_timit_fa +logger.wandb.name=timit.fa.powsm
-# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
-# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
-# experiment=w2v2ph_timit_fa +logger.wandb.name=timit.fa.ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns data.tokenizer.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
+# experiment=probing/fa_timit_powsm +logger.wandb.name=timit.fa.powsm
+# experiment=probing/fa_timit_w2v2ph +logger.wandb.name=timit.fa.lv-60 model.net.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-lv-60-espeak-cv-ft
+# experiment=probing/fa_timit_w2v2ph +logger.wandb.name=timit.fa.xlsr-53 model.net.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft data.tokenizer.hf_repo=facebook/wav2vec2-xlsr-53-espeak-cv-ft
+# experiment=probing/fa_timit_w2v2ph +logger.wandb.name=timit.fa.ctaguchi model.net.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns data.tokenizer.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
 
 # ZIPA-CTC model options:
-# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=zipactc_timit_fa +logger.wandb.name=timit.fa.zipactc.500k model.net.hf_repo=anyspeech/zipa-large-crctc-500k
-# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=zipactc_timit_fa +logger.wandb.name=timit.fa.zipactc.800k model.net.hf_repo=anyspeech/zipa-large-crctc-ns-800k
+# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=probing/fa_timit_zipactc +logger.wandb.name=timit.fa.zipactc.500k model.net.hf_repo=anyspeech/zipa-large-crctc-500k
+# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=probing/fa_timit_zipactc +logger.wandb.name=timit.fa.zipactc.800k model.net.hf_repo=anyspeech/zipa-large-crctc-ns-800k
 
-# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=zipactc_buckeye_fa +logger.wandb.name=buckeye.fa.zipactc.500k model.net.hf_repo=anyspeech/zipa-large-crctc-500k
-# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=zipactc_buckeye_fa +logger.wandb.name=buckeye.fa.zipactc.800k model.net.hf_repo=anyspeech/zipa-large-crctc-ns-800k
+# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=probing/fa_buckeye_zipactc +logger.wandb.name=buckeye.fa.zipactc.500k model.net.hf_repo=anyspeech/zipa-large-crctc-500k
+# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=probing/fa_buckeye_zipactc +logger.wandb.name=buckeye.fa.zipactc.800k model.net.hf_repo=anyspeech/zipa-large-crctc-ns-800k
 
 ## Geolocation with zipactc
-# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=zipactc_vaani_geolocation +logger.wandb.name=zipactc.vaani.geolocation.500k model.net.hf_repo=anyspeech/zipa-large-crctc-500k
-# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=zipactc_vaani_geolocation +logger.wandb.name=zipactc.vaani.geolocation.800k model.net.hf_repo=anyspeech/zipa-large-crctc-ns-800k
+# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=probing/geolocation_vaani_zipactc +logger.wandb.name=zipactc.vaani.geolocation.500k model.net.hf_repo=anyspeech/zipa-large-crctc-500k
+# sbatch -A bbjs-delta-gpu -t 24:00:00 -p gpuA100x4 -c 20 --mem=32G scripts/train.sh experiment=probing/geolocation_vaani_zipactc +logger.wandb.name=zipactc.vaani.geolocation.800k model.net.hf_repo=anyspeech/zipa-large-crctc-ns-800k

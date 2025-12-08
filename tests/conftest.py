@@ -17,11 +17,11 @@ def cfg_train_global() -> DictConfig:
     """
     with initialize(version_base="1.3", config_path="../configs"):
         # Use main.yaml with an experiment config
-        # vaani_geolocation is a simple experiment that should work for tests
+        # geolocation_vaani_powsm is a simple probing experiment that should work for tests
         cfg = compose(
             config_name="main.yaml",
             return_hydra_config=True,
-            overrides=["experiment=vaani_geolocation"],
+            overrides=["experiment=probing/geolocation_vaani_powsm"],
         )
 
         # set defaults for all tests
@@ -57,7 +57,7 @@ def cfg_eval_global() -> DictConfig:
             config_name="main.yaml",
             return_hydra_config=True,
             overrides=[
-                "experiment=vaani_geolocation",
+                "experiment=probing/geolocation_vaani_powsm",
                 "train=False",
                 "test=True",
                 "ckpt_path=.",

@@ -46,7 +46,11 @@ python src/main.py trainer=gpu
 Train model with chosen experiment configuration from [configs/experiment/](configs/experiment/)
 
 ```bash
-python src/main.py experiment=vaani_geolocation
+# For probing experiments using hidden representations
+python src/main.py experiment=probing/geolocation_vaani_powsm
+
+# For inference experiments
+python src/main.py experiment=inference/vaani_powsmpr
 ```
 
 You can override any parameter from command line like this

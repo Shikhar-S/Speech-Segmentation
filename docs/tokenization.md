@@ -71,7 +71,7 @@ Set the vocabulary path in your experiment config or via CLI override.
 **Option A: In experiment config**
 
 ```yaml
-# configs/experiment/my_experiment.yaml
+# configs/experiment/probing/my_experiment.yaml
 defaults:
   - override /data/tokenizer: char
 
@@ -83,7 +83,7 @@ data:
 **Option B: CLI override**
 
 ```bash
-python src/main.py experiment=my_experiment \
+python src/main.py experiment=probing/my_experiment \
     data/tokenizer=char \
     data.tokenizer.vocab_path=artifacts/ipa_vocab.json
 ```

@@ -55,10 +55,11 @@ The directory structure of this project looks like this:
 
 1. Write your PyTorch Lightning model module (see [recipe/geolocation/model_module.py](src/recipe/geolocation/model_module.py) for example)
 1. Write your PyTorch Lightning datamodule (see [data/vaani/geolocation.py](src/data/vaani/geolocation.py) for example)
-1. Write your experiment config, containing paths to model and datamodule (see [configs/experiment/vaani_geolocation.yaml](configs/experiment/vaani_geolocation.yaml) for example)
+1. Write your experiment config, containing paths to model and datamodule (see [configs/experiment/probing/geolocation_vaani_powsm.yaml](configs/experiment/probing/geolocation_vaani_powsm.yaml) for example)
 1. Run training with chosen experiment config:
    ```bash
-   python src/main.py experiment=vaani_geolocation
+   # For probing experiments (use task_dataset_model naming)
+   python src/main.py experiment=probing/geolocation_vaani_powsm
    ```
 
 ### Experiment design
@@ -117,7 +118,7 @@ Example pipeline managing the instantiation logic: [src/main.py](src/main.py).
 
 ## Main Config
 
-Location: [configs/train.yaml](configs/train.yaml)  
+Location: [configs/main.yaml](configs/main.yaml)  
 Main project config contains default training configuration.  
 It determines how config is composed when simply executing command `python src/main.py`.
 
@@ -174,48 +175,57 @@ Location: [configs/experiment](configs/experiment)
 Experiment configs allow you to overwrite parameters from main config.  
 For example, you can use them to version control best hyperparameters for each combination of model and dataset.
 
+Experiment configs are organized in subdirectories:
+- `probing/` - Probing experiments (naming: `task_dataset_model.yaml`)
+- `inference/` - Inference experiments
+- `cascade/` - Cascade experiments
+
 <details>
-<summary><b>Show example experiment config</b></summary>
+<summary><b>Show example probing experiment config</b></summary>
 
 ```yaml
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=vaani_geolocation
+# python src/main.py experiment=probing/geolocation_vaani_powsm
 
 defaults:
   - override /data: vaani_geolocation
-  - override /model: powsm_geolocation
-  - override /trainer: default
+  - override /model: geolocation
+  - override /model/net: powsm
+  - override /trainer: gpu
   - override /callbacks: default
+  - override /logger: wandb
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-task_name: "vaani_geolocation"
-tags: ["vaani_geolocation", "powsm"]
+task_name: "geolocation_vaani_powsm"
+tags: ["vaani", "powsm", "geolocation"]
 
 seed: 42
 
 trainer:
   min_epochs: 10
   max_epochs: 10
-  gradient_clip_val: 0.5
+  gradient_clip_val: 1.0
 
 model:
   optimizer:
-    lr: 0.002
+    lr: 0.0002
 
 data:
-  batch_size: 2
+  batch_size: 48
 
 logger:
   wandb:
     tags: ${tags}
-    group: "vaani_geolocation"
+    group: "geolocation_vaani_powsm"
   aim:
-    experiment: "vaani_geolocation"
+    experiment: "geolocation_vaani_powsm"
 ```
+
+> **Note**: Probing experiment configs follow the naming convention `task_dataset_model.yaml` (e.g., `geolocation_vaani_powsm.yaml`) and tags are structured as `[dataset, model, task]`.
 
 </details>
 

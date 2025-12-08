@@ -37,4 +37,4 @@ if torch.cuda.is_available():
     print("tensor on cuda ok:", x)
 EOF
 
-python src/main.py experiment=powsm_buckeye_fa "$@"
+python src/main.py experiment=probing/fa_buckeye_powsm "$@"
