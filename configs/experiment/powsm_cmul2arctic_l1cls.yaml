@@ -28,10 +28,10 @@ trainer:
   val_check_interval: 0.25  # validate 4 times per epoch
 
 data:
-  batch_size: 32
+  batch_size: 48
 
 model:
-  freeze_encoder: false
+  freeze_encoder: true
   optimizer:
     lr: 0.0001
 

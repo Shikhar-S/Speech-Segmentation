@@ -5,6 +5,6 @@ num_classes: 7 # Number of L1 classes
 id_to_label: ["ar", "en", "es", "hi", "ko", "vi", "zh"]  # Fixed L1 labels (alphabetical order)
 target_sr: 16000
 batch_size: 32 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-num_workers: 5
+num_workers: 10
 pin_memory: False
 max_duration_sec: 20 # Optional: maximum audio duration in seconds for truncation
