@@ -1,7 +1,7 @@
 _target_: src.data.speechocean.speechocean762.SpeechOceanDataModule
 
 data_dir: /data/user_data/hanyuzho/speechocean762
-metadata_path: /data/user_data/hanyuzho/speechocean762/metadata.csv
+metadata_path: ${paths.exp_dir}/speechocean762/cache/metadata.csv
 
 target_sr: 16000
 batch_size: 32

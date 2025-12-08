@@ -1,6 +1,6 @@
 _target_: src.data.swissgerman.geolocation.SwissGermanGeolocation
 data_dir: /work/hdd/bbjs/shared/corpora/swiss_german
-metadata_path: /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/swissgerman_cache/metadata.csv
+metadata_path: ${paths.exp_dir}/swissgerman_cache/metadata.csv
 target_sr: 16000
 batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 num_workers: 10

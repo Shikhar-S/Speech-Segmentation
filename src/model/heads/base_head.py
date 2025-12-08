@@ -5,10 +5,13 @@ This module defines the common interface that all downstream task heads must imp
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Tuple
+from typing import Literal
 
 import torch
 import torch.nn as nn
+
+# Type alias for input modes
+InputType = Literal["audio", "ipa"]
 
 
 class TaskType(Enum):
@@ -73,4 +76,3 @@ class BaseHead(nn.Module, ABC):
             Logits tensor of shape (batch, output_dim).
         """
         raise NotImplementedError
-

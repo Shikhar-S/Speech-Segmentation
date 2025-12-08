@@ -1,44 +1,41 @@
 # @package _global_
 
-# to execute this experiment run:
+# Fleurs Langid experiment with POWSM encoder
+# To execute this experiment run:
 # python src/main.py experiment=powsm_fleurs_lid
 
 defaults:
   - override /data: fleurs
-  - override /model: powsm_language_id
-  - override /model/net: powsm  # Required by main.yaml, but model uses 'model' field instead
+  - override /model: langid
+  - override /model/head: attnmlp
+  - override /model/net: powsm
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
+# TODO(shikhar): add a nesting level to separate out experiment 
+# configs for probing, cascade, inference
 
 task_name: "powsm_fleurs_lid"
-tags: ["powsm_fleurs_lid"]
+tags: ["powsm",'fleurs' ,"lid"]
 
 seed: 42
 
 trainer:
   min_epochs: 10
-  max_epochs: 10
+  max_epochs: 50
   gradient_clip_val: 1.0
-  val_check_interval: 0.25 # validate 4 times per epoch
-  callbacks:
-    - learning_rate_monitor
-
-model:
-  optimizer:
-    lr: 0.0002
-  freeze_encoder: true
+  val_check_interval: 0.25  # validate 4 times per epoch
 
 data:
-  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
+  batch_size: 48
+
+model:
+  freeze_encoder: true
+  optimizer:
+    lr: 0.0001
 
 logger:
   wandb:
     tags: ${tags}
-    group: "powsm_fleurs_lid"
-  aim:
-    experiment: "powsm_fleurs_lid"
-
+    group: "lid"

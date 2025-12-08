@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -A bbjs-delta-gpu
-#SBATCH -p gpuA100x4
+#SBATCH -p gpuA40x4
 #SBATCH -J train
 #SBATCH -N 1
 #SBATCH --gpus-per-node=1
@@ -25,5 +25,16 @@ source setup_uv.sh .venv
 export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
 ###########################
+
+python - << 'EOF'
+import torch
+print("torch.cuda.is_available() =", torch.cuda.is_available())
+print("torch.cuda.device_count() =", torch.cuda.device_count())
+if torch.cuda.is_available():
+    print("current device:", torch.cuda.current_device())
+    print("device name:", torch.cuda.get_device_name(0))
+    x = torch.randn(1, device="cuda")
+    print("tensor on cuda ok:", x)
+EOF
 
 python src/main.py experiment=powsm_buckeye_fa "$@"

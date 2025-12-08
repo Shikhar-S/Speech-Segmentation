@@ -1,6 +1,6 @@
 _target_: src.data.buckeye.common_datamodule.BuckeyeDataModule
 buckeye_root: /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye
-local_cache_path: /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache
+local_cache_path: ${paths.exp_dir}/buckeye_cache
 tokenizer: ??? # defined in experiment config
 batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 num_workers: 10

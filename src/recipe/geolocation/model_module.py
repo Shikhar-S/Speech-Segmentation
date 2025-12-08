@@ -7,7 +7,7 @@ Run main:
 """
 
 import pyarrow.parquet as pq  # before torch
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple
 
 import torch
 import torch.nn as nn
@@ -15,15 +15,7 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
-
-
-def get_kv_pooling_mask(lengths):
-    max_len = lengths.max()
-    batch_size = lengths.size(0)
-    mask = torch.arange(max_len, device=lengths.device).expand(
-        batch_size, max_len
-    ) >= lengths.unsqueeze(1)
-    return mask  # (B, T)
+from src.model.common.utils import get_kv_pooling_mask
 
 
 class GeolocationRegressionLoss(nn.Module):

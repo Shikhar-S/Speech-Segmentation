@@ -27,12 +27,10 @@ from torchmetrics.classification import (
 )
 from lightning.pytorch.utilities import grad_norm
 
-from src.model.heads.base_head import BaseHead, TaskType
+from src.model.heads.base_head import BaseHead, TaskType, InputType
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
-# Type alias for input modes
-InputType = Literal["audio", "ipa"]
 
 
 class L1ClassificationModel(LightningModule):
