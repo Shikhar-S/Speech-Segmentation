@@ -1,13 +1,13 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=w2v2ph_timit_fa
+# python src/main.py experiment/probing=buckeye_fa
 
 defaults:
-  - override /data: timit
+  - override /data: buckeye
   - override /model: forced_alignment
-  - override /model/net: w2v2ph
-  - override /data/tokenizer: w2v2ph
+  - override /model/net: powsm
+  - override /data/tokenizer: powsm
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
@@ -15,8 +15,8 @@ defaults:
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-task_name: "w2v2ph_timit_fa"
-tags: ["w2v2ph_timit_fa"]
+task_name: "powsm_buckeye_fa"
+tags: ["powsm_buckeye_fa"]
 
 seed: 42
 
@@ -34,13 +34,11 @@ model:
   # freeze_encoder: true TODO(shikhar): implement (?)
 
 data:
-  batch_size: 24
-  tokenizer:
-    hf_repo: ???
+  batch_size: 48
 
 logger:
   wandb:
     tags: ${tags}
-    group: "w2v2ph_timit_fa"
+    group: "powsm_buckeye_fa"
   aim:
-    experiment: "w2v2ph_timit_fa"
+    experiment: "powsm_buckeye_fa"  

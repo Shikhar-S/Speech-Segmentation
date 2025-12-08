@@ -2,7 +2,7 @@
 
 # L1 Classification experiment with POWSM encoder
 # To execute this experiment run:
-# python src/main.py experiment=powsm_cmul2arctic_l1cls
+# python src/main.py experiment/probing=powsm_cmul2arctic_l1cls
 
 defaults:
   - override /data: cmu_l2arctic_l1

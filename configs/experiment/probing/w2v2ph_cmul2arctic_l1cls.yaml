@@ -1,7 +1,7 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=w2v2ph_cmul2arctic_l1cls
+# python src/main.py experiment/probing=w2v2ph_cmul2arctic_l1cls
 
 defaults:
   - override /data: cmu_l2arctic_l1

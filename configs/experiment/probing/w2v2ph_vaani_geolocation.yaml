@@ -1,19 +1,18 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=zipactc_cmul2arctic_l1cls
+# python src/main.py experiment/probing=w2v2ph_vaani_geolocation
 
 defaults:
-  - override /data: cmu_l2arctic_l1
-  - override /model: classification
-  - override /model/head: transformer
-  - override /model/net: zipactc
+  - override /data: vaani_geolocation
+  - override /model: geolocation
+  - override /model/net: w2v2ph
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "zipactc_cmul2arctic_l1cls"
-tags: ["zipactc","cmul2arctic","l1cls"]
+task_name: "w2v2ph_vaani_geolocation"
+tags: ["w2v2ph_vaani_geolocation"]
 
 seed: 42
 
@@ -26,7 +25,6 @@ trainer:
     - learning_rate_monitor
 
 model:
-  freeze_encoder: true
   optimizer:
     lr: 0.0002
 
@@ -36,4 +34,6 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "zipactc_cmul2arctic_l1cls"
+    group: "w2v2ph_vaani_geolocation"
+  aim:
+    experiment: "w2v2ph_vaani_geolocation"

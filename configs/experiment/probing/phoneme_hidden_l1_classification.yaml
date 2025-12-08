@@ -4,10 +4,10 @@
 # Uses raw audio input with an encoder (e.g., PoWSM, Wav2Vec2Phoneme)
 #
 # To execute this experiment run:
-# python src/main.py experiment=phoneme_hidden_l1_classification
+# python src/main.py experiment/probing=phoneme_hidden_l1_classification
 #
 # To use different encoders, override model/net:
-# python src/main.py experiment=phoneme_hidden_l1_classification model/net=w2v2ph
+# python src/main.py experiment/probing=phoneme_hidden_l1_classification model/net=w2v2ph
 
 defaults:
   - override /data: cmu_l2arctic_l1 

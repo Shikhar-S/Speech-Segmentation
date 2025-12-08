@@ -1,18 +1,18 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=w2v2ph_swissgerman_geolocation
+# python src/main.py experiment/probing=zipactc_swissgerman_geolocation
 
 defaults:
   - override /data: swissgerman_geolocation
   - override /model: geolocation
-  - override /model/net: w2v2ph
+  - override /model/net: zipactc
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "w2v2ph_swissgerman_geolocation"
-tags: ["w2v2ph_swissgerman_geolocation"]
+task_name: "zipactc_swissgerman_geolocation"
+tags: ["zipactc_swissgerman_geolocation"]
 
 seed: 42
 
@@ -34,6 +34,6 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "w2v2ph_swissgerman_geolocation"
+    group: "zipactc_swissgerman_geolocation"
   aim:
-    experiment: "w2v2ph_swissgerman_geolocation"
+    experiment: "zipactc_swissgerman_geolocation"

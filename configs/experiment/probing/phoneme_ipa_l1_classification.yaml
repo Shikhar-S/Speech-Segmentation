@@ -4,10 +4,10 @@
 # Uses pre-extracted IPA transcripts from JSON files (e.g., PoWSM or Wav2Vec2Phoneme output)
 #
 # To execute this experiment run:
-# python src/main.py experiment=phoneme_ipa_l1_classification
+# python src/main.py experiment/probing=phoneme_ipa_l1_classification
 #
 # To use different IPA sources, override data.json_path:
-# python src/main.py experiment=phoneme_ipa_l1_classification \
+# python src/main.py experiment/probing=phoneme_ipa_l1_classification \
 #   data.json_path=/path/to/cmu_l2arctic_w2v2ph_out.json
 
 defaults:

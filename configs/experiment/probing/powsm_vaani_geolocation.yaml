@@ -1,18 +1,18 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=w2v2ph_vaani_geolocation
+# python src/main.py experiment/probing=powsm_vaani_geolocation
 
 defaults:
   - override /data: vaani_geolocation
   - override /model: geolocation
-  - override /model/net: w2v2ph
+  - override /model/net: powsm
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "w2v2ph_vaani_geolocation"
-tags: ["w2v2ph_vaani_geolocation"]
+task_name: "powsm_vaani_geolocation"
+tags: ["powsm_vaani_geolocation"]
 
 seed: 42
 
@@ -34,6 +34,6 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "w2v2ph_vaani_geolocation"
+    group: "powsm_vaani_geolocation"
   aim:
-    experiment: "w2v2ph_vaani_geolocation"
+    experiment: "powsm_vaani_geolocation"

@@ -2,7 +2,7 @@
 
 # Fleurs Langid experiment with POWSM encoder
 # To execute this experiment run:
-# python src/main.py experiment=powsm_fleurs_lid
+# python src/main.py experiment/probing=powsm_fleurs_lid
 
 defaults:
   - override /data: fleurs

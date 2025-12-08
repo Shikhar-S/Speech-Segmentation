@@ -1,6 +1,6 @@
-_target_: src.data.speechocean.speechocean762.SpeechOceanDataModule
+_target_: src.data.speechocean.l2_assessment.SpeechOceanDataModule
 
-data_dir: /data/user_data/hanyuzho/speechocean762
+data_dir: ${paths.exp_dir}/speechocean762
 metadata_path: ${paths.exp_dir}/speechocean762/cache/metadata.csv
 
 target_sr: 16000

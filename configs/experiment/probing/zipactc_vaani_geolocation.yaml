@@ -1,18 +1,18 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=powsm_vaani_geolocation
+# python src/main.py experiment/probing=zipactc_vaani_geolocation
 
 defaults:
   - override /data: vaani_geolocation
   - override /model: geolocation
-  - override /model/net: powsm
+  - override /model/net: zipactc
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "powsm_vaani_geolocation"
-tags: ["powsm_vaani_geolocation"]
+task_name: "zipactc_vaani_geolocation"
+tags: ["zipactc_vaani_geolocation"]
 
 seed: 42
 
@@ -34,6 +34,6 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "powsm_vaani_geolocation"
+    group: "zipactc_vaani_geolocation"
   aim:
-    experiment: "powsm_vaani_geolocation"
+    experiment: "zipactc_vaani_geolocation"

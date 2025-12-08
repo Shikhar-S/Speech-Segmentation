@@ -1,7 +1,7 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=powsm_swissgerman_geolocation
+# python src/main.py experiment/probing=powsm_swissgerman_geolocation
 
 defaults:
   - override /data: swissgerman_geolocation
