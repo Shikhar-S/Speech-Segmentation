@@ -6,7 +6,7 @@
 
 defaults:
   - override /data: fleurs
-  - override /model: langid
+  - override /model: classification
   - override /model/head: attnmlp
   - override /model/net: powsm
   - override /trainer: gpu

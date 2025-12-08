@@ -4,7 +4,7 @@ Run main:
     python -m src.recipe.common.classification_model_module
 """
 
-from typing import Any, Dict, Tuple, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -16,8 +16,7 @@ from torchmetrics.classification import (
 )
 from lightning.pytorch.utilities import grad_norm
 from src.utils import RankedLogger
-from src.model.heads.base_head import BaseHead, InputType
-
+from src.model.heads.base_head import BaseHead, InputType, TaskType
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -40,7 +39,16 @@ class ClassificationModel(LightningModule):
         self.net = net
         self.encoder_dim = self.net.encoder_output_size()
         self.num_classes = num_classes
-        self.classification_head = head(input_dim=self.net.encoder_output_size())
+        self.classification_head = head(input_dim=self.encoder_dim)
+        if (
+            getattr(self.classification_head, "task_type", TaskType.CLASSIFICATION)
+            != TaskType.CLASSIFICATION
+        ):
+            raise ValueError(
+                f"ClassificationModel requires a classification head, "
+                f"got {getattr(self.classification_head, 'task_type', None)}"
+            )
+
         self.criterion = nn.CrossEntropyLoss()
         self.freeze_encoder = freeze_encoder
         if freeze_encoder:
@@ -50,6 +58,12 @@ class ClassificationModel(LightningModule):
             self.net.train()
             self.net.requires_grad_(True)
 
+        # Input mode: "audio" or "ipa"
+        self.input_type: InputType = input_type
+        self.id_to_label = id_to_label
+        self.label_to_id = (
+            {x: i for i, x in enumerate(id_to_label)} if id_to_label else None
+        )
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
@@ -62,25 +76,24 @@ class ClassificationModel(LightningModule):
         self.test_f1 = MulticlassF1Score(num_classes=num_classes, average="macro")
 
     def forward(self, x: torch.Tensor, x_lengths: torch.Tensor) -> torch.Tensor:
-        if self.classification_head is None:
-            raise RuntimeError(
-                "num_classes not set. Call setup_num_classes() first or provide num_classes in config."
-            )
         h, h_len = self.net.encode(x, x_lengths)  # (B, T, D), (B,)
         logits = self.classification_head(h, h_len)  # (B, num_classes)
         return logits
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        speech = batch["speech"]
-        speech_length = batch["speech_length"]
+        x = batch["speech"] if self.input_type == "audio" else batch["ipa_ids"]
+        x_lengths = (
+            batch["speech_length"] if self.input_type == "audio" else batch["lengths"]
+        )
         y_target = batch["target"]
-        logits = self(speech, speech_length)
+        logits = self(x, x_lengths)
         loss = self.criterion(logits, y_target)
+        preds = logits.argmax(dim=-1)
         return {
             "loss": loss,
-            "logits": logits,
+            "logits": logits.detach(),
             "targets": y_target,
-            "preds": logits.argmax(dim=-1),
+            "preds": preds.detach(),
         }
 
     def on_before_optimizer_step(self, optimizer):
@@ -96,20 +109,18 @@ class ClassificationModel(LightningModule):
     def training_step(
         self, batch: Dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
-        batch = self.model_step(batch)
-        self.train_loss(batch["loss"])
-        self.train_acc(batch["preds"], batch["targets"])
+        out = self.model_step(batch)
+        self.train_loss(out["loss"])
+        self.train_acc(out["preds"], out["targets"])
         self.log(
             "train/acc", self.train_acc, on_step=True, on_epoch=True, prog_bar=True
         )
         self.log(
             "train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True
         )
-        return batch["loss"]
+        return out["loss"]
 
-    def validation_step(
-        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
-    ) -> None:
+    def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         out = self.model_step(batch)
         self.val_loss(out["loss"])
         self.val_acc(out["preds"], out["targets"])
@@ -123,23 +134,15 @@ class ClassificationModel(LightningModule):
         self.val_loss_best(loss)
         self.log(
             "val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True
-        )  # important: log through compute, and sync_dist
+        )
 
     def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
-        """Test step.
-
-        Args:
-            batch: Input batch dictionary.
-            batch_idx: Batch index.
-        """
         out = self.model_step(batch)
 
-        # Update metrics
         self.test_loss(out["loss"])
         self.test_acc(out["preds"], out["targets"])
         self.test_f1(out["preds"], out["targets"])
 
-        # Log metrics
         self.log(
             "test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True
         )
@@ -149,7 +152,7 @@ class ClassificationModel(LightningModule):
     def configure_optimizers(self) -> Dict[str, Any]:
         if self.freeze_encoder:
             optimizable_params = [
-                x for n, x in self.named_parameters() if not n.startswith("net.")
+                p for n, p in self.named_parameters() if not n.startswith("net.")
             ]
         else:
             optimizable_params = list(self.parameters())

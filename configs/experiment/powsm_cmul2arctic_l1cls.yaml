@@ -6,7 +6,7 @@
 
 defaults:
   - override /data: cmu_l2arctic_l1
-  - override /model: l1_classification
+  - override /model: classification
   - override /model/head: transformer
   - override /model/net: powsm
   - override /trainer: gpu

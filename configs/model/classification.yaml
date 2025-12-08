@@ -1,4 +1,4 @@
-# L1 Classification model config
+# Classification model config
 # Encoder is injected via model/net group (e.g., override /model/net: powsm or ipa_embedding)
 # Head is injected via model/head group (e.g., override /model/head: transformer or rnn)
 # Head is built partially here. The input dimension for head is inferred dynamically based on the encoder.
@@ -9,9 +9,9 @@
 #    - Data batch contains: ipa_ids, lengths, label
 
 defaults:
-  - head: transformer  # Default head, can be overridden with /model/head: rnn
+  - head: attnmlp
 
-_target_: src.recipe.l1_classification.model_module.L1ClassificationModel
+_target_: src.recipe.common.classification_module.ClassificationModel
 
 optimizer:
   _target_: torch.optim.Adam
@@ -28,10 +28,9 @@ scheduler:
 # Encoder must be provided via model/net group
 net: ???
 # Head configuration is loaded from configs/model/head/*.yaml
-# Override output_dim here, input_dim is picked up 
-# dynamically based on the specified net in code
 head:
   output_dim: ${data.num_classes}
+  # partially constructed here
 
 num_classes: ${data.num_classes}
 id_to_label: ${data.id_to_label}
