@@ -37,7 +37,7 @@ def load_fleurs_data(
         )
         if samples_per_lang:
             ds = ds.select(range(min(samples_per_lang, len(ds))))
-        langnames.append(set(ds["language"]).pop()) # hack
+        langnames.append(set(ds["language"]).pop())  # hack
         datasets.append(ds)
 
     dataset = concatenate_datasets(datasets)
@@ -115,6 +115,7 @@ class FleursLanguageIdDataset(Dataset):
             "target": sample["lang_id"],
             "split": self.split,
             "metadata_idx": i,
+            "utt_id": f"{self.split}_{i}",
         }
 
 
@@ -163,44 +164,44 @@ class FleursLanguageId(LightningDataModule):
 
         if self.ds_train is None:
             train_data = load_fleurs_data(
-                "train",
-                self.hparams.id_to_label,
-                self.hparams.max_samples,
-                self.hparams.cache_dir,
+                split="train",
+                language_subset=self.hparams.id_to_label,
+                max_samples=self.hparams.max_samples,
+                cache_dir=self.hparams.cache_dir,
             )
             val_data = load_fleurs_data(
-                "validation",
-                self.hparams.id_to_label,
-                self.hparams.max_samples,
-                self.hparams.cache_dir,
+                split="validation",
+                language_subset=self.hparams.id_to_label,
+                max_samples=self.hparams.max_samples,
+                cache_dir=self.hparams.cache_dir,
             )
             test_data = load_fleurs_data(
-                "test",
-                self.hparams.id_to_label,
-                self.hparams.max_samples,
-                self.hparams.cache_dir,
+                split="test",
+                language_subset=self.hparams.id_to_label,
+                max_samples=self.hparams.max_samples,
+                cache_dir=self.hparams.cache_dir,
             )
 
             self.ds_train = FleursLanguageIdDataset(
-                train_data,
-                "train",
-                self.hparams.id_to_label,
-                self.hparams.target_sr,
-                self.hparams.max_audio_length,
+                dataset=train_data,
+                split="train",
+                id_to_label=self.hparams.id_to_label,
+                target_sr=self.hparams.target_sr,
+                max_audio_length=self.hparams.max_audio_length,
             )
             self.ds_val = FleursLanguageIdDataset(
-                val_data,
-                "validation",
-                self.hparams.id_to_label,
-                self.hparams.target_sr,
-                self.hparams.max_audio_length,
+                dataset=val_data,
+                split="validation",
+                id_to_label=self.hparams.id_to_label,
+                target_sr=self.hparams.target_sr,
+                max_audio_length=self.hparams.max_audio_length,
             )
             self.ds_test = FleursLanguageIdDataset(
-                test_data,
-                "test",
-                self.hparams.id_to_label,
-                self.hparams.target_sr,
-                self.hparams.max_audio_length,
+                dataset=test_data,
+                split="test",
+                id_to_label=self.hparams.id_to_label,
+                target_sr=self.hparams.target_sr,
+                max_audio_length=self.hparams.max_audio_length,
             )
 
     def _dl(self, ds, shuffle: bool):

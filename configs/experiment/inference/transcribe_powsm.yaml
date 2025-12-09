@@ -1,27 +1,27 @@
 # @package _global_
 
-# This config executes inference with PoWSM on CMU L2Arctic + CMU dataset for L1 classification:
-# python src/main.py experiment=inference/cmu_l2arctic_powsmpr
+# This config executes inference with PoWSM:
+# Set data field when calling
+# eg. python src/main.py experiment=inference/transcribe_powsm data=fleurs task_name=powsm_fleurs
 
 defaults:
   - override /logger: csv
-  - override /data: cmu_l2arctic_l1
   - override /model: null
   - override /model/net: null
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
 
-task_name: "cmu_l2arctic_powsmpr"
-tags: ["cmu_l2arctic_powsmpr"]
+task_name: "powsm_transcription"
+tags: ["powsm","transcription"]
 
 seed: 42
 
+train: false
+test: false
 distributed_predict: True
 
 inference:
-  num_workers: 4 # number of parallel workers for distributed inference
-  passthrough_keys: ["l1_label", "metadata_idx", "speaker_id", "split", "utt_id"]
-  out_file: ${paths.output_dir}/cmu_l2arctic_powsm_out.json
+  num_workers: 4 # number of parallel workers for distributed inference, set acc to gpu memory
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  out_file: ${paths.output_dir}/transcription.json
   # an object (or fn that creates such an object) with __call__ method to transcribe single speech
   inference_runner:
     _target_: src.model.powsm.powsm_inference.build_powsm_inference
@@ -40,7 +40,8 @@ inference:
     normalize_length: False
     maxlenratio: 0.0
     minlenratio: 0.0
-  # additional args to pass to the __call__ method of inference_runner, but can be overridden by keys from dataset
+  # additional args to pass to the __call__ method of inference_runner, 
+  # but can be overridden by keys from dataset if needed
   inference_call_args: 
     text_prev: <na>
     lang_sym: <unk>

@@ -1,4 +1,4 @@
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 import os
 import hydra
 import torch
@@ -53,8 +53,8 @@ def work_chunk_(
 
 def default_encoder(o):
     if is_dataclass(o):
-        return asdict(o)
-    return o.__dict__ if hasattr(o, "__dict__") else str(o)
+        return {f.name: getattr(o, f.name) for f in fields(o)}
+    return str(o)
 
 
 def save_json(data, out_file):
