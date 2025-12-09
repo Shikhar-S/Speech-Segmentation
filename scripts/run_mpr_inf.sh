@@ -27,3 +27,11 @@ for mp in ${PROB[@]}; do
         --extra_args "data=buckeye data.mask_probability=$mp"
     sleep 1s
 done
+
+
+##########
+
+scripts/run.sh \
+    --setup inference \
+    --model lv60 \
+    --extra_args "data=cmul2arcticl1"

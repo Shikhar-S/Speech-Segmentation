@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Copyright 2025  Carnegie Mellon University (Author: Shikhar Bharadwaj)
+# TODO(shikhar): support for cascade setup
 set -euo pipefail
 log() {
     echo "$(date '+%Y-%m-%dT%H:%M:%S') [${BASH_SOURCE[1]##*/}:${BASH_LINENO[0]}] $*"
@@ -43,15 +44,15 @@ EOF
 flag_compatibility_checks(){
     if [[ "$setup" == "inference" ]]; then
         fft=false
-        [[ -z "$extra_args" ]] && { echo "Set data field. Eg --extra_args data=fleurs"; return 1; }
+        [[ -z "$extra_args" ]] && { echo "Set data field. Eg --extra_args data=fleurs"; }
     fi
 }
 flag_compatibility_checks
 
 [ -z "$run_name" ] && run_name=$(date "+%Y%m%d%H%M%S")
-exp_dir="$(pwd)/exp/multirun/${run_name}"
+exp_dir="$(pwd)/exp/runs"
 mkdir -p "$exp_dir"
-summary_log="${exp_dir}/summary.log"
+summary_log="${exp_dir}/${run_name}.summary.log"
 
 # Cluster configurations
 declare -A cluster_configs=(
@@ -80,6 +81,7 @@ declare -A recipe_configs=(
     ["l1cls"]="l1cls_cmul2arctic"
     ["l2as"]="l2as_speechocean"
     ["lid_fl"]="lid_fleurs"
+    ["pr"]="transcribe"
 )
 
 get_base_model() {
@@ -119,10 +121,6 @@ construct_config_name() {
     local model_var=$1 recipe_code=$2
     local base=$(get_base_model "$model_var")
     local recipe_full="${recipe_configs[$recipe_code]}"
-    if [ "$setup" = "inference" ]; then
-        echo "configs/experiment/${setup}/transcribe_${base}.yaml"
-        return
-    fi
     echo "configs/experiment/${setup}/${recipe_full}_${base}.yaml"
 }
 
