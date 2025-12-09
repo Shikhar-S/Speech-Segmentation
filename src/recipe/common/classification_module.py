@@ -30,7 +30,6 @@ class ClassificationModel(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         freeze_encoder: bool = True,
-        id_to_label: Optional[Sequence[str]] = None,
         input_type: InputType = "audio",
         **kwargs,
     ) -> None:
@@ -60,10 +59,6 @@ class ClassificationModel(LightningModule):
 
         # Input mode: "audio" or "ipa"
         self.input_type: InputType = input_type
-        self.id_to_label = id_to_label
-        self.label_to_id = (
-            {x: i for i, x in enumerate(id_to_label)} if id_to_label else None
-        )
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
@@ -81,7 +76,7 @@ class ClassificationModel(LightningModule):
         return logits
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x = batch["speech"] if self.input_type == "audio" else batch["ipa_ids"]
+        x = batch["speech"] if self.input_type == "audio" else batch["text"]
         x_lengths = (
             batch["speech_length"] if self.input_type == "audio" else batch["lengths"]
         )

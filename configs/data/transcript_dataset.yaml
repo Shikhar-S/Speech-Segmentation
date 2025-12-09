@@ -1,6 +1,7 @@
 # Use transcripts from JSON files (e.g., PoWSM or Wav2Vec2Phoneme output) as dataset
 _target_: src.data.json_dataset.TranscriptionDataModule
 json_path: ???
+num_classes: ???
 batch_size: 32
 num_workers: 4
 pin_memory: False

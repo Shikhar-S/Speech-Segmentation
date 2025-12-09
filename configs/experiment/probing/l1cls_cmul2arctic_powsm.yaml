@@ -13,9 +13,6 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-# TODO(shikhar): add a nesting level to separate out experiment 
-# configs for probing, cascade, inference
-
 task_name: "l1cls_cmul2arctic_powsm"
 tags: ["cmu_l2arctic", "powsm", "l1cls"]
 

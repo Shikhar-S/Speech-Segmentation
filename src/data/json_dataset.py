@@ -15,7 +15,7 @@ The JSON file format is expected to be:
 
 Usage:
     python -m src.data.json_dataset \
-        --json_path /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/w2v2ph_fleurs/runs/20251208_213552/transcription.json
+        --json_path x
 """
 
 from __future__ import annotations
@@ -70,10 +70,6 @@ class TranscriptionDataset(Dataset):
         """
         sample = self.samples[idx]
         textids = self.tokenizer.encode(sample["processed_transcript"])
-        print("=== Sample ===")
-        print(sample["processed_transcript"])
-        print(self.tokenizer.decode(textids))
-        print("=============")
         return {
             "text_ids": textids,
             "target": sample["target"],
@@ -95,6 +91,7 @@ class TranscriptionDataModule(LightningDataModule):
     def __init__(
         self,
         json_path: str,
+        num_classes: int,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -104,6 +101,7 @@ class TranscriptionDataModule(LightningDataModule):
 
         Args:
             json_path: Path to JSON file with IPA transcripts
+            num_classes: Number of target classes
             vocab_path: Path to vocabulary JSON file (required)
             batch_size: Batch size (will be divided by world_size in distributed mode)
             num_workers: Number of dataloader workers
@@ -115,6 +113,7 @@ class TranscriptionDataModule(LightningDataModule):
         self.save_hyperparameters()
 
         self.json_path = Path(json_path)
+        self.num_classes = num_classes
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory

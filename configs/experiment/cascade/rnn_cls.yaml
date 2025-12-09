@@ -5,13 +5,13 @@
 # python src/main.py experiment=cascade/rnn_cls.yaml
 
 # To use different IPA sources, override data.json_path:
-# python src/main.py experiment=cascade/rnn_cls.yaml \
-#   data.json_path=/path/to/cmu_l2arctic_w2v2ph_out.json
+# python src/main.py experiment=cascade/rnn_cls.yaml data.json_path=/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/runs/w2v2ph_transcription/20251209_111713/transcription.json
 
 defaults:
   - override /data: transcript_dataset
   - override /model: classification
   - override /model/net: ipa_embedding
+  - override /model/head: rnn
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
