@@ -11,8 +11,14 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Dict, Tuple, Any, Union
 from tqdm import tqdm
+from collections import Counter
+from itertools import chain, combinations
 
 import panphon.distance
+from phone_inventory_metric import get_metrics as get_inventory_metrics
+from phone_inventory_metric.common import setkeydict
+from rich.console import Console
+from rich.table import Table
 
 from src.utils import RankedLogger
 
@@ -32,6 +38,7 @@ class PhoneRecognitionSummary:
     DEL: float
     N: int  # number of utterances
     phones: int  # total number of reference phones
+    inventory: setkeydict[float]
 
 
 class PhoneRecognitionEvaluator:
@@ -156,6 +163,46 @@ class PhoneRecognitionEvaluator:
         }
         return out
 
+    @classmethod
+    def _get_phone_inventory_metrics(cls, test_data: dict[str, dict[str, Any]]) -> setkeydict[float]:
+        """
+        Compute the phone inventory metrics on the dataset.
+
+        The results are computed against a combination of different boolean options:
+        - `featured`: if True, use a fuzzy notion of set membership based on
+          phonetic feature similarity (provided by Panphon).
+        - `exclusive`: if True, then phones in each inventory may match at most
+          one other phone; if False, any phone matches its nearest neighbor in
+          the other set (this only makes a difference for when `featured` is
+          true.
+        - `max`: if True, compute the optimal cutoff for the reference set in
+          terms of F1-score (i.e., iteratively remove the least frequent phones
+          from the predicted inventory).
+
+        Returns
+        -------
+        setkeydict:
+            A dict where the keys are tuples of strings that do not care about
+            order.  Indexing with brackets works, but some methods (e.g.,
+            `.get()`) may not work properly.
+
+
+        """
+        def get_inventory(key: str) -> list[str]:
+            c = Counter()
+            for _, sample in test_data.items():
+                datum = sample.get(key, "")
+                c.update(datum)
+            # This will return phones in order of descending frequency.  For
+            # the reference set, this is not taken into account, but for the
+            # predictions, it used to calculate an upper bound onf the
+            # F1-score.
+            return [x[0] for x in c.most_common()]
+
+        pred_inventory = get_inventory("prediction")
+        ref_inventory = get_inventory("transcription")
+        return get_inventory_metrics(ref_inventory, pred_inventory, search_max=True)
+
     def evaluate(
         self, test_data: Dict[str, Dict[str, Any]]
     ) -> Tuple[PhoneRecognitionSummary, Dict[str, Dict[str, float]]]:
@@ -223,6 +270,7 @@ class PhoneRecognitionEvaluator:
             DEL=(del_err_sum / phones_sum * 100) if phones_sum > 0 else 0.0,
             N=n_utts,
             phones=phones_sum,
+            inventory=self._get_phone_inventory_metrics(test_data),
         )
 
         return summary, instance_metrics
@@ -256,6 +304,42 @@ class PhoneRecognitionEvaluator:
         for row in rows:
             print(" | ".join(str(val).ljust(w) for val, w in zip(row, col_widths)))
         print()
+
+        self.pretty_print_inventory_metrics(summary.inventory)
+
+    @classmethod
+    def pretty_print_inventory_metrics(cls, inventory_metrics: setkeydict[float]) -> None:
+        t = Table(title="Phone Inventory Metrics")
+        t.add_column("Exclusive\nMatch", justify="center")
+        t.add_column("Featured", justify="center")
+        t.add_column("Upper\nBound", justify="center")
+        t.add_column("F1", justify="center")
+        t.add_column("Precision", justify="center")
+        t.add_column("Recall", justify="center")
+
+        # powerset
+        base_key_elements = ["exclusive", "max", "featured"]
+        base_keys = chain.from_iterable(
+            combinations(base_key_elements, n) for n in range(len(base_key_elements) + 1)
+        )
+
+        for base_key in base_keys:
+            if "featured" not in base_key and "exclusive" in base_key:
+                continue
+            f1 = inventory_metrics[base_key + ("f1_score",)]
+            precision = inventory_metrics[base_key + ("precision",)]
+            recall = inventory_metrics[base_key + ("recall",)]
+            t.add_row(
+                # If we are not using features, the matches are implicitly exclusive.
+                "x" if ("exclusive" in base_key or "featured" not in base_key) else "",
+                "x" if "featured" in base_key else "",
+                "x" if "max" in base_key else "",
+                f"{f1:.3f}",
+                f"{precision:.3f}",
+                f"{recall:.3f}",
+            )
+
+        Console().print(t)
 
     def write_to_csv(
         self, summary: PhoneRecognitionSummary, evalname: str, output_file: str
