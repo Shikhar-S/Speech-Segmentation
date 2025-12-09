@@ -1,25 +1,23 @@
 # @package _global_
 
-# L1 Classification experiment using IPA text (text embedding mode)
-# Uses pre-extracted IPA transcripts from JSON files (e.g., PoWSM or Wav2Vec2Phoneme output)
-#
+# run transcript --> label classification training with rnn
 # To execute this experiment run:
-# python src/main.py experiment=probing/phoneme_ipa_l1_classification
-#
+# python src/main.py experiment=cascade/rnn_cls.yaml
+
 # To use different IPA sources, override data.json_path:
-# python src/main.py experiment=probing/phoneme_ipa_l1_classification \
+# python src/main.py experiment=cascade/rnn_cls.yaml \
 #   data.json_path=/path/to/cmu_l2arctic_w2v2ph_out.json
 
 defaults:
-  - override /data: cmu_l2arctic_ipa
-  - override /model: l1_classification
+  - override /data: transcript_dataset
+  - override /model: classification
   - override /model/net: ipa_embedding
   - override /trainer: gpu
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "phoneme_ipa_l1_classification"
-tags: ["ipa", "l1_classification"]
+task_name: "cascade_classification"
+tags: ["cascade","rnn","classification"]
 
 seed: 42
 
@@ -30,7 +28,7 @@ trainer:
   val_check_interval: 0.25  # validate 4 times per epoch
 
 data:
-  json_path: ${paths.data_dir}/l1/cmu_l2arctic_powsm_out.json
+  json_path: ???
   batch_size: 64
   num_workers: 4
 
@@ -51,9 +49,3 @@ logger:
   wandb:
     tags: ${tags}
     group: "l1_classification"
-
-
-
-
-
-

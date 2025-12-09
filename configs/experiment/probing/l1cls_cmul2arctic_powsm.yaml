@@ -5,7 +5,7 @@
 # python src/main.py experiment=probing/l1cls_cmul2arctic_powsm
 
 defaults:
-  - override /data: cmu_l2arctic_l1
+  - override /data: cmul2arcticl1
   - override /model: classification
   - override /model/head: attnmlp
   - override /model/net: powsm
