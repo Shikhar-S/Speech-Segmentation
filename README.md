@@ -56,8 +56,11 @@ python src/main.py trainer.max_epochs=20 data.batch_size=64
 ```
 
 ## Tonal Recognition
-Currently, the repository provide the dataloader for tusom dataset. The dataset can be found and downloaded here: https://github.com/dmort27/tusom2021
-And we also include the code to separate the IPA with the tone from the original dataset. The file location is here: PhoneBench/configs/data/IPA_tone_separation.py
+Currently, the repository provide the dataloader for tusom dataset. The tusom dataset can be found and downloaded here: https://github.com/dmort27/tusom2021
+The aishell dataset can be found and downloaded here: 
+https://www.openslr.org/33/
+
+And we also include the code to separate the IPA from the tone of the original dataset. The file location is here: PhoneBench/src/recipe/tonal_phone_recognition/local
 
 ## More Documentation
 
