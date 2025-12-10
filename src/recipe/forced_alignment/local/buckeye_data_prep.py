@@ -4,7 +4,7 @@ Buckeye Corpus Data Preparation
 This script segments long recordings into chunks.
 Usage:
     python -m src.recipe.forced_alignment.local.buckeye_data_prep \
-        --output_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache \
+        --output_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/buckeye \
         --buckeye_root /work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye
 """
 

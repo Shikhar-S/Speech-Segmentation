@@ -7,9 +7,9 @@ srun -p cpu -A bbjs-delta-cpu \
     --time=10:00:00 \
     --job-name=vaani_geo \
     --output=logs/vaani_geo_%j.out \
-    bash -c "source ~/.bashrc && conda activate pseld \
-    && cd /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/src/recipe/geolocation/local \
-    && python prepare_vaani_metadata.py"
+    bash -c "source ~/.bashrc && conda deactivate && envinit \
+    && cd /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench \
+    && python src/recipe/geolocation/local/prepare_vaani_metadata.py"
 """
 
 import os, random, itertools, io, re, math, pandas as pd, pyarrow.parquet as pq
@@ -21,7 +21,7 @@ import soundfile as sf
 
 PATH_PATTERN = "/work/hdd/bbjs/shared/corpora/vaani_iisc/Vaani/audio/**/*parquet"
 PIN_META = "/work/hdd/bbjs/shared/corpora/vaani_iisc/Vaani/pincode_metadata.csv"
-OUT_CSV = "vaani_geolocation_metadata.big.csv"
+OUT_CSV = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/vaani_geolocation/vaani_geolocation_metadata.big.csv"
 K = 1000  # Checkpoint every K items
 
 

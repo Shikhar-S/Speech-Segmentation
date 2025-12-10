@@ -5,8 +5,13 @@ Usage:
 """
 
 import pandas as pd
+import os
+from multiprocessing import Pool
 
 data_root = "/work/hdd/bbjs/shared/corpora/swiss_german"
+save_path = (
+    "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/swissgerman/metadata.csv"
+)
 
 
 def read_df_with_location(
@@ -28,7 +33,7 @@ def read_df_with_location(
     metadata_df = metadata_df[list(column_map.values())]
     metadata_df["dataset"] = dataset_name
     metadata_df["audio_path"] = metadata_df.apply(
-        lambda row: f"{data_root}/{dataset_name}/{row['path']}", axis=1
+        lambda row: f"{data_root}/{dataset_name}/audio/{row['path']}", axis=1
     )
     return metadata_df
 
@@ -101,16 +106,32 @@ train_df["split"] = "train"
 valid_df["split"] = "valid"
 test_df["split"] = "test"
 combined_metadata = pd.concat([train_df, valid_df, test_df], ignore_index=True)
+print("Total data points before filtering:", len(combined_metadata))
+
+
+#####################
+# drop paths with missing audio
+def exists(path):
+    return os.path.exists(path)
+
+
+with Pool() as p:
+    combined_metadata["audio_exists"] = p.map(exists, combined_metadata["audio_path"])
+print(
+    "Number of missing audio files:",
+    len(combined_metadata) - combined_metadata["audio_exists"].sum(),
+)
+combined_metadata = combined_metadata[combined_metadata["audio_exists"]]
+combined_metadata.drop(columns=["audio_exists"], inplace=True)
+combined_metadata.reset_index(drop=True, inplace=True)
+#####################
+print("Total data points after filtering:", len(combined_metadata))
 print(
     "Maximum duration (seconds):",
     combined_metadata["duration"].max(),
     "Minimum duration (seconds):",
     combined_metadata["duration"].min(),
 )
-save_path = (
-    "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/swissgerman_cache/metadata.csv"
-)
-import os
 
 os.makedirs(os.path.dirname(save_path), exist_ok=True)
 combined_metadata.to_csv(save_path, index=False)

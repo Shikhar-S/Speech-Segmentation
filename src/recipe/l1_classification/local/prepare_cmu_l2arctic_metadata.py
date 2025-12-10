@@ -60,16 +60,16 @@ Test Speakers (fixed, from L2-classification project):
 
 Usage:
     python -m src.recipe.l1_classification.local.prepare_cmu_l2arctic_metadata \
-        --l2arctic_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic/l2arctic \
-        --cmu_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic/cmu \
-        --output_csv /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic_cache/metadata.csv \
-        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic
+        --l2arctic_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/downloads/cmu_l2arctic/l2arctic \
+        --cmu_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/downloads/cmu_l2arctic/cmu \
+        --output_csv /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/cmu_l2arctic/metadata.csv \
+        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/downloads/cmu_l2arctic
 """
 
 import argparse
 import csv
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from collections import Counter
 import random
 from tqdm import tqdm
