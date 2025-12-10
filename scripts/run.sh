@@ -6,17 +6,16 @@ log() {
     echo "$(date '+%Y-%m-%dT%H:%M:%S') [${BASH_SOURCE[1]##*/}:${BASH_LINENO[0]}] $*"
 }
 
-model="all"
-recipe="all"
+model=""
+recipe=""
+data=""
 cluster="dai"
-setup="probing"
 fft=false
-parallel=false
-wait_time=10
 dry_run=false
 run_name=""
 sbatch_args=""
 extra_args=""
+wait_time=1s
 
 help_message=$(cat << 'EOF'
 Usage: $0 [OPTIONS]
@@ -24,30 +23,33 @@ Usage: $0 [OPTIONS]
 Options:
   --model LIST        Models: logmel, powsm, powsmvr, ctag, lv60, xlsr53, zipactc, zipactc_ns, or "all"
   --recipe LIST       Recipes: fab, fat, gsw, gva, l1c, l2a, lif, or "all"
+  --data LIST         Datasets: buckeye, timit, geo_sw, geo_in, cmul2arctic, speechocean, fleurs, or "all"
   --cluster NAME      Cluster: dai, delta (default: dai)
-  --setup NAME        Setup: probing, inference (default: probing)
   --fft               Enable full fine-tuning
-  --parallel          Run in parallel
   --dry_run           Print commands only (explicitly set to --dry_run true)
   --run_name STR      Run name (default: timestamp)
   --sbatch_args STR   Extra sbatch arguments
-  --extra_args STR    Extra training arguments
-  
+  --extra_args STR    Extra training arguments passed at the end to override all config values
+  --wait_time STR    Wait time between job submissions (default: 2s)
+
 Examples:
   $0 --model powsm,ctag --recipe lif --fft
   $0 --model all --recipe fab,fat --cluster delta
-  $0 --model ctag --recipe lif --setup inference
 EOF
 )
 . scripts/parse_options.sh 2>/dev/null || true
 
-flag_compatibility_checks(){
-    if [[ "$setup" == "inference" ]]; then
-        fft=false
-        [[ -z "$extra_args" ]] && { echo "Set data field. Eg --extra_args data=fleurs"; }
-    fi
-}
-flag_compatibility_checks
+setup="probing"
+if [ "$recipe" = "inference" ]; then
+    setup="inference"
+elif [ "$recipe" = "cascade_rnn" ] || [ "$recipe" = "cascade_transformer" ]; then
+    setup="cascade"
+fi
+if [ "$setup" != "probing" ] && [ -z "$data" ]; then
+    log "Error: --data must be provided for setup=$setup"
+    echo "$help_message"
+    exit 1
+fi
 
 [ -z "$run_name" ] && run_name=$(date "+%Y%m%d%H%M%S")
 exp_dir="$(pwd)/exp/runs"
@@ -81,7 +83,20 @@ declare -A recipe_configs=(
     ["l1cls"]="l1cls_cmul2arctic"
     ["l2as"]="l2as_speechocean"
     ["lid_fl"]="lid_fleurs"
-    ["pr"]="transcribe"
+    ["inference"]="transcribe"
+    ["cascade_rnn"]="rnn_cls"
+    ["cascade_transformer"]="transformer_cls"
+)
+
+# Dataset configurations: dataset|num_classes (num_classes is empty if not applicable)
+declare -A dataset_configs=(
+    ["buckeye"]="buckeye|"
+    ["timit"]="timit|"
+    ["geo_sw"]="swissgermangeo|"
+    ["geo_in"]="vaanigeo|"
+    ["cmul2arctic"]="cmul2arcticl1|7"
+    ["speechocean"]="speechocean|11"
+    ["fleurs"]="fleurs|11"
 )
 
 get_base_model() {
@@ -100,10 +115,9 @@ config_exists() {
 }
 
 generate_list() {
-    local type=$1 input=$2
-    local -n config_ref=$3
+    local input=$1
+    local -n config_ref=$2
     local items=()
-    
     if [ "$input" = "all" ]; then
         items=("${!config_ref[@]}")
     else
@@ -112,8 +126,6 @@ generate_list() {
             [[ -v config_ref[$item] ]] && items+=("$item")
         done
     fi
-    
-    [ ${#items[@]} -eq 0 ] && { log "No ${type}s found"; exit 1; }
     echo "${items[@]}"
 }
 
@@ -124,52 +136,107 @@ construct_config_name() {
     echo "configs/experiment/${setup}/${recipe_full}_${base}.yaml"
 }
 
-construct_command() {
+construct_cmd_for_probing() {
     local model_var=$1 config_file=$2
     local repo=$(get_hf_repo "$model_var")
     local script="${cluster_configs[$cluster]}"
     local cmd="sbatch${sbatch_args:+ $sbatch_args} $script experiment=${setup}/${config_file##*/}"
-    
     if [ -n "$repo" ]; then
-        case "$setup" in
-            probing) cmd+=" model.net.hf_repo=$repo" ;;
-            inference) cmd+=" inference.inference_runner.hf_repo=$repo" ;;
-        esac
+        cmd+=" model.net.hf_repo=$repo"
     fi
-    
     if $fft; then
         cmd+=" model.freeze_encoder=false tags+=[\\\"fft\\\"]"
     fi
-    
     [ -n "$extra_args" ] && cmd+=" $extra_args"
-    echo "$cmd"
+    local cmds=()
+    cmds+=("$cmd")
+    printf '%s\n' "${cmds[@]}"
+}
+
+construct_cmd_for_inference() {
+    local model_var=$1 config_file=$2
+    shift 2
+    local datasets=("$@")
+    local repo=$(get_hf_repo "$model_var")
+    local script="${cluster_configs[$cluster]}"
+    local cmds=()
+    for dataset_code in "${datasets[@]}"; do
+        [ -z "$dataset_code" ] && continue
+        local dataset_name="${dataset_configs[$dataset_code]%%|*}"
+        task_name="inf_${dataset_name}_${model_var}"
+        local cmd="sbatch${sbatch_args:+ $sbatch_args} $script experiment=${setup}/${config_file##*/} data=$dataset_name task_name=$task_name"
+        if [ -n "$repo" ]; then
+            cmd+=" inference.inference_runner.hf_repo=$repo"
+        fi
+        [ -n "$extra_args" ] && cmd+=" $extra_args"
+        cmds+=("$cmd")
+    done
+    printf '%s\n' "${cmds[@]}"
+}
+
+construct_cmd_for_cascade() {    
+    local model_var=$1 config_file=$2
+    shift 2
+    local datasets=("$@")
+    local repo=$(get_hf_repo "$model_var")
+    local script="${cluster_configs[$cluster]}"
+    local cmds=()
+    for dataset_code in "${datasets[@]}"; do
+        [ -z "$dataset_code" ] && continue
+        local dataset_conf="${dataset_configs[$dataset_code]}"
+        local dataset_name="${dataset_conf%%|*}"
+        local num_classes="${dataset_conf#*|}"
+        local cmd="sbatch${sbatch_args:+ $sbatch_args} $script experiment=${setup}/${config_file##*/} data=$dataset_name"
+        $fft && cmd+=" model.freeze_encoder=false tags+=[\\\"fft\\\"]"
+        [ -n "$num_classes" ] && cmd+=" data.num_classes=$num_classes"
+        [ -n "$extra_args" ] && cmd+=" $extra_args"
+        cmds+=("$cmd")
+    done
+    printf '%s\n' "${cmds[@]}"
 }
 
 run_experiment() {
     local model_var=$1 recipe_code=$2
+    shift 2
+    local datasets=("$@")
     local config_file=$(construct_config_name "$model_var" "$recipe_code")
-    local cmd=$(construct_command "$model_var" "$config_file") || {
-        log "Error constructing command for $model_var on $recipe_code (config: $config_file)"
-        echo "ERROR: $model_var on $recipe_code" >> "$summary_log"
-        return 1
-    }
     if ! config_exists "$config_file"; then
         log "Skip: $model_var on $recipe_code (config not found: $config_file)"
         echo "SKIP: $model_var on $recipe_code" >> "$summary_log"
         return 2
     fi
-    
+    local cmd_list
+    case "$setup" in
+        inference)
+            cmd_list=$(construct_cmd_for_inference "$model_var" "$config_file" "${datasets[@]}") || {
+                log "Error constructing commands for $model_var on $recipe_code (config: $config_file)"
+                echo "ERROR: $model_var on $recipe_code" >> "$summary_log"
+                return 1
+            }
+            ;;
+        cascade)
+            cmd_list=$(construct_cmd_for_cascade "$model_var" "$config_file" "${datasets[@]}") || {
+                log "Error constructing commands for $model_var on $recipe_code (config: $config_file)"
+                echo "ERROR: $model_var on $recipe_code" >> "$summary_log"
+                return 1
+            }
+            ;;
+        *)
+            cmd_list=$(construct_cmd_for_probing "$model_var" "$config_file") || {
+                log "Error constructing command for $model_var on $recipe_code (config: $config_file)"
+                echo "ERROR: $model_var on $recipe_code" >> "$summary_log"
+                return 1
+            }
+            ;;
+    esac
+    IFS=$'\n' read -r -a cmds <<< "$cmd_list"
     log "Run: $model_var on $recipe_code"
     echo "RUN: $model_var on $recipe_code" >> "$summary_log"
-    log "CMD: $cmd"
-    echo "CMD: $cmd" >> "$summary_log"
-    
-    [[ "$dry_run" = true ]] && return 0
-    
-    if $parallel; then
-        eval "$cmd &"
-        sleep "$wait_time"
-    else
+    for cmd in "${cmds[@]}"; do
+        [ -z "$cmd" ] && continue
+        log "CMD: $cmd"
+        echo "CMD: $cmd" >> "$summary_log"
+        [[ "$dry_run" = true ]] && continue
         if eval "$cmd"; then
             echo "SUCCESS: $model_var on $recipe_code" >> "$summary_log"
         else
@@ -177,10 +244,11 @@ run_experiment() {
             echo "FAILED: $model_var on $recipe_code" >> "$summary_log"
             return 1
         fi
-    fi
+        sleep "$wait_time"
+    done
+    return 0
 }
 
-# Initialize
 {
     echo "=== Run: $run_name ==="
     echo "Started: $(date)"
@@ -188,11 +256,13 @@ run_experiment() {
     echo ""
 } > "$summary_log"
 
-models=$(generate_list "model" "$model" model_configs)
-recipes=$(generate_list "recipe" "$recipe" recipe_configs)
+models=$(generate_list "$model" model_configs)
+recipes=$(generate_list "$recipe" recipe_configs)
+read -ra datasets <<< "$(generate_list "$data" dataset_configs)"
 
 log "Models: $models"
 log "Recipes: $recipes"
+log "Datasets: ${datasets[*]}"
 
 total=0 successful=0 failed=0 skipped=0
 
@@ -200,24 +270,21 @@ for m in $models; do
     for r in $recipes; do
         total=$((total + 1))
         set +e
-        run_experiment "$m" "$r"
+        run_experiment "$m" "$r" "${datasets[@]}"
+        rc=$?
         set -e
-        case $? in
+        case $rc in
             0) successful=$((successful + 1)) ;;
             2) skipped=$((skipped + 1)) ;;
             *) failed=$((failed + 1)) ;;
         esac
     done
 done
-
-$parallel && [[ "$dry_run" != true ]] && { log "Waiting for jobs..."; wait; }
-
 {
     echo ""
     echo "=== Summary ==="
     echo "Finished: $(date)"
     echo "Total: $total | Success: $successful | Failed: $failed | Skipped: $skipped"
 } >> "$summary_log"
-
-log "Complete: $successful/$total succeeded (skipped: $skipped, failed: $failed)"
+log "$successful/$total jobs successfully submitted (skipped: $skipped, failed: $failed)"
 log "Log: $summary_log"

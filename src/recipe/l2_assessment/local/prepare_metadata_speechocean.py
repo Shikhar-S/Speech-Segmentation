@@ -1,13 +1,13 @@
 """
 Metadata preparation script for speechocean762 dataset.
 
-To download the corpus, clone this git repo: 
+To download the corpus, clone this git repo, and remove .git folder: 
     https://github.com/jimbozhang/speechocean762
 
 Usage:
     python -m src.recipe.l2_assessment.local.prepare_metadata_speechocean \
-        --corpus_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762 \
-        --output_csv /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762/cache/metadata.csv \
+        --corpus_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/download/speechocean762 \
+        --output_csv /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/speechocean762/metadata.csv \
         --val_ratio 0.1 \
         --seed 42
 """
