@@ -1,27 +1,35 @@
+"""Vaani Geolocation Dataset and DataModule.
+
+Usage (for naive baseline):
+    python -m src.data.vaani.geolocation
+"""
+
 import pyarrow.parquet as pq  # before torch
 import os, io, torch
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 import torchaudio
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from lightning import LightningDataModule
 import pandas as pd
 import math
 
 
 def pad_collate(batch):
-    L = [b["audio"].shape[-1] for b in batch]
+    L = [b["speech"].shape[-1] for b in batch]
     M = max(L)
     A = [
-        torch.nn.functional.pad(b["audio"], (0, M - b["audio"].shape[-1]))
+        torch.nn.functional.pad(b["speech"], (0, M - b["speech"].shape[-1]))
         for b in batch
     ]
     return {
-        "audio": torch.stack(A, 0),
-        "lengths": torch.tensor(L),
+        "speech": torch.stack(A, 0),
+        "speech_length": torch.tensor(L),
         "sr": batch[0]["sr"],
         "pincode": [b["pincode"] for b in batch],
         "latitude": torch.tensor([b["latitude"] for b in batch]),
         "longitude": torch.tensor([b["longitude"] for b in batch]),
+        "split": [b.get("split", "none") for b in batch],
+        "metadata_idx": [b["metadata_idx"] for b in batch],
     }
 
 
@@ -81,12 +89,14 @@ class VaaniParquetDataset(Dataset):
         )
 
         return {
-            "audio": wav,
-            "lengths": wav.shape[-1],
+            "speech": wav,
+            "speech_length": wav.shape[-1],
             "sr": sr,
             "pincode": row["pincode"] if not pd.isna(row["pincode"]) else 0,
             "latitude": latitude,
             "longitude": longitude,
+            "split": row["split"],
+            "metadata_idx": i,
         }
 
 
@@ -103,13 +113,13 @@ class VaaniGeolocation(LightningDataModule):
         super().__init__()
         self.save_hyperparameters()
         self.ds_train = self.ds_val = self.ds_test = None
-        self.bs_dev = batch_size
+        self.batch_size = batch_size
 
     def setup(self, stage: Optional[str] = None):
         if self.trainer:
             if self.hparams.batch_size % self.trainer.world_size:
                 raise RuntimeError("batch_size not divisible by world_size")
-            self.bs_dev = self.hparams.batch_size // self.trainer.world_size
+            self.batch_size = self.hparams.batch_size // self.trainer.world_size
 
         if self.ds_train is None:
             self.ds_train = VaaniParquetDataset(
@@ -137,7 +147,7 @@ class VaaniGeolocation(LightningDataModule):
     def _dl(self, ds, shuffle):
         return DataLoader(
             ds,
-            batch_size=self.bs_dev,
+            batch_size=self.batch_size,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             shuffle=shuffle,
@@ -154,9 +164,14 @@ class VaaniGeolocation(LightningDataModule):
     def test_dataloader(self):
         return self._dl(self.ds_test, shuffle=False)
 
+    def predict_dataloader(self):
+        return self._dl(
+            ConcatDataset([self.ds_train, self.ds_val, self.ds_test]), shuffle=False
+        )
+
 
 def _naive_baseline():
-    metadata_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/vaani_geolocation_metadata.train10.csv"
+    metadata_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/tmp/vaani_geolocation_metadata.train10.csv"
     import pandas as pd
 
     metadata = pd.read_csv(metadata_path)

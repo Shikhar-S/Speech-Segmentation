@@ -104,13 +104,13 @@ celerybeat.pid
 # Environments
 .venv*
 .uv_cache
-core
+/core
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
-
+icefall/
 # Spyder project settings
 .spyderproject
 .spyproject

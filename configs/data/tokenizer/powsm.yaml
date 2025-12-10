@@ -1,0 +1,3 @@
+_target_: src.model.powsm.token_id_converter.build_powsm_tokenizer
+work_dir: ${paths.exp_dir}/powsm_cache
+hf_repo: espnet/powsm

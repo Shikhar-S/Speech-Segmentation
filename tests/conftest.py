@@ -16,11 +16,19 @@ def cfg_train_global() -> DictConfig:
     :return: A DictConfig object containing a default Hydra configuration for training.
     """
     with initialize(version_base="1.3", config_path="../configs"):
-        cfg = compose(config_name="train.yaml", return_hydra_config=True, overrides=[])
+        # Use main.yaml with an experiment config
+        # geolocation_vaani_powsm is a simple probing experiment that should work for tests
+        cfg = compose(
+            config_name="main.yaml",
+            return_hydra_config=True,
+            overrides=["experiment=probing/geolocation_vaani_powsm"],
+        )
 
         # set defaults for all tests
         with open_dict(cfg):
             cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+            cfg.train = True  # Ensure training is enabled
+            cfg.test = True  # Also run test after training
             cfg.trainer.max_epochs = 1
             cfg.trainer.limit_train_batches = 0.01
             cfg.trainer.limit_val_batches = 0.1
@@ -43,13 +51,24 @@ def cfg_eval_global() -> DictConfig:
     :return: A DictConfig containing a default Hydra configuration for evaluation.
     """
     with initialize(version_base="1.3", config_path="../configs"):
+        # Use main.yaml with an experiment config for evaluation
+        # Set train=False and test=True for evaluation mode
         cfg = compose(
-            config_name="eval.yaml", return_hydra_config=True, overrides=["ckpt_path=."]
+            config_name="main.yaml",
+            return_hydra_config=True,
+            overrides=[
+                "experiment=probing/geolocation_vaani_powsm",
+                "train=False",
+                "test=True",
+                "ckpt_path=.",
+            ],
         )
 
         # set defaults for all tests
         with open_dict(cfg):
             cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+            cfg.train = False  # Ensure training is disabled
+            cfg.test = True  # Ensure testing is enabled
             cfg.trainer.max_epochs = 1
             cfg.trainer.limit_test_batches = 0.1
             cfg.trainer.accelerator = "cpu"

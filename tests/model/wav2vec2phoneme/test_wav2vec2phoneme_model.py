@@ -202,11 +202,11 @@ def test_ctc_logits_returns_logits_and_lengths(patched_model):
 
 
 # -------------------------
-# Test frames2points caching behavior
+# Test points_by_frames caching behavior
 # -------------------------
 
 
-def test_frames2points_cached(monkeypatch, patched_model):
+def test_points_by_frames_cached(monkeypatch, patched_model):
     model = patched_model
 
     # Counter to see how many times encode is called
@@ -215,7 +215,7 @@ def test_frames2points_cached(monkeypatch, patched_model):
     def fake_encode(speech, speech_lengths):
         call_count["n"] += 1
         # pretend 16000 input -> 100 frames
-        # frames2points = 16000 // 100 = 160
+        # points_by_frames = 16000 // 100 = 160
         dummy_enc = torch.zeros(1, 100, model.encoder_output_size())
         dummy_lens = torch.tensor([100])
         return dummy_enc, dummy_lens
@@ -223,8 +223,8 @@ def test_frames2points_cached(monkeypatch, patched_model):
     # patch the *instance* method encode
     monkeypatch.setattr(model, "encode", fake_encode)
 
-    r1 = model.frames2points()
-    r2 = model.frames2points()
+    r1 = model.points_by_frames()
+    r2 = model.points_by_frames()
 
     assert r1 == 160
     assert r2 == 160

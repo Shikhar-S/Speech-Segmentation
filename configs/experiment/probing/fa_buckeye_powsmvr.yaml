@@ -1,0 +1,43 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/main.py experiment=probing/fa_buckeye_powsmvr
+
+defaults:
+  - override /data: buckeye
+  - override /model: forced_alignment
+  - override /model/net: powsm_vr
+  - override /data/tokenizer: powsm
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+task_name: "fa_buckeye_powsmvr"
+tags: ["buckeye", "powsmvr", "fa"]
+
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 10
+  gradient_clip_val: 1.0
+  val_check_interval: 0.25 # validate 4 times per epoch
+  callbacks:
+    - learning_rate_monitor
+
+model:
+  optimizer:
+    lr: 0.0002
+
+data:
+  batch_size: 32
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: "fa_buckeye_powsmvr"
+  aim:
+    experiment: "fa_buckeye_powsmvr"  

@@ -1,0 +1,37 @@
+# @package _global_
+
+# This config executes inference with wav2vec2phoneme on buckeye dataset:
+# python src/main.py experiment=inference/fa_w2v2ph
+
+defaults:
+  - override /data: buckeye
+  - override /logger: csv
+  - override /model: null
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+task_name: "inf_fa_w2v2ph"
+tags: ["inf_fa_w2v2ph"]
+
+seed: 42
+
+distributed_predict: True
+
+data:
+  model_tokenizer:
+    _target_: src.model.wav2vec2phoneme.builders.build_wav2vec2phoneme_tokenizer
+    hf_repo: ???
+
+inference:
+  num_workers: 25 # number of parallel workers for distributed inference
+  out_file: ${paths.output_dir}/fa_w2v2ph_out.json
+  passthrough_keys:
+    - "utt_id"
+    - "text"
+    - "ground_truth_timestamps"
+  inference_runner:
+    _target_: src.recipe.forced_alignment.inference.ForcedAlignmentInference
+    model:
+      _target_: src.model.wav2vec2phoneme.builders.build_wav2vec2phoneme_model
+      hf_repo: ???

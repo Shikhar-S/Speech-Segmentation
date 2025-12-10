@@ -84,10 +84,17 @@ python src/main.py logger=wandb
 <summary><b>Train model with chosen experiment config</b></summary>
 
 ```bash
-python src/main.py experiment=vaani_geolocation
+# For probing experiments (task_dataset_model format)
+python src/main.py experiment=probing/geolocation_vaani_powsm
+
+# For inference experiments
+python src/main.py experiment=inference/vaani_powsmpr
 ```
 
-> **Note**: Experiment configs are placed in [configs/experiment/](../configs/experiment/).
+> **Note**: Experiment configs are organized in [configs/experiment/](../configs/experiment/) with subdirectories:
+> - `probing/` - Probing experiment configs (format: `task_dataset_model`)
+> - `inference/` - Inference experiment configs
+> - `cascade/` - Cascade experiment configs
 
 </details>
 
@@ -173,10 +180,11 @@ python src/main.py ckpt_path="/path/to/ckpt/name.ckpt"
 <summary><b>Evaluate checkpoint on test dataset</b></summary>
 
 ```bash
-python eval.py ckpt_path="/path/to/ckpt/name.ckpt"
+python src/main.py test=True train=False ckpt_path="/path/to/ckpt/name.ckpt" experiment=your_experiment
 ```
 
 > **Note**: Checkpoint can be either path or URL.
+> **Note**: You need to specify the experiment config that matches your training configuration.
 
 </details>
 
@@ -199,7 +207,7 @@ python src/main.py -m data.batch_size=32,64,128 model.lr=0.001,0.0005
 ```bash
 # this will run hyperparameter search defined in `configs/hparams_search/mnist_optuna.yaml`
 # over chosen experiment config
-python src/main.py -m hparams_search=mnist_optuna experiment=vaani_geolocation
+python src/main.py -m hparams_search=mnist_optuna experiment=probing/geolocation_vaani_powsm
 ```
 
 > **Note**: Using [Optuna Sweeper](https://hydra.cc/docs/next/plugins/optuna_sweeper) doesn't require you to add any boilerplate to your code, everything is defined in a [single config file](../configs/hparams_search/mnist_optuna.yaml).
@@ -212,10 +220,14 @@ python src/main.py -m hparams_search=mnist_optuna experiment=vaani_geolocation
 <summary><b>Execute all experiments from folder</b></summary>
 
 ```bash
-python src/main.py -m 'experiment=glob(*)'
+# Execute all probing experiments
+python src/main.py -m 'experiment=probing/glob(*)'
+
+# Execute all inference experiments
+python src/main.py -m 'experiment=inference/glob(*)'
 ```
 
-> **Note**: Hydra provides special syntax for controlling behavior of multiruns. Learn more [here](https://hydra.cc/docs/next/tutorials/basic/running_your_app/multi-run). The command above executes all experiments from [configs/experiment/](../configs/experiment/).
+> **Note**: Hydra provides special syntax for controlling behavior of multiruns. Learn more [here](https://hydra.cc/docs/next/tutorials/basic/running_your_app/multi-run). Experiment configs are organized in subdirectories under [configs/experiment/](../configs/experiment/).
 
 </details>
 
@@ -283,10 +295,12 @@ pytest -k "not slow"
 Each experiment should be tagged in order to easily filter them across files or in logger UI:
 
 ```bash
-python src/main.py tags=["vaani_geolocation","powsm"]
+python src/main.py tags=["vaani","powsm","geolocation"]
 ```
 
-> **Note**: You might need to escape the bracket characters in your shell with `python src/main.py tags=\["vaani_geolocation","powsm"\]`.
+> **Note**: Tags are structured as `[dataset, model, task]` in probing experiments for consistency.
+
+> **Note**: You might need to escape the bracket characters in your shell with `python src/main.py tags=\["vaani","powsm","geolocation"\]`.
 
 If no tags are provided, you will be asked to input them from command line:
 

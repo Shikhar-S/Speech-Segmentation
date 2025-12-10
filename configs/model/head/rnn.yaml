@@ -1,0 +1,32 @@
+# RNNHead configuration
+# Reference: src/model/heads/rnn_head.py
+
+_target_: src.model.heads.rnn_head.RNNHead
+_partial_: true
+
+# Required parameters (must be overridden)
+input_dim: ???  # Encoder output dimension (e.g., 256 for powsm)
+output_dim: ???  # Number of classes for classification
+
+# RNN architecture
+hidden_size: 256  # Hidden dimension of RNN layers
+num_layers: 2  # Number of stacked RNN layers
+
+# RNN type: "gru" or "lstm"
+rnn_type: "gru"
+
+# Bidirectional RNN (doubles output dimension)
+bidirectional: true
+
+# Regularization
+dropout: 0.1
+
+# Pooling strategy: "last", "mean", or "attention"
+# - last: Use last valid hidden state (concat forward/backward for bidirectional)
+# - mean: Mean pooling over valid timesteps
+# - attention: Attention-weighted pooling
+pooling: "mean"
+
+# Task type: "classification" or "regression"
+task_type: "classification"
+

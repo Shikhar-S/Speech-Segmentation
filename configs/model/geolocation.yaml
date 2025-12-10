@@ -1,0 +1,17 @@
+_target_: src.recipe.geolocation.model_module.GeolocationModel
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.LinearLR
+  _partial_: true
+  total_iters: 100
+  last_epoch: -1
+
+net: ???
+
+freeze_encoder: true

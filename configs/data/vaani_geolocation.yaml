@@ -1,7 +1,0 @@
-_target_: src.data.vaani.geolocation.VaaniGeolocation
-data_dir: /work/hdd/bbjs/shared/corpora/vaani_iisc
-metadata_path: /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/vaani_geolocation_metadata.train10.csv
-target_sr: 16000
-batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-num_workers: 10
-pin_memory: False

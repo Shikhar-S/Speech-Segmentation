@@ -1,0 +1,20 @@
+# Character-level tokenizer for IPA transcripts
+# Requires vocab_path to be set (e.g., in experiment config or via CLI override)
+#
+# Example usage:
+#   python src/main.py data/tokenizer=char data.tokenizer.vocab_path=artifacts/ipa_vocab.json
+#
+# To build vocabulary:
+#   vocab = CharacterTokenizer.build_vocab(train_texts)
+#   CharacterTokenizer.save_vocab(vocab, "artifacts/ipa_vocab.json")
+
+_target_: src.core.tokenizer.CharacterTokenizer
+
+# Path to vocabulary JSON file (REQUIRED)
+# Hydra will raise MissingMandatoryValue if not specified
+vocab_path: ???
+
+# Special token configuration (optional, defaults shown)
+pad_token: "<pad>"
+unk_token: "<unk>"
+

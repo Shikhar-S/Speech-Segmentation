@@ -46,7 +46,11 @@ python src/main.py trainer=gpu
 Train model with chosen experiment configuration from [configs/experiment/](configs/experiment/)
 
 ```bash
-python src/main.py experiment=vaani_geolocation
+# For probing experiments using hidden representations
+python src/main.py experiment=probing/geolocation_vaani_powsm
+
+# For inference experiments
+python src/main.py experiment=inference/vaani_powsmpr
 ```
 
 You can override any parameter from command line like this
@@ -65,6 +69,8 @@ And we also include the code to separate the IPA from the tone of the original d
 ## More Documentation
 
 - **[Features & Capabilities](docs/features.md)** - Look at this to train on multi-gpu, run hyper-param searches etc.
+- **[Running Inference](docs/running_inference.md)** - Guide for running phone recognition inference with pre-trained models
+- **[Tokenization Workflow](docs/tokenization.md)** - How to build vocabularies and use tokenizers for IPA transcripts
 - **[Contributing Guide](CONTRIBUTING.md)** - Project structure, workflow, and best practices for contributors
 
 ## ❤️ Acknowledgement

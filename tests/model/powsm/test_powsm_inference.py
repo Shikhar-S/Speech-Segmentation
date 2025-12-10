@@ -75,7 +75,6 @@ def test_build_powsm_inference_uses_dependencies(monkeypatch, tmp_path):
         normalize_length=True,
         maxlenratio=1.0,
         minlenratio=0.5,
-        batch_size=3,
     )
 
     assert isinstance(inference, DummyInference)

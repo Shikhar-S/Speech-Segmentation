@@ -445,7 +445,7 @@ class EBranchformerEncoder(torch.nn.Module):
         # For gradient checkpointing
         # 0 is the embedding layer, 1 is the first encoder layer, etc.
         self.gradient_checkpoint_layers = gradient_checkpoint_layers
-        logging.info(f"Gradient checkpoint layers: {self.gradient_checkpoint_layers}")
+        # logging.info(f"Gradient checkpoint layers: {self.gradient_checkpoint_layers}")
 
     def output_size(self) -> int:
         return self._output_size

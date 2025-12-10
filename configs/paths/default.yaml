@@ -4,6 +4,8 @@
 root_dir: ${oc.env:PROJECT_ROOT}
 
 exp_dir: ${paths.root_dir}/exp
+cache_dir: ${paths.exp_dir}/data_cache
+inference_dir: ${paths.exp_dir}/inference
 
 # path to output directory, created dynamically by hydra
 # path generation pattern is specified in `configs/hydra/default.yaml`

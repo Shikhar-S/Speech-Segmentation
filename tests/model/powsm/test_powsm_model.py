@@ -71,7 +71,7 @@ def test_powsm_model_forward_backward_pass():
     text_ctc = torch.tensor([[6, 7, 5, -1], [7, 6, 5, -1]], dtype=torch.long)
     text_ctc_lengths = torch.tensor([3, 3], dtype=torch.long)
 
-    loss, stats, weight = model(
+    loss = model(
         speech=speech,
         speech_lengths=speech_lengths,
         text=text,
@@ -80,7 +80,7 @@ def test_powsm_model_forward_backward_pass():
         text_prev_lengths=text_prev_lengths,
         text_ctc=text_ctc,
         text_ctc_lengths=text_ctc_lengths,
-    )
+    )["loss"]
 
     assert torch.isfinite(loss).item()
     loss.backward()

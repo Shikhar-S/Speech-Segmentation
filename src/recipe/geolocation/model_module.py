@@ -1,12 +1,13 @@
 """Lightning style Geolocation Model.
 
+# TODO(shikhar): Fix metric updates
 This module works with both powsm and wav2vec2phoneme encoders.
 Run main:
     python -m src.recipe.geolocation.model_module
 """
 
 import pyarrow.parquet as pq  # before torch
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple
 
 import torch
 import torch.nn as nn
@@ -14,15 +15,7 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
-
-
-def get_kv_pooling_mask(lengths):
-    max_len = lengths.max()
-    batch_size = lengths.size(0)
-    mask = torch.arange(max_len, device=lengths.device).expand(
-        batch_size, max_len
-    ) >= lengths.unsqueeze(1)
-    return mask  # (B, T)
+from src.model.common.utils import get_kv_pooling_mask
 
 
 class GeolocationRegressionLoss(nn.Module):
@@ -110,13 +103,14 @@ class GeolocationHead(nn.Module):
 class GeolocationModel(LightningModule):
     def __init__(
         self,
-        model: nn.Module,
+        net: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
+        freeze_encoder: bool = True,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
-        self.net = model
+        self.net = net
         self.encoder_dim = self.net.encoder_output_size()
         self.query_vector = nn.Parameter(torch.randn(1, 1, self.encoder_dim))
         self.attentive_pooling = nn.MultiheadAttention(
@@ -124,8 +118,13 @@ class GeolocationModel(LightningModule):
         )
         self.geohead = GeolocationHead(self.encoder_dim)
         self.criterion = GeolocationAngularLoss()
-        # self.criterion = GeolocationRegressionLoss()
-        # self.criterion = GeolocationRadianRegressionLoss()
+        self.freeze_encoder = freeze_encoder
+        if freeze_encoder:
+            self.net.eval()
+            self.net.requires_grad_(False)
+        else:
+            self.net.train()
+            self.net.requires_grad_(True)
 
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -152,11 +151,11 @@ class GeolocationModel(LightningModule):
         return pred
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        audio = batch["audio"]
-        lengths = batch["lengths"]
+        speech = batch["speech"]
+        speech_length = batch["speech_length"]
         y_lat = batch["latitude"]
         y_long = batch["longitude"]
-        coordinates, pred_lat, pred_long = self(audio, lengths)
+        coordinates, pred_lat, pred_long = self(speech, speech_length)
         loss = self.criterion(pred_lat, pred_long, y_lat, y_long)  # angular loss
         # loss = self.criterion(coordinates, y_lat, y_long)
         return {
@@ -210,7 +209,13 @@ class GeolocationModel(LightningModule):
         )
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        optimizer = self.hparams.optimizer(params=self.parameters())
+        if self.freeze_encoder:
+            optimizable_params = [
+                x for n, x in self.named_parameters() if not n.startswith("net.")
+            ]
+        else:
+            optimizable_params = list(self.parameters())
+        optimizer = self.hparams.optimizer(params=optimizable_params)
         if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)
             return {
@@ -227,27 +232,17 @@ class GeolocationModel(LightningModule):
 
 if __name__ == "__main__":
     from src.model.powsm.powsm_model import build_powsm
-    from src.model.wav2vec2phoneme.wav2vec2phoneme_model import build_wav2vec2phoneme
+    from src.model.wav2vec2phoneme.wav2vec2phoneme_model import Wav2Vec2PhonemeModel
 
     model = GeolocationModel(
-        model=build_wav2vec2phoneme("facebook/wav2vec2-lv-60-espeak-cv-ft"),
+        net=Wav2Vec2PhonemeModel(
+            "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
+        ),
         # model=build_powsm(
         #     work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
         #     hf_repo="espnet/powsm",
         # ),
         optimizer=torch.optim.Adam,
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
+        freeze_encoder=True,
     )
-    dummy_input = torch.randn(2, 16000 * 5)  # batch of 2, 5 seconds of audio at 16kHz
-    dummy_lengths = torch.tensor([16000 * 5, 16000 * 5])
-    output = model.training_step(
-        {
-            "audio": dummy_input,
-            "lengths": dummy_lengths,
-            "latitude": torch.tensor([0.0, 0.0]),
-            "longitude": torch.tensor([0.0, 0.0]),
-        },
-        0,
-    )
-    print(output)
-    print("Model forward pass successful!")

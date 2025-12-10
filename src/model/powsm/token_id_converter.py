@@ -1,5 +1,4 @@
 import argparse
-import logging
 from pathlib import Path
 from typing import Dict, Iterable, List, Union, Optional
 
@@ -7,6 +6,10 @@ from huggingface_hub import snapshot_download
 import numpy as np
 from typeguard import typechecked
 import yaml
+
+from src.utils import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class TokenIDConverter:
@@ -58,6 +61,13 @@ class TokenIDConverter:
         return [self.token_list[i] for i in integers]
 
     def tokens2ids(self, tokens: Iterable[str]) -> List[int]:
+        # NOTE(shikhar): hack for powsm tokenizer to work with non / delimited tokens.
+        # Example, buckeye.
+        # TODO(shikhar): Combine this class with sentencepiece tokenizer class
+        tokens = [
+            f"/{t}/" if not (t.startswith("/") and t.endswith("/")) else t
+            for t in tokens
+        ]
         return [self.token2id.get(i, self.unk_id) for i in tokens]
 
 
@@ -77,7 +87,7 @@ def build_powsm_tokenizer_from_files(
         raise RuntimeError("token_list must be str or list")
 
     vocab_size = len(token_list)
-    logging.info(f"Vocabulary size: {vocab_size}")
+    log.info(f"Vocabulary size: {vocab_size}")
     return TokenIDConverter(token_list=token_list)
 
 

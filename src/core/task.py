@@ -1,9 +1,12 @@
+"""Main task class that controls execution flow for all stages."""
+
 from typing import Any, Dict, List, Tuple
 
 import hydra
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
+from src.core.distributed_inference import run_distributed_inference_
 
 from src.utils import (
     RankedLogger,
@@ -18,17 +21,76 @@ log = RankedLogger(__name__, rank_zero_only=True)
 class Task:
     def __init__(self, cfg: DictConfig) -> None:
         self.task_cfg = cfg
-        self.name = self.task_cfg.get("task_name", "Task")
+        self.name = cfg.get("task_name", "Task")
 
-    def run(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def train(
+        self, trainer: Trainer, model: LightningModule, datamodule: LightningDataModule
+    ) -> Tuple[Dict[str, Any], str]:
+        log.info("Starting training!")
+        trainer.fit(
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=self.task_cfg.get("ckpt_path"),
+        )
+        ckpt_cb = getattr(trainer, "checkpoint_callback", None)
+        ckpt_path = getattr(ckpt_cb, "best_model_path", "") if ckpt_cb else ""
+        return dict(trainer.callback_metrics), ckpt_path
+
+    def test(
+        self,
+        trainer: Trainer,
+        model: LightningModule,
+        datamodule: LightningDataModule,
+        ckpt_path: str,
+    ) -> Dict[str, Any]:
+        if self.task_cfg.get("ckpt_path") is not None:
+            ckpt_path = self.task_cfg.ckpt_path
+        # if not ckpt_path:
+        #     log.error("Testing ckpt not provided!")
+        # else:
+        log.info(f"Ckpt path: {ckpt_path}")
+        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path or None)
+        return dict(trainer.callback_metrics)
+
+    def predict(
+        self,
+        trainer: Trainer,
+        model: LightningModule,
+        datamodule: LightningDataModule,
+        ckpt_path: str,
+    ):
+        if self.task_cfg.get("ckpt_path") is not None:
+            ckpt_path = self.task_cfg.ckpt_path
+        log.info("Starting prediction!")
+        return trainer.predict(
+            model=model, datamodule=datamodule, ckpt_path=ckpt_path or None
+        )
+
+    def run_distributed_inference(self):
+        """Wraps the utility function for distributed inference."""
+        log.info("Starting distributed prediction!")
+        datamodule: LightningDataModule = hydra.utils.instantiate(self.task_cfg.data)
+        datamodule.setup(stage="predict")  # in the experiment flow, trainer calls setup
+        run_distributed_inference_(
+            dataset=datamodule.predict_dataloader().dataset,
+            inference_config=self.task_cfg.inference.inference_runner,
+            inference_call_args=self.task_cfg.inference.get(
+                "inference_call_args", None
+            ),
+            num_workers=self.task_cfg.inference.num_workers,
+            out_file=self.task_cfg.inference.out_file,
+            passthrough_keys=self.task_cfg.inference.get("passthrough_keys", []),
+        )
+
+    def run_experiment(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         log.info(f"Instantiating datamodule <{self.task_cfg.data._target_}>")
         datamodule: LightningDataModule = hydra.utils.instantiate(self.task_cfg.data)
 
-        log.info(f"Instantiating model <{self.task_cfg.model._target_}>")
-        model: LightningModule = hydra.utils.instantiate(self.task_cfg.model)
-
         log.info("Instantiating loggers...")
         logger: List[Logger] = instantiate_loggers(self.task_cfg.get("logger"))
+
+        log.info(f"Instantiating model <{self.task_cfg.model._target_}>")
+        model: LightningModule = hydra.utils.instantiate(self.task_cfg.model)
 
         log.info("Instantiating callbacks...")
         callbacks: List[Callback] = instantiate_callbacks(
@@ -48,34 +110,24 @@ class Task:
             "logger": logger,
             "trainer": trainer,
         }
-        # TODO(shikhar): For api based models, do we still need to create logger inside trainer?
+
         if logger:
-            log.info("Logging hyperparameters!")
+            log.info("logging hyperparameters!")
             log_hyperparameters(object_dict)
 
-        if self.task_cfg.get("train"):
-            log.info("Starting training!")
-            trainer.fit(
-                model=model,
-                datamodule=datamodule,
-                ckpt_path=self.task_cfg.get("ckpt_path"),
-            )
+        metrics: Dict[str, Any] = {}
+        ckpt_path = ""
 
-        train_metrics = trainer.callback_metrics
-        ckpt_path = trainer.checkpoint_callback.best_model_path
+        if self.task_cfg.get("train"):
+            train_metrics, ckpt_path = self.train(trainer, model, datamodule)
+            metrics.update(train_metrics)
 
         if self.task_cfg.get("test"):
-            log.info("Starting testing!")
-            if self.task_cfg.ckpt_path is not None:
-                ckpt_path = self.task_cfg.ckpt_path  # override ckpt to test if provided
-            if ckpt_path == "":
-                log.error("Testing ckpt not provided!")
-            trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
-            log.info(f"Ckpt path: {ckpt_path}")
+            test_metrics = self.test(trainer, model, datamodule, ckpt_path)
+            metrics.update(test_metrics)
 
-        test_metrics = trainer.callback_metrics
+        if self.task_cfg.get("predict", False):
+            preds = self.predict(trainer, model, datamodule, ckpt_path)
+            object_dict["predictions"] = preds
 
-        # merge train and test metrics
-        metric_dict = {**train_metrics, **test_metrics}
-
-        return metric_dict, object_dict
+        return metrics, object_dict

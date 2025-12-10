@@ -1,9 +1,11 @@
-import logging
 from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from typeguard import typechecked
+from src.utils import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class CTC(torch.nn.Module):
@@ -47,7 +49,7 @@ class CTC(torch.nn.Module):
             )
         elif self.ctc_type == "builtin2":
             self.ignore_nan_grad = True
-            logging.warning("builtin2")
+            log.warning("builtin2")
             self.ctc_loss = torch.nn.CTCLoss(reduction="none")
 
         elif self.ctc_type == "gtnctc":
@@ -102,12 +104,12 @@ class CTC(torch.nn.Module):
                 size = indices.long().sum()
                 if size == 0:
                     # Return as is
-                    logging.warning(
+                    log.warning(
                         "All samples in this mini-batch got nan grad."
                         " Returning nan value instead of CTC loss"
                     )
                 elif size != th_pred.size(1):
-                    logging.warning(
+                    log.warning(
                         f"{th_pred.size(1) - size}/{th_pred.size(1)}"
                         " samples got nan grad."
                         " These were ignored for CTC loss."

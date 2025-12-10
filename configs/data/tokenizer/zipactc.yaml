@@ -1,0 +1,2 @@
+_target_: src.model.sentencepieces_tokenizer.SentencepiecesTokenizer
+model: src/model/zipa/resources/unigram_127.model
