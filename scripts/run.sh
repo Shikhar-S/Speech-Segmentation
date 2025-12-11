@@ -83,6 +83,7 @@ declare -A recipe_configs=(
     ["l1cls"]="l1cls_cmul2arctic"
     ["l2as"]="l2as_speechocean"
     ["lid_fl"]="lid_fleurs"
+    ["atyp_ec"]="atypical_easycall"
     ["inference"]="transcribe"
     ["cascade_rnn"]="rnn_cls"
     ["cascade_transformer"]="transformer_cls"
@@ -97,6 +98,7 @@ declare -A dataset_configs=(
     ["cmul2arctic"]="cmul2arcticl1|7"
     ["speechocean"]="speechocean|11"
     ["fleurs"]="fleurs|11"
+    ['easycall']="easycall|4"
 )
 
 get_base_model() {
