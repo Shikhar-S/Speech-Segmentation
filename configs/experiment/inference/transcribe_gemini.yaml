@@ -1,0 +1,52 @@
+# @package _global_
+
+# This config executes inference with Gemini:
+# Set data field when calling
+# eg. python src/main.py experiment=inference/transcribe_gemini data=cmul2arcticl1 task_name=inf_gemini_l2arctic
+
+defaults:
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: ??? # pass inf_<model>_<data> when calling. This will create output dirs accordingly
+tags: ["gemini","inference"]
+
+seed: 42
+
+train: false
+test: false
+distributed_predict: True
+
+inference:
+  num_workers: 4
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  out_file: ${paths.output_dir}/transcription.json
+  limit_samples: 10  # Set to null for full run
+
+  inference_runner:
+    _target_: src.model.gemini.inference.GeminiInference
+    client_config:
+      model_name: "gemini-3-pro-preview"
+      temperature: 1.0
+      top_p: 1.0
+      top_k: 1
+      seed: ${seed}
+      thinking_level: "low"  # Options: "low", "high"
+      retry_config:
+        max_retries: 3
+        base_delay: 1.0
+        max_delay: 60.0
+    prompt_config:
+      system_prompt: |
+        You are an AI assistant specialized in phonetic transcription.
+        You will listen to an audio clip and transcribe it into IPA (International Phonetic Alphabet) symbols.
+
+        Constraints:
+        - Transcribe the speech into IPA phonetic symbols.
+        - Use standard IPA notation.
+        - Do NOT add any explanation or commentary.
+        - Output ONLY the phonetic transcription.
+      user_prompt_template: "Transcribe this audio into IPA (International Phonetic Alphabet) symbols. Output only the phonetic transcription."
+      default_user_prompt: "Transcribe this audio into IPA (International Phonetic Alphabet) symbols. Output only the phonetic transcription."
+    clean_response: True

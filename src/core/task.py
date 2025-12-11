@@ -70,6 +70,7 @@ class Task:
         """Wraps the utility function for distributed inference."""
         log.info("Starting distributed prediction!")
         datamodule: LightningDataModule = hydra.utils.instantiate(self.task_cfg.data)
+        datamodule.prepare_data()
         datamodule.setup(stage="predict")  # in the experiment flow, trainer calls setup
         run_distributed_inference_(
             dataset=datamodule.predict_dataloader().dataset,
@@ -80,6 +81,7 @@ class Task:
             num_workers=self.task_cfg.inference.num_workers,
             out_file=self.task_cfg.inference.out_file,
             passthrough_keys=self.task_cfg.inference.get("passthrough_keys", []),
+            limit_samples=self.task_cfg.inference.get("limit_samples", None),
         )
 
     def run_experiment(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
