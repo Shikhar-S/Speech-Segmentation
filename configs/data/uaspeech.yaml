@@ -1,0 +1,14 @@
+_target_: src.data.uaspeech.common_datamodule.UASpeechDataModule
+data_dir: ${paths.download_dir}/uaspeech
+cache_dir: ${paths.cache_dir}/uaspeech
+uaspeech_meta_csv: src/data/uaspeech/uaspeech_meta.csv
+uaspeech_wordlist_csv: src/data/uaspeech/uaspeech_wordlist.csv
+tokenizer:
+  _target_: src.core.ipa_utils.IPATokenizer
+num_classes: 5
+
+target_sr: 16000
+max_duration_sec: 20 # Optional: maximum audio duration in seconds for truncation
+batch_size: 32 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+num_workers: 10
+pin_memory: False

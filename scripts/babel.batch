@@ -1,0 +1,26 @@
+#!/bin/bash
+#SBATCH -p swl_general
+#SBATCH -J main
+#SBATCH -N 1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 20
+#SBATCH --mem=40G
+#SBATCH -t 48:00:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+
+# === Directory Setup ===
+cd /data/user_data/sbharad2/PhoneBench
+mkdir -p "exp/slurm_logs"
+# === Environment setup ===
+source ~/.zshrc
+conda deactivate
+source setup_uv.sh .venv
+# for w2v2ph these must be pre-built
+# export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
+# export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
+###########################
+###########################
+python src/main.py "$@"
+###########################
+###########################
