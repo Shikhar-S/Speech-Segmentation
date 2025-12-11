@@ -63,7 +63,7 @@ class EasyCallDataset(Dataset):
         tokenizer,
         target_sr: int = 16000,
         split: str = "train",
-        max_speech_length: Optional[float] = None,  # seconds
+        max_duration_sec: Optional[float] = None,  # seconds
     ):
         """
         Args:
@@ -73,12 +73,12 @@ class EasyCallDataset(Dataset):
             tokenizer: Object with `tokens2ids(List[str]) -> List[int]`.
             target_sr: Expected sample rate.
             split: "train" / "validation" / "test".
-            max_speech_length: Optional max duration in seconds.
+            max_duration_sec: Optional max duration in seconds.
         """
         self.hf_ds = hf_ds
         self.target_sr = target_sr
         self.split = split
-        self.max_speech_length = max_speech_length
+        self.max_duration_sec = max_duration_sec
         self.tokenizer = tokenizer
 
         df_meta = pd.read_csv(easycall_meta_csv)
@@ -116,7 +116,11 @@ class EasyCallDataset(Dataset):
         if not text:
             return []
         ipa_string = self.epitran_transliterator.transliterate(text)
-        phonemes_list = ipatok_tokenise(ipa_string)
+        try:
+            phonemes_list = ipatok_tokenise(ipa_string)
+        except Exception as e:
+            # workaround for ipatok issues
+            phonemes_list = ipa_string.split()
         if not phonemes_list:
             raise ValueError("Epitran/ipatok returned empty phoneme list")
         return phonemes_list
@@ -135,8 +139,8 @@ class EasyCallDataset(Dataset):
             )
         if waveform.shape[0] > 1:
             waveform = waveform.mean(dim=0, keepdim=True)
-        if self.max_speech_length is not None:
-            max_samples = int(self.max_speech_length * sr)
+        if self.max_duration_sec is not None:
+            max_samples = int(self.max_duration_sec * sr)
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
 
@@ -200,11 +204,12 @@ class EasyCallDataModule(L.LightningDataModule):
         cache_dir: str,
         easycall_meta_csv: str,
         tokenizer,
+        target_sr: int = 16000,
+        max_duration_sec: Optional[float] = None,
+        num_classes: int = 4,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
-        target_sr: int = 16000,
-        max_speech_length: Optional[float] = None,
     ):
         """
         Lightning DataModule for EasyCall.
@@ -216,13 +221,14 @@ class EasyCallDataModule(L.LightningDataModule):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.easycall_meta_csv = easycall_meta_csv
+        self.num_classes = num_classes
 
         self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.target_sr = target_sr
-        self.max_speech_length = max_speech_length
+        self.max_duration_sec = max_duration_sec
 
         self._hf_train = None
         self._hf_val = None
@@ -253,7 +259,7 @@ class EasyCallDataModule(L.LightningDataModule):
             easycall_meta_csv=self.easycall_meta_csv,
             tokenizer=self.tokenizer,
             target_sr=self.target_sr,
-            max_speech_length=self.max_speech_length,
+            max_duration_sec=self.max_duration_sec,
             split=split,
         )
 
@@ -313,7 +319,8 @@ if __name__ == "__main__":
         num_workers=1,
         pin_memory=False,
         target_sr=16000,
-        max_speech_length=20.0,
+        max_duration_sec=20.0,
+        num_classes=4,
     )
 
     dm.prepare_data()
