@@ -38,10 +38,13 @@ def load_easycall_data(
         ds = ds.select(range(max_samples))
     device = "cuda" if torch.cuda.is_available() else "cpu"
     resampler = torchaudio.transforms.Resample(8000, 16000).to(device)
+    MIN_LENGTH = 8000  # 0.5 second at 16kHz
 
     def _resample(example):
         audio = example["audio"]
         wav, _ = torchaudio.load(io.BytesIO(example["audio"]["bytes"]))
+        if wav.shape[1] < MIN_LENGTH:
+            return None  # filter out too short
         wav = wav.to(device)
         wav = resampler(wav).cpu()
         buf = io.BytesIO()
@@ -301,6 +304,7 @@ class EasyCallDataModule(L.LightningDataModule):
 if __name__ == "__main__":
     import argparse
     from src.core.ipa_utils import IPATokenizer
+    from tqdm import tqdm
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--hf_repo", type=str, required=True)
