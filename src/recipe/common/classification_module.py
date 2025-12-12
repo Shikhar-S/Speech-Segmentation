@@ -145,12 +145,12 @@ class ClassificationModel(LightningModule):
         self.log("test/f1", self.test_f1, on_step=False, on_epoch=True, prog_bar=False)
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        if self.freeze_encoder:
-            optimizable_params = [
-                p for n, p in self.named_parameters() if not n.startswith("net.")
-            ]
-        else:
-            optimizable_params = list(self.parameters())
+        optimizable_params = []
+        for n, p in self.named_parameters():
+            if n.startswith("net") and self.freeze_encoder:
+                p.requires_grad = False
+                continue
+            optimizable_params.append(p)
         optimizer = self.hparams.optimizer(params=optimizable_params)
         if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)

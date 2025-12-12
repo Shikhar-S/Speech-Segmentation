@@ -47,6 +47,7 @@ class CharacterTokenizer(BaseTokenizer):
 
     def __init__(
         self,
+        vocab_path: Union[str, Path] = None,
         pad_token: str = PAD_TOKEN,
         unk_token: str = UNK_TOKEN,
     ) -> None:
@@ -55,10 +56,17 @@ class CharacterTokenizer(BaseTokenizer):
             pad_token: Padding token string.
             unk_token: Unknown token string.
         """
-        self._ids_to_tokens = None
+        super().__init__()
         self._pad_token = pad_token
         self._unk_token = unk_token
-        self._vocab = None
+        if vocab_path is not None:
+            self._vocab = self._load_vocab(Path(vocab_path))
+            self._ids_to_tokens = {v: k for k, v in self._vocab.items()}
+            assert pad_token in self._vocab, f"pad_token '{pad_token}' not in vocab"
+            assert unk_token in self._vocab, f"unk_token '{unk_token}' not in vocab"
+        else:
+            self._ids_to_tokens = None
+            self._vocab = None
 
     @property
     def vocab(self) -> Dict[str, int]:
@@ -237,14 +245,7 @@ class CharacterTokenizer(BaseTokenizer):
 
     @staticmethod
     def _load_vocab(path: Path) -> Dict[str, int]:
-        """Load vocabulary from JSON file.
-
-        Args:
-            path: Path to vocabulary JSON file.
-
-        Returns:
-            Vocabulary dictionary.
-        """
+        """Load vocabulary from JSON file."""
         with open(path, encoding="utf-8") as f:
             return json.load(f)
 

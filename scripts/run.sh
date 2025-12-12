@@ -60,6 +60,7 @@ summary_log="${exp_dir}/${run_name}.summary.log"
 declare -A cluster_configs=(
     ["dai"]="scripts/dai.batch"
     ["delta"]="scripts/delta.batch"
+    ["babel"]="scripts/babel.batch"
 )
 
 # Model configurations: base_model|hf_repo

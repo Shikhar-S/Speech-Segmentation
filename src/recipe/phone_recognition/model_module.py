@@ -4,8 +4,7 @@ Usage:
     python -m src.recipe.phone_recognition.model_module
 """
 
-from typing import Any, Dict, List, Optional, Sequence
-
+from typing import Any, Dict, List, Optional
 import torch
 import torch.nn as nn
 from lightning import LightningModule
@@ -20,10 +19,11 @@ class PhoneRecognitionModel(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         inference: Optional[Any] = None,
+        freeze_encoder: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net", "inference"])
-
+        self.freeze_encoder = freeze_encoder
         self.net = net
         self.inference = inference
         self.blank_id: Optional[int] = getattr(self.net, "blank_id", None)
@@ -37,7 +37,17 @@ class PhoneRecognitionModel(LightningModule):
         self,
         batch: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
-        return self.net(**batch)
+        # TODO(shikhar): fix typo throughtout length --> lengths
+        speech = batch["speech"]
+        speech_length = batch["speech_length"]
+        text = batch["text"]
+        text_length = batch["text_length"]
+        return self.net(
+            speech=speech,
+            speech_lengths=speech_length,
+            text=text,
+            text_lengths=text_length,
+        )
 
     def on_before_optimizer_step(self, optimizer) -> None:
         norms = grad_norm(self, norm_type=2)
@@ -138,7 +148,8 @@ class PhoneRecognitionModel(LightningModule):
 
     def configure_optimizers(self) -> Dict[str, Any]:
         # skip params for inference obj
-        optimizer = self.hparams.optimizer(params=self.net.parameters())
+        trainable_params = self.net.get_trainable_parameters(self.freeze_encoder)
+        optimizer = self.hparams.optimizer(params=trainable_params)
         scheduler_cls = self.hparams.scheduler
 
         if scheduler_cls is not None:
@@ -154,51 +165,3 @@ class PhoneRecognitionModel(LightningModule):
             }
 
         return {"optimizer": optimizer}
-
-
-if __name__ == "__main__":
-    from functools import partial
-    from pathlib import Path
-
-    from src.data.buckeye.common_datamodule import BuckeyeDataModule
-    from src.model.powsm.powsm_inference import build_powsm_inference
-    from src.model.powsm.token_id_converter import build_powsm_tokenizer
-
-    WORK_DIR = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache"
-    DATA_DIR = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache"
-    BUCKEYE_ROOT = (
-        "/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/"
-        "s2t1/dump/raw/test_buckeye/buckeye"
-    )
-
-    inference_obj = build_powsm_inference(
-        work_dir=WORK_DIR,
-        hf_repo="espnet/powsm",
-    )
-    tokenizer = build_powsm_tokenizer(work_dir=WORK_DIR, hf_repo="espnet/powsm")
-
-    data_module = BuckeyeDataModule(
-        buckeye_root=BUCKEYE_ROOT,
-        train_metadata=str(Path(DATA_DIR) / "train_metadata.json"),
-        val_metadata=str(Path(DATA_DIR) / "val_metadata.json"),
-        test_metadata=str(Path(DATA_DIR) / "test_metadata.json"),
-        model_tokenizer=tokenizer,
-        batch_size=2,
-        num_workers=1,
-    )
-    data_module.setup()
-    sample_batch = next(iter(data_module.test_dataloader()))
-
-    model = PhoneRecognitionModel(
-        net=inference_obj.model,
-        optimizer=partial(torch.optim.Adam, lr=1e-4),
-        scheduler=None,
-        inference=inference_obj,
-    )
-    model.eval()
-
-    with torch.no_grad():
-        predictions = model.predict_step(sample_batch, batch_idx=0)
-    for pred in predictions:
-        print(pred)
-        break

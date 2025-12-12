@@ -7,9 +7,10 @@ optimizer:
   weight_decay: 0.0
 
 scheduler:
-  _target_: torch.optim.lr_scheduler.LinearLR
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
   _partial_: true
-  total_iters: 100
-  last_epoch: -1
+  mode: "min"
+  factor: 0.5
+  patience: 2
 
 net: ???

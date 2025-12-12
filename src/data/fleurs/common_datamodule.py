@@ -65,7 +65,18 @@ def pad_collate(batch):
         torch.nn.functional.pad(b["speech"], (0, max_len - b["speech"].shape[-1]))
         for b in batch
     ]
-    return {
+    padded_text = None
+    padded_text_length = None
+    if "text" in batch[0]:
+        max_text_len = max(len(b["text"]) for b in batch)
+        padded_text = torch.zeros((len(batch), max_text_len), dtype=torch.long)
+        padded_text_length = torch.zeros((len(batch),), dtype=torch.long)
+        for i, b in enumerate(batch):
+            text_len = len(b["text"])
+            padded_text[i, :text_len] = b["text"]
+            padded_text_length[i] = text_len
+
+    return_dict = {
         "speech": torch.stack(padded),
         "speech_length": torch.tensor([b["speech"].shape[-1] for b in batch]),
         "sr": batch[0]["sr"],
@@ -74,6 +85,10 @@ def pad_collate(batch):
         "split": [b.get("split", "none") for b in batch],
         "metadata_idx": [b["metadata_idx"] for b in batch],
     }
+    if "text" in batch[0]:
+        return_dict["text"] = padded_text
+        return_dict["text_length"] = padded_text_length
+    return return_dict
 
 
 class FleursLanguageIdDataset(Dataset):
@@ -84,7 +99,9 @@ class FleursLanguageIdDataset(Dataset):
         split: str,
         target_sr: int = 16000,
         max_audio_length: float = 20.0,
+        tokenizer=None,
     ):
+        self.tokenizer = tokenizer
         self.dataset = dataset
         self.split = split
         self.target_sr = target_sr
@@ -103,12 +120,15 @@ class FleursLanguageIdDataset(Dataset):
             waveform = waveform.mean(dim=0, keepdim=True)
         assert sr == self.target_sr, f"Expected sr={self.target_sr}, got sr={sr}"
         waveform = waveform.squeeze(0)  # (T,)
+        if self.tokenizer:
+            text = sample["transcription"]
+            text = torch.tensor(self.tokenizer.encode(text), dtype=torch.long)
 
         # Truncate
         if waveform.shape[-1] > self.max_len:
             waveform = waveform[: self.max_len]
 
-        return {
+        return_dict = {
             "speech": waveform.to(torch.float32),
             "sr": self.target_sr,
             "language": sample["language"],
@@ -117,6 +137,9 @@ class FleursLanguageIdDataset(Dataset):
             "metadata_idx": i,
             "utt_id": f"{self.split}_{i}",
         }
+        if self.tokenizer:
+            return_dict["text"] = text
+        return return_dict
 
 
 class FleursLanguageId(LightningDataModule):
@@ -126,6 +149,7 @@ class FleursLanguageId(LightningDataModule):
         num_classes: int = 102,
         max_samples: Optional[int] = None,
         target_sr: int = 16000,
+        tokenizer: Optional[object] = None,
         max_audio_length: float = 20.0,
         cache_dir: Optional[str] = None,
         batch_size: int = 64,
@@ -137,7 +161,8 @@ class FleursLanguageId(LightningDataModule):
             id_to_label: List of language codes to use from FLEURS (e.g., ["en_us", "hi_in"])
         """
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["tokenizer"])
+        self.tokenizer = tokenizer
         self.ds_train = self.ds_val = self.ds_test = None
         self.num_classes = self.hparams.num_classes
         assert self.num_classes == len(self.hparams.id_to_label), (
@@ -156,53 +181,29 @@ class FleursLanguageId(LightningDataModule):
                 self.hparams.cache_dir,
             )
 
+    def _ds(self, split):
+        return FleursLanguageIdDataset(
+            dataset=load_fleurs_data(
+                split,
+                self.hparams.id_to_label,
+                self.hparams.max_samples,
+                self.hparams.cache_dir,
+            ),
+            split=split,
+            id_to_label=self.hparams.id_to_label,
+            target_sr=self.hparams.target_sr,
+            max_audio_length=self.hparams.max_audio_length,
+            tokenizer=self.tokenizer,
+        )
+
     def setup(self, stage: Optional[str] = None):
         if self.trainer and self.trainer.world_size > 1:
             if self.hparams.batch_size % self.trainer.world_size:
                 raise RuntimeError("batch_size not divisible by world_size")
             self.bs_dev = self.hparams.batch_size // self.trainer.world_size
-
-        if self.ds_train is None:
-            train_data = load_fleurs_data(
-                split="train",
-                language_subset=self.hparams.id_to_label,
-                max_samples=self.hparams.max_samples,
-                cache_dir=self.hparams.cache_dir,
-            )
-            val_data = load_fleurs_data(
-                split="validation",
-                language_subset=self.hparams.id_to_label,
-                max_samples=self.hparams.max_samples,
-                cache_dir=self.hparams.cache_dir,
-            )
-            test_data = load_fleurs_data(
-                split="test",
-                language_subset=self.hparams.id_to_label,
-                max_samples=self.hparams.max_samples,
-                cache_dir=self.hparams.cache_dir,
-            )
-
-            self.ds_train = FleursLanguageIdDataset(
-                dataset=train_data,
-                split="train",
-                id_to_label=self.hparams.id_to_label,
-                target_sr=self.hparams.target_sr,
-                max_audio_length=self.hparams.max_audio_length,
-            )
-            self.ds_val = FleursLanguageIdDataset(
-                dataset=val_data,
-                split="validation",
-                id_to_label=self.hparams.id_to_label,
-                target_sr=self.hparams.target_sr,
-                max_audio_length=self.hparams.max_audio_length,
-            )
-            self.ds_test = FleursLanguageIdDataset(
-                dataset=test_data,
-                split="test",
-                id_to_label=self.hparams.id_to_label,
-                target_sr=self.hparams.target_sr,
-                max_audio_length=self.hparams.max_audio_length,
-            )
+        self.ds_train = self._ds("train")
+        self.ds_val = self._ds("validation")
+        self.ds_test = self._ds("test")
 
     def _dl(self, ds, shuffle: bool):
         return DataLoader(
@@ -231,11 +232,18 @@ class FleursLanguageId(LightningDataModule):
 
 
 def test_datamodule():
+    from src.core.tokenizer.character_tokenizer import CharacterTokenizer
+
+    tokenizer = CharacterTokenizer()
+    tokenizer.build_vocab(["abcdefghijklmnopqrstuvwxyz"])
+    # tokenizer.save_vocab(tokenizer.vocab, "exp/cache/envocab.json")
     dm = FleursLanguageId(
-        id_to_label=["en_us", "hi_in"],
-        num_classes=2,
+        id_to_label=["en_us"],
+        num_classes=1,
         max_samples=500,
         batch_size=8,
+        cache_dir="/scratch/sbharad2/PhoneBench/exp/cache/fleurs",
+        tokenizer=tokenizer,
     )
     dm.prepare_data()
     dm.setup()
