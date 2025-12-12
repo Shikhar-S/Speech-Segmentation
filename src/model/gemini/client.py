@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from google import genai
 from google.genai import types
@@ -26,10 +26,6 @@ class UploadedFile:
     original_path: Optional[Path] = None
 
 
-# Type alias for thinking level options
-ThinkingLevel = Literal["low", "high"]
-
-
 class GeminiClient:
     """
     Gemini API client for multimodal content generation.
@@ -41,13 +37,14 @@ class GeminiClient:
 
     def __init__(
         self,
-        model_name: str = "gemini-3-pro-preview",
+        model_name: str = "gemini-2.5-flash",
         api_key: Optional[str] = None,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 1,
         seed: int = 0,
-        thinking_level: ThinkingLevel = "low",
+        thinking_budget: int = 0,
+        response_schema: Optional[dict] = None,
         retry_config: Optional[dict] = None,
     ) -> None:
         """
@@ -61,8 +58,17 @@ class GeminiClient:
             top_p: Top-p (nucleus) sampling parameter (default: 1.0).
             top_k: Top-k sampling parameter (default: 1).
             seed: Random seed for reproducibility (default: 0).
-            thinking_level: Thinking level for reasoning models (default: "low").
-                Options: "none", "low", "medium", "high".
+            thinking_budget: Thinking budget for reasoning models (default: 0).
+                Set to 0 for non-thinking mode, higher values for more reasoning.
+            response_schema: Optional schema for structured JSON output. If provided,
+                enables JSON mode with the specified schema. Expected format:
+                {
+                    "type": "OBJECT",
+                    "required": ["field_name"],
+                    "properties": {
+                        "field_name": {"type": "STRING"}
+                    }
+                }
             retry_config: Configuration for retry logic. Keys:
                 - max_retries (int): Maximum retry attempts (default: 5)
                 - initial_delay (float): Initial delay in seconds (default: 1.0)
@@ -81,12 +87,49 @@ class GeminiClient:
         self.top_p = top_p
         self.top_k = top_k
         self.seed = seed
-        self.thinking_level = thinking_level
+        self.thinking_budget = thinking_budget
+        self.response_schema = self._build_schema(response_schema) if response_schema else None
         self.client = genai.Client(api_key=key)
 
         # Retry configuration
         default_retry = {"max_retries": 5, "initial_delay": 1.0, "backoff_factor": 2.0}
         self.retry_config = {**default_retry, **(retry_config or {})}
+
+    def _build_schema(self, schema_config: dict) -> types.Schema:
+        """
+        Build a Gemini Schema object from a dictionary configuration.
+
+        Args:
+            schema_config: Dictionary with schema definition.
+
+        Returns:
+            types.Schema object for structured output.
+        """
+        # Map string type names to Gemini Type enum
+        type_mapping = {
+            "STRING": types.Type.STRING,
+            "NUMBER": types.Type.NUMBER,
+            "INTEGER": types.Type.INTEGER,
+            "BOOLEAN": types.Type.BOOLEAN,
+            "ARRAY": types.Type.ARRAY,
+            "OBJECT": types.Type.OBJECT,
+        }
+
+        schema_type = type_mapping.get(schema_config.get("type", "OBJECT").upper(), types.Type.OBJECT)
+
+        # Build properties if present
+        properties = None
+        if "properties" in schema_config:
+            properties = {}
+            for prop_name, prop_config in schema_config["properties"].items():
+                prop_type = type_mapping.get(prop_config.get("type", "STRING").upper(), types.Type.STRING)
+                properties[prop_name] = types.Schema(type=prop_type)
+
+        return types.Schema(
+            type=schema_type,
+            required=schema_config.get("required"),
+            properties=properties,
+        )
 
     def generate(
         self,
@@ -243,8 +286,13 @@ class GeminiClient:
             "seed": self.seed,
             "candidate_count": 1,
             "response_modalities": ["TEXT"],
-            "thinking_config": types.ThinkingConfig(thinking_level=self.thinking_level),
+            "thinking_config": types.ThinkingConfig(thinking_budget=self.thinking_budget),
         }
+
+        # Add structured output schema if configured
+        if self.response_schema:
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_schema"] = self.response_schema
 
         # Add system instruction if provided
         if system_prompt:

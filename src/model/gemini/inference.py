@@ -6,6 +6,7 @@ project's distributed_inference.py workflow, handling prompt templating
 and response post-processing.
 """
 
+import json
 import string
 import unicodedata
 from pathlib import Path
@@ -28,6 +29,7 @@ class GeminiInference:
         client_config: dict[str, Any],
         prompt_config: dict[str, Any],
         clean_response: bool = False,
+        output_key: Optional[str] = None,
         device: Optional[str] = None,  # Ignored for API-based model
     ) -> None:
         """
@@ -38,6 +40,7 @@ class GeminiInference:
                 - model_name (str): Gemini model identifier
                 - api_key (str, optional): API key for authentication
                 - temperature (float, optional): Sampling temperature
+                - response_schema (dict, optional): Schema for structured JSON output
                 - retry_config (dict, optional): Retry configuration
             prompt_config: Configuration for prompt handling. Expected keys:
                 - system_prompt (str): System instruction for the model
@@ -45,6 +48,8 @@ class GeminiInference:
                 - default_user_prompt (str, optional): Fallback prompt if template fails
             clean_response: If True, normalize the response text (remove spaces,
                             punctuation, etc.). Useful for IPA transcription tasks.
+            output_key: Key to extract from JSON response when using structured output.
+                If None and structured output is used, returns the raw JSON string.
             device: Ignored parameter for API compatibility with distributed_inference.
         """
         # Initialize the client
@@ -57,6 +62,7 @@ class GeminiInference:
 
         # Store post-processing options
         self.clean_response = clean_response
+        self.output_key = output_key
 
     def __call__(self, wav_path: str | Path, **kwargs: Any) -> str:
         """
@@ -88,11 +94,35 @@ class GeminiInference:
             files=wav_path,
         )
 
-        # 3. Optionally clean the response
+        # 3. Parse JSON response if output_key is specified
+        if self.output_key:
+            raw_response = self._parse_json_response(raw_response, self.output_key)
+
+        # 4. Optionally clean the response
         if self.clean_response:
             return self._clean_response(raw_response)
 
         return raw_response
+
+    @staticmethod
+    def _parse_json_response(response: str, key: str) -> str:
+        """
+        Parse JSON response and extract value for the specified key.
+
+        Args:
+            response: JSON string response from the model.
+            key: Key to extract from the JSON object.
+
+        Returns:
+            Extracted value as string, or original response if parsing fails.
+        """
+        try:
+            parsed = json.loads(response)
+            if isinstance(parsed, dict) and key in parsed:
+                return str(parsed[key])
+            return response
+        except json.JSONDecodeError:
+            return response
 
     @staticmethod
     def _clean_response(text: str) -> str:

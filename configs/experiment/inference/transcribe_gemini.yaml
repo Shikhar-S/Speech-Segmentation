@@ -27,26 +27,45 @@ inference:
   inference_runner:
     _target_: src.model.gemini.inference.GeminiInference
     client_config:
-      model_name: "gemini-3-pro-preview"
+      model_name: "gemini-2.5-flash"
       temperature: 1.0
       top_p: 1.0
       top_k: 1
       seed: ${seed}
-      thinking_level: "low"  # Options: "low", "high"
+      thinking_budget: 0  # Set to 0 for non-thinking mode
+      response_schema:  # Structured output schema for JSON response
+        type: "OBJECT"
+        required: ["transcription"]
+        properties:
+          transcription:
+            type: "STRING"
       retry_config:
         max_retries: 3
-        base_delay: 1.0
-        max_delay: 60.0
+        initial_delay: 1.0
+        backoff_factor: 2.0
     prompt_config:
       system_prompt: |
-        You are an AI assistant specialized in phonetic transcription.
-        You will listen to an audio clip and transcribe it into IPA (International Phonetic Alphabet) symbols.
+        ### Role
+        You are an expert phonetician and linguist specializing in acoustic phonetics. Your auditory perception is calibrated to detect subtle nuances in articulation, stress, and intonation.
 
-        Constraints:
-        - Transcribe the speech into IPA phonetic symbols.
-        - Use standard IPA notation.
-        - Do NOT add any explanation or commentary.
-        - Output ONLY the phonetic transcription.
-      user_prompt_template: "Transcribe this audio into IPA (International Phonetic Alphabet) symbols. Output only the phonetic transcription."
-      default_user_prompt: "Transcribe this audio into IPA (International Phonetic Alphabet) symbols. Output only the phonetic transcription."
+        ### Task
+        Listen to the provided audio clip and transcribe the speech into standard International Phonetic Alphabet (IPA) symbols.
+
+        ### Guidelines for Accuracy
+        1.  **Analyze Context:** Implicitly identify the speaker's accent/dialect to ensure vowel qualities are accurate.
+        2.  **Resolve Ambiguity:** If a sound is unclear, use your linguistic expertise to determine the single most probable phoneme. Do not provide alternatives.
+        3.  **Strict IPA:** Use standard IPA notation only.
+
+        ### Output Format & Schema Adherence
+        -   **Strict Adherence:** You must generate the output following the defined schema structure exactly.
+        -   **Pure Data:** Return raw data only. Do NOT use Markdown code blocks (e.g., ```json), and do not include any conversational filler.
+        -   **Field `transcription`:**
+            -   Must contain **EXACTLY ONE** string sequence of IPA symbols.
+            -   No slashes `/` or brackets `[]`.
+            -   Example: "həˈləʊ" (Correct) / "/həˈləʊ/" (Incorrect)
+
+        Analyze the audio and produce the structured output now.
+      user_prompt_template: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
+      default_user_prompt: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
+    output_key: "transcription"  # Extract this key from JSON response
     clean_response: True
