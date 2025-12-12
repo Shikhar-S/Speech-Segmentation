@@ -1,25 +1,27 @@
 # @package _global_
 
-# This config executes phoneme recognition inference 
-# python src/main.py experiment=inference/vaani_powsmpr
+# This config executes inference with PoWSM:
+# Set data field when calling
+# eg. python src/main.py experiment=inference/transcribe_powsm data=fleurs task_name=inf_powsm_fleurs
 
 defaults:
   - override /logger: csv
-  - override /data: vaanigeo
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
+  - override /model: null
+  - override /model/net: null
 
-task_name: "vaani_powsmpr"
-tags: ["vaani_powsmpr"]
+task_name: ??? # pass inf_<model>_<data> when calling. This will create output dirs accordingly
+tags: ["powsm","inference"]
 
 seed: 42
 
+train: false
+test: false
 distributed_predict: True
 
 inference:
-  num_workers: 1 # number of parallel workers for distributed inference
-  passthrough_keys: ["latitude","longitude", "split", "metadata_idx"] # keys from dataset to be passed to output
-  out_file: ${paths.output_dir}/vaani_powsmpr.json
+  num_workers: 25 # number of parallel workers for distributed inference, 25 for 90GB gpu
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  out_file: ${paths.output_dir}/transcription.json
   # an object (or fn that creates such an object) with __call__ method to transcribe single speech
   inference_runner:
     _target_: src.model.powsm.powsm_inference.build_powsm_inference
@@ -38,7 +40,8 @@ inference:
     normalize_length: False
     maxlenratio: 0.0
     minlenratio: 0.0
-  # additional args to pass to the __call__ method of inference_runner, but can be overridden by keys from dataset
+  # additional args to pass to the __call__ method of inference_runner, 
+  # but can be overridden by keys from dataset if needed
   inference_call_args: 
     text_prev: <na>
     lang_sym: <unk>

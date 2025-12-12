@@ -27,7 +27,7 @@ inference:
   out_file: ${paths.output_dir}/buckeye_powsm_${data.mask_probability}.json
   inference_runner:
     _target_: src.model.powsm.powsm_inference.build_powsm_inference
-    work_dir: ${paths.exp_dir}/powsm_cache
+    work_dir: ${paths.cache_dir}/powsm
     hf_repo: espnet/powsm
     force_download: False
     config_file: null

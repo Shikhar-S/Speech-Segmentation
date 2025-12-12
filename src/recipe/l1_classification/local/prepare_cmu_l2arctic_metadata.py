@@ -60,16 +60,17 @@ Test Speakers (fixed, from L2-classification project):
 
 Usage:
     python -m src.recipe.l1_classification.local.prepare_cmu_l2arctic_metadata \
-        --l2arctic_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic/l2arctic \
-        --cmu_root /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic/cmu \
-        --output_csv /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic_cache/metadata.csv \
-        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic
+        --l2arctic_root exp/download/cmu_l2arctic/l2arctic \
+        --cmu_root exp/download/cmu_l2arctic/cmu \
+        --output_csv exp/cache/cmu_l2arctic/metadata.csv \
+        --data_dir exp/download/cmu_l2arctic \
+        --val_speakers_per_l1 1  # (optional, default=1) stratified: 1 val speaker per L1
 """
 
 import argparse
 import csv
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from collections import Counter
 import random
 from tqdm import tqdm
@@ -217,19 +218,19 @@ def collect_cmu_arctic_files(cmu_root: str, data_dir: str) -> List[Dict[str, str
 def split_data(
     samples: List[Dict[str, str]],
     test_speakers: List[str] = None,
-    val_ratio: float = 0.1,
+    val_speakers_per_l1: int = 1,
     seed: int = 42,
 ) -> List[Dict[str, str]]:
     """
-    Split data into train/val/test sets by speaker.
+    Split data into train/val/test sets by speaker with stratified L1 sampling.
 
     Uses fixed test speakers from L2-classification project to ensure consistency.
-    Validation speakers are randomly selected from remaining train speakers.
+    Validation speakers are selected to ensure each L1 class is represented.
 
     Args:
         samples: List of sample dicts
         test_speakers: Fixed list of test speaker IDs (default: TEST_SPEAKERS constant)
-        val_ratio: Ratio of speakers for validation (from non-test speakers)
+        val_speakers_per_l1: Number of validation speakers per L1 class (default: 1)
         seed: Random seed
 
     Returns:
@@ -243,45 +244,69 @@ def split_data(
     # Normalize test speakers to uppercase for comparison
     test_speakers_upper = {s.upper() for s in test_speakers}
 
-    # Group samples by speaker
+    # Group samples by speaker and get speaker -> L1 mapping
     speaker_samples = {}
+    speaker_to_l1 = {}
     for sample in samples:
         spk = sample["speaker_id"]
         if spk not in speaker_samples:
             speaker_samples[spk] = []
+            speaker_to_l1[spk] = sample["l1_label"]
         speaker_samples[spk].append(sample)
 
-    # Separate test speakers and train speakers
+    # Separate test speakers and non-test speakers
     all_speakers = list(speaker_samples.keys())
     test_spk_found = []
-    train_spk_pool = []
+    non_test_speakers = []
 
     for spk in all_speakers:
         spk_upper = spk.upper()
         if spk_upper in test_speakers_upper:
             test_spk_found.append(spk)
         else:
-            train_spk_pool.append(spk)
+            non_test_speakers.append(spk)
 
-    # Randomly select validation speakers from train pool
-    random.shuffle(train_spk_pool)
-    n_val = max(1, int(len(train_spk_pool) * val_ratio))
-    val_speakers = train_spk_pool[:n_val]
-    train_speakers = train_spk_pool[n_val:]
+    # Group non-test speakers by L1 for stratified validation selection
+    l1_to_speakers = {}
+    for spk in non_test_speakers:
+        l1 = speaker_to_l1[spk]
+        if l1 not in l1_to_speakers:
+            l1_to_speakers[l1] = []
+        l1_to_speakers[l1].append(spk)
 
-    print(f"\nSplit statistics:")
+    # Select validation speakers: stratified by L1 (1 speaker per L1 by default)
+    val_speakers = []
+    train_speakers = []
+
+    for l1, spk_list in l1_to_speakers.items():
+        random.shuffle(spk_list)
+        n_val = min(val_speakers_per_l1, len(spk_list) - 1)  # Keep at least 1 for train
+        n_val = max(0, n_val)  # Ensure non-negative
+
+        val_speakers.extend(spk_list[:n_val])
+        train_speakers.extend(spk_list[n_val:])
+
+    # Convert to sets for O(1) lookup
+    val_speakers_set = set(val_speakers)
+    test_spk_found_set = set(test_spk_found)
+
+    print(f"\nSplit statistics (stratified by L1):")
     print(f"  Train speakers: {len(train_speakers)}")
-    print(f"  Val speakers: {len(val_speakers)}")
+    print(f"  Val speakers: {len(val_speakers)} ({val_speakers_per_l1} per L1)")
     print(f"  Test speakers: {len(test_spk_found)} (fixed from L2-classification)")
+    print(f"  Val speakers by L1:")
+    for l1 in sorted(l1_to_speakers.keys()):
+        val_spk_for_l1 = [s for s in val_speakers if speaker_to_l1[s] == l1]
+        print(f"    {l1}: {val_spk_for_l1}")
     print(f"  Test speakers: {test_spk_found}")
 
     # Assign split to each sample
     result = []
     for sample in samples:
         spk = sample["speaker_id"]
-        if spk in test_spk_found:
+        if spk in test_spk_found_set:
             sample["split"] = "test"
-        elif spk in val_speakers:
+        elif spk in val_speakers_set:
             sample["split"] = "val"
         else:
             sample["split"] = "train"
@@ -366,10 +391,10 @@ def main():
         help="List of test speaker IDs (default: fixed TEST_SPEAKERS from L2-classification)",
     )
     parser.add_argument(
-        "--val_ratio",
-        type=float,
-        default=0.1,
-        help="Ratio of non-test speakers for validation (default: 0.1)",
+        "--val_speakers_per_l1",
+        type=int,
+        default=1,
+        help="Number of validation speakers per L1 class (default: 1, stratified)",
     )
     parser.add_argument(
         "--seed",
@@ -392,11 +417,13 @@ def main():
     print(f"\nTotal samples collected: {len(all_samples)}")
 
     # Split data
-    print("\nSplitting data by speaker (using fixed test speakers)...")
+    print(
+        "\nSplitting data by speaker (stratified by L1, using fixed test speakers)..."
+    )
     samples_with_split = split_data(
         all_samples,
         test_speakers=args.test_speakers,
-        val_ratio=args.val_ratio,
+        val_speakers_per_l1=args.val_speakers_per_l1,
         seed=args.seed,
     )
 

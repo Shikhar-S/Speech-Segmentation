@@ -23,7 +23,7 @@ distributed_predict: True
 data:
   model_tokenizer:
     _target_: src.model.powsm.token_id_converter.build_powsm_tokenizer
-    work_dir: ${paths.exp_dir}/powsm_cache
+    work_dir: ${paths.cache_dir}/powsm
     hf_repo: espnet/powsm
 
 inference:
@@ -37,5 +37,5 @@ inference:
     _target_: src.recipe.forced_alignment.inference.ForcedAlignmentInference
     model:
       _target_: src.model.powsm.powsm_model.build_powsm
-      work_dir: ${paths.exp_dir}/powsm_cache
+      work_dir: ${paths.cache_dir}/powsm
       hf_repo: espnet/powsm

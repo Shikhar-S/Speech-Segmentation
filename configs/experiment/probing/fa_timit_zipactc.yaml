@@ -31,7 +31,6 @@ trainer:
 model:
   optimizer:
     lr: 0.0002
-  # freeze_encoder: true TODO(shikhar): implement (?)
 
 data:
   batch_size: 48

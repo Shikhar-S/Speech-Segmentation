@@ -4,7 +4,7 @@
 # python src/main.py experiment=probing/geolocation_swissgerman_w2v2ph
 
 defaults:
-  - override /data: swissgerman_geolocation
+  - override /data: swissgermangeo
   - override /model: geolocation
   - override /model/net: w2v2ph
   - override /trainer: gpu

@@ -1,8 +1,8 @@
 _target_: src.data.fleurs.common_datamodule.FleursLanguageId
 cache_dir: ${paths.cache_dir}/fleurs
-
-id_to_label: ["en_us", "hi_in", "es_419", "fr_fr", "de_de"]  # limit languages
-num_classes: 5  # Must match the number of languages in language_subset
+# FLEURS-11
+id_to_label: ["pl_pl", "yue_hant_hk", "pt_br", "es_419", "ml_in","ja_jp","fil_ph","en_us","ru_ru","mk_mk","fr_fr"]
+num_classes: 11  # Must match the number of languages in language_subset
 max_samples: 500  # Use only 500 samples per split (train/val/test) = 1500 total samples
 
 target_sr: 16000

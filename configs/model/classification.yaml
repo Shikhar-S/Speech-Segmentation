@@ -33,6 +33,5 @@ head:
   # partially constructed here
 
 num_classes: ${data.num_classes}
-id_to_label: ${data.id_to_label}
 freeze_encoder: false  # True/False for audio mode; false for IPA mode
 input_type: "audio" # Input mode: "audio" for audio encoder, "ipa" for IPA embedding

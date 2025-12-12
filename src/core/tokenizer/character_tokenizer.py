@@ -1,29 +1,17 @@
 """Character-level tokenizer for IPA transcripts.
 
 This module provides a simple character-based tokenizer that treats each
-character (including IPA symbols) as a separate token. The vocabulary is
-built from training data and stored as a JSON file.
+character as a separate token. The vocabulary is built from training data and
+can be stored as a JSON file.
 
 Usage:
     # Build vocabulary from training transcripts
-    vocab = CharacterTokenizer.build_vocab(train_texts, min_freq=1)
-    CharacterTokenizer.save_vocab(vocab, "artifacts/ipa_vocab.json")
-
-    # Initialize tokenizer from vocab file
-    tokenizer = CharacterTokenizer(vocab_path="artifacts/ipa_vocab.json")
+    tokenizer = CharacterTokenizer()
+    tokenizer.build_vocab(train_texts, min_freq=1)
 
     # Encode/decode
     ids = tokenizer.encode("həˈloʊ")
     text = tokenizer.decode(ids)
-
-DataModule integration:
-    # In DataModule.prepare_data()
-    if not os.path.exists(vocab_path):
-        vocab = CharacterTokenizer.build_vocab(train_texts)
-        CharacterTokenizer.save_vocab(vocab, vocab_path)
-
-    # In DataModule.setup()
-    self.tokenizer = CharacterTokenizer(vocab_path=vocab_path)
 """
 
 from __future__ import annotations
@@ -31,7 +19,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, List, Sequence, Tuple, Union
 
 from src.core.tokenizer.base_tokenizer import BaseTokenizer
 
@@ -59,55 +47,26 @@ class CharacterTokenizer(BaseTokenizer):
 
     def __init__(
         self,
-        vocab_path: Optional[Union[str, Path]] = None,
-        vocab: Optional[Dict[str, int]] = None,
+        vocab_path: Union[str, Path] = None,
         pad_token: str = PAD_TOKEN,
         unk_token: str = UNK_TOKEN,
     ) -> None:
         """Initialize the CharacterTokenizer.
-
-        Must provide either vocab_path or vocab dict. If both are provided,
-        vocab_path takes precedence.
-
         Args:
-            vocab_path: Path to JSON file containing vocabulary mapping.
-            vocab: Pre-built vocabulary dictionary (token -> id).
             pad_token: Padding token string.
             unk_token: Unknown token string.
-
-        Raises:
-            ValueError: If neither vocab_path nor vocab is provided.
-            FileNotFoundError: If vocab_path does not exist.
         """
-        if vocab_path is None and vocab is None:
-            raise ValueError(
-                "CharacterTokenizer requires either 'vocab_path' or 'vocab'. "
-                "To create a vocabulary, use CharacterTokenizer.build_vocab() "
-                "and save it with CharacterTokenizer.save_vocab()."
-            )
-
-        if vocab_path is not None:
-            vocab_path = Path(vocab_path)
-            if not vocab_path.exists():
-                raise FileNotFoundError(
-                    f"Vocabulary file not found: {vocab_path}\n"
-                    f"Please build the vocabulary first using:\n"
-                    f"  vocab = CharacterTokenizer.build_vocab(train_texts)\n"
-                    f"  CharacterTokenizer.save_vocab(vocab, '{vocab_path}')"
-                )
-            vocab = self._load_vocab(vocab_path)
-
-        assert vocab is not None  # for type checker
-        self._vocab = vocab
-        self._ids_to_tokens = {v: k for k, v in vocab.items()}
+        super().__init__()
         self._pad_token = pad_token
         self._unk_token = unk_token
-
-        # Validate special tokens exist
-        if pad_token not in self._vocab:
-            raise ValueError(f"Padding token '{pad_token}' not found in vocabulary.")
-        if unk_token not in self._vocab:
-            raise ValueError(f"Unknown token '{unk_token}' not found in vocabulary.")
+        if vocab_path is not None:
+            self._vocab = self._load_vocab(Path(vocab_path))
+            self._ids_to_tokens = {v: k for k, v in self._vocab.items()}
+            assert pad_token in self._vocab, f"pad_token '{pad_token}' not in vocab"
+            assert unk_token in self._vocab, f"unk_token '{unk_token}' not in vocab"
+        else:
+            self._ids_to_tokens = None
+            self._vocab = None
 
     @property
     def vocab(self) -> Dict[str, int]:
@@ -170,7 +129,9 @@ class CharacterTokenizer(BaseTokenizer):
         Returns:
             Decoded text string.
         """
-        return "".join(self._ids_to_tokens.get(idx, self._unk_token) for idx in token_ids)
+        return "".join(
+            self._ids_to_tokens.get(idx, self._unk_token) for idx in token_ids
+        )
 
     def decode_clean(self, token_ids: Sequence[int], skip_special: bool = True) -> str:
         """Decode token IDs, optionally removing special tokens.
@@ -221,44 +182,31 @@ class CharacterTokenizer(BaseTokenizer):
         """
         return self._ids_to_tokens.get(idx, self._unk_token)
 
-    @staticmethod
     def build_vocab(
+        self,
         texts: Iterable[str],
         min_freq: int = 1,
         specials: Tuple[str, ...] = DEFAULT_SPECIALS,
     ) -> Dict[str, int]:
         """Build vocabulary from a collection of texts.
-
-        Characters are extracted from all texts and filtered by minimum
-        frequency. Special tokens are added at the beginning of the
-        vocabulary with fixed indices.
-
         Args:
             texts: Iterable of text strings (e.g., IPA transcripts).
             min_freq: Minimum frequency for a character to be included.
             specials: Tuple of special tokens to prepend to vocabulary.
-
-        Returns:
-            Dictionary mapping token strings to integer IDs.
         """
-        # Count character frequencies
         counter: Counter[str] = Counter()
         for text in texts:
             counter.update(text)
-
-        # Build vocab with special tokens first
         vocab: Dict[str, int] = {}
         for idx, token in enumerate(specials):
             vocab[token] = idx
-
-        # Add characters meeting frequency threshold
         next_id = len(specials)
         for char, freq in sorted(counter.items()):
             if freq >= min_freq and char not in vocab:
                 vocab[char] = next_id
                 next_id += 1
-
-        return vocab
+        self._vocab = vocab
+        self._ids_to_tokens = {v: k for k, v in vocab.items()}
 
     @staticmethod
     def save_vocab(vocab: Dict[str, int], path: Union[str, Path]) -> None:
@@ -297,14 +245,7 @@ class CharacterTokenizer(BaseTokenizer):
 
     @staticmethod
     def _load_vocab(path: Path) -> Dict[str, int]:
-        """Load vocabulary from JSON file.
-
-        Args:
-            path: Path to vocabulary JSON file.
-
-        Returns:
-            Vocabulary dictionary.
-        """
+        """Load vocabulary from JSON file."""
         with open(path, encoding="utf-8") as f:
             return json.load(f)
 
@@ -318,12 +259,13 @@ if __name__ == "__main__":
     ]
 
     print("Building vocabulary from sample texts...")
-    vocab = CharacterTokenizer.build_vocab(sample_texts)
-    print(f"Vocabulary size: {len(vocab)}")
-    print(f"Vocabulary: {vocab}")
+    tokenizer = CharacterTokenizer()
+    tokenizer.build_vocab(sample_texts)
+    print(f"Vocabulary size: {len(tokenizer._vocab)}")
+    print(f"Vocabulary: {tokenizer._vocab}")
 
     print("\nCreating tokenizer from vocab dict...")
-    tokenizer = CharacterTokenizer(vocab=vocab)
+    tokenizer = CharacterTokenizer(vocab=tokenizer._vocab)
 
     test_text = "həˈloʊ"
     encoded = tokenizer.encode(test_text)
@@ -339,5 +281,3 @@ if __name__ == "__main__":
     encoded_unk = tokenizer.encode(unknown_text)
     print(f"\nUnknown text: {unknown_text}")
     print(f"Encoded (should have unk_id={tokenizer.unk_id}): {encoded_unk}")
-
-

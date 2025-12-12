@@ -1,8 +1,8 @@
 """Prepare train/val/test splits for Vaani geolocation data.
 Usage:
-    python /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/src/recipe/geolocation/local/prepare_vaani_splits.py \
-        --input-metadata /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/vaani_geolocation_metadata.big.csv \
-        --output-dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/tmp \
+    python src/recipe/geolocation/local/prepare_vaani_splits.py \
+        --input-metadata /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/vaani_geolocation/vaani_geolocation_metadata.big.csv \
+        --output-dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/vaani_geolocation \
         --max-pincodes 140
 """
 

@@ -10,7 +10,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import torch

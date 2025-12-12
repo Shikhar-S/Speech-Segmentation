@@ -4,7 +4,7 @@
 root_dir: ${oc.env:PROJECT_ROOT}
 
 exp_dir: ${paths.root_dir}/exp
-download_dir: ${paths.exp_dir}/downloads
+download_dir: ${paths.exp_dir}/download
 cache_dir: ${paths.exp_dir}/cache
 
 # path to output directory, created dynamically by hydra

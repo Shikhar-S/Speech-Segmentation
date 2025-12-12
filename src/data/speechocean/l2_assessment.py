@@ -17,7 +17,6 @@ Usage:
 """
 
 import os
-import math
 from typing import Optional, Dict, Any, List
 
 import torch
@@ -34,11 +33,15 @@ def pad_collate(batch: List[Dict[str, Any]]):
         torch.nn.functional.pad(b["speech"], (0, M - b["speech"].shape[-1]))
         for b in batch
     ]
+    tgt_type = torch.long if isinstance(batch[0]["target"], int) else torch.float
 
     return {
         "speech": torch.stack(A, dim=0),  # (B, T_max)
         "speech_length": torch.tensor(L, dtype=torch.long),
-        "scores": [b["scores"] for b in batch],
+        "target": torch.tensor(
+            [b["target"] for b in batch],
+            dtype=tgt_type,
+        ),
         "speaker_id": [b["speaker_id"] for b in batch],
         "utt_id": [b["utt_id"] for b in batch],
         "split": [b["split"] for b in batch],
@@ -53,6 +56,7 @@ class SpeechOceanDataset(Dataset):
         metadata_path: str,
         split: str,
         data_dir: str,
+        target_key: str = "total",
         target_sr: int = 16000,
     ):
         super().__init__()
@@ -60,6 +64,17 @@ class SpeechOceanDataset(Dataset):
         self.data_dir = data_dir
         self.split = split
         self.target_sr = target_sr
+        self.target_key = target_key
+        assert target_key in [
+            "accuracy",
+            "completeness",
+            "fluency",
+            "prosodic",
+            "total",
+        ], (
+            f"Invalid target_key: {target_key}. Must be one of "
+            f"['accuracy', 'completeness', 'fluency', 'prosodic', 'total']"
+        )
 
         metadata = (
             pd.read_csv(metadata_path)
@@ -67,6 +82,7 @@ class SpeechOceanDataset(Dataset):
             .rename(columns={"index": "metadata_idx"})
         )
         self.metadata = metadata[metadata["split"] == split].reset_index(drop=True)
+        self.max_output_audio_length = 20  # seconds
 
     def __len__(self):
         return len(self.metadata)
@@ -86,28 +102,25 @@ class SpeechOceanDataset(Dataset):
 
         audio_path = os.path.join(self.data_dir, row["audio_path"])
         wav, sr = torchaudio.load(audio_path)
-
-        if sr != self.target_sr:
-            resampler = torchaudio.transforms.Resample(sr, self.target_sr)
-            wav = resampler(wav)
-
+        assert sr == self.target_sr, f"Expected sr={self.target_sr}, but got sr={sr}"
         if wav.shape[0] > 1:
             wav = torch.mean(wav, dim=0, keepdim=True)
+        # Trim
+        max_len = sr * self.max_output_audio_length
+        if wav.shape[-1] > max_len:
+            wav = wav[:, :max_len]
 
         wav = wav.squeeze(0)  # (T,)
-
-        scores = {
-            "accuracy": float(row["accuracy"]),
-            "completeness": float(row["completeness"]),
-            "fluency": float(row["fluency"]),
-            "prosodic": float(row["prosodic"]),
-            "total": float(row["total"]),
-        }
+        target = (
+            int(row[self.target_key])
+            if self.target_key != "completeness"
+            else float(row[self.target_key])
+        )
 
         return {
             "speech": wav,
             "speech_length": wav.shape[0],
-            "scores": scores,
+            "target": target,
             "speaker_id": str(row["speaker_id"]),
             "utt_id": str(row["utt_id"]),
             "split": row["split"],
@@ -121,6 +134,9 @@ class SpeechOceanDataModule(LightningDataModule):
         self,
         data_dir: str,
         metadata_path: str,
+        id_to_label: List[int],
+        num_classes: int,
+        target_key: str = "total",
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -128,6 +144,9 @@ class SpeechOceanDataModule(LightningDataModule):
     ):
         super().__init__()
         self.save_hyperparameters()
+        self.ids_to_label = id_to_label
+        self.num_classes = num_classes
+        self.target_key = target_key
         self.ds_train = self.ds_val = self.ds_test = None
         self.bs_dev = batch_size
 
@@ -147,18 +166,21 @@ class SpeechOceanDataModule(LightningDataModule):
                 split="train",
                 data_dir=self.hparams.data_dir,
                 target_sr=self.hparams.target_sr,
+                target_key=self.target_key,
             )
             self.ds_val = SpeechOceanDataset(
                 metadata_path=self.hparams.metadata_path,
                 split="val",
                 data_dir=self.hparams.data_dir,
                 target_sr=self.hparams.target_sr,
+                target_key=self.target_key,
             )
             self.ds_test = SpeechOceanDataset(
                 metadata_path=self.hparams.metadata_path,
                 split="test",
                 data_dir=self.hparams.data_dir,
                 target_sr=self.hparams.target_sr,
+                target_key=self.target_key,
             )
 
             print(
@@ -208,6 +230,9 @@ def _test_datamodule():
     dm = SpeechOceanDataModule(
         data_dir=args.data_dir,
         metadata_path=args.metadata_path,
+        id_to_label=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        num_classes=11,
+        target_key="total",
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=False,
@@ -226,7 +251,7 @@ def _test_datamodule():
     print(f"speech_length values: {batch['speech_length']}")
     print(f"speaker_id: {batch['speaker_id']}")
     print(f"utt_id: {batch['utt_id']}")
-    print(f"scores: {batch['scores']}")
+    print(f"target: {batch['target']}")
     print(f"split: {batch['split']}")
     print(f"metadata_idx: {batch['metadata_idx']}")
 
@@ -238,7 +263,7 @@ def _test_datamodule():
     print(f"batch 0 (size={len(batch)}): {batch.keys()}")
     print(f"speech shape: {batch['speech'].shape}")
     print(f"speech_length shape: {batch['speech_length'].shape}")
-    print(f"scores: {batch['scores']}")
+    print(f"target: {batch['target']}")
     print(f"split: {batch['split']}")
 
 

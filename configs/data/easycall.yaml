@@ -1,0 +1,13 @@
+_target_: src.data.easycall.dysarthria_severity.EasyCallDataModule
+hf_repo: speech31/easycall-dysarthria
+cache_dir: ${paths.cache_dir}/easycall
+easycall_meta_csv: src/data/easycall/easycall_meta.csv
+num_classes: 4 # Severity levels are grouped into 4 classes based on data availability
+tokenizer:
+  _target_: src.core.ipa_utils.IPATokenizer
+
+target_sr: 16000
+max_duration_sec: 20 # Optional: maximum audio duration in seconds for truncation
+batch_size: 32 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+num_workers: 10
+pin_memory: False

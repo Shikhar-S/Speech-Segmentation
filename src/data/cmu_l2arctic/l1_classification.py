@@ -92,6 +92,7 @@ class CmuL2ArcticL1Dataset(Dataset):
             target_sr: Target sample rate for audio (default: 16000)
             max_duration_sec: Maximum audio duration in seconds (for truncation)
         """
+        self.split = split
         self.data_dir = data_dir
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
@@ -260,9 +261,6 @@ class CmuL2ArcticL1Classification(LightningDataModule):
 
     def _dl(self, ds, shuffle):
         """Helper to create DataLoader with common settings."""
-        logger.info(
-            'Constructing DataLoader for split="%s", shuffle=%s', ds.split, shuffle
-        )
         return DataLoader(
             ds,
             batch_size=self.batch_size,

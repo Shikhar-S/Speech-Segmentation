@@ -4,7 +4,7 @@
 # python src/main.py experiment=probing/geolocation_vaani_zipactc
 
 defaults:
-  - override /data: vaani_geolocation
+  - override /data: vaanigeo
   - override /model: geolocation
   - override /model/net: zipactc
   - override /trainer: gpu

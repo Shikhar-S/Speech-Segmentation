@@ -30,7 +30,6 @@ class ClassificationModel(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         freeze_encoder: bool = True,
-        id_to_label: Optional[Sequence[str]] = None,
         input_type: InputType = "audio",
         **kwargs,
     ) -> None:
@@ -60,10 +59,6 @@ class ClassificationModel(LightningModule):
 
         # Input mode: "audio" or "ipa"
         self.input_type: InputType = input_type
-        self.id_to_label = id_to_label
-        self.label_to_id = (
-            {x: i for i, x in enumerate(id_to_label)} if id_to_label else None
-        )
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
@@ -81,7 +76,7 @@ class ClassificationModel(LightningModule):
         return logits
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x = batch["speech"] if self.input_type == "audio" else batch["ipa_ids"]
+        x = batch["speech"] if self.input_type == "audio" else batch["text"]
         x_lengths = (
             batch["speech_length"] if self.input_type == "audio" else batch["lengths"]
         )
@@ -150,12 +145,12 @@ class ClassificationModel(LightningModule):
         self.log("test/f1", self.test_f1, on_step=False, on_epoch=True, prog_bar=False)
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        if self.freeze_encoder:
-            optimizable_params = [
-                p for n, p in self.named_parameters() if not n.startswith("net.")
-            ]
-        else:
-            optimizable_params = list(self.parameters())
+        optimizable_params = []
+        for n, p in self.named_parameters():
+            if n.startswith("net") and self.freeze_encoder:
+                p.requires_grad = False
+                continue
+            optimizable_params.append(p)
         optimizer = self.hparams.optimizer(params=optimizable_params)
         if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)
