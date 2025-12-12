@@ -2,9 +2,9 @@
 #SBATCH -p swl_general
 #SBATCH -J main
 #SBATCH -N 1
-#SBATCH --gpus-per-node=1
-#SBATCH -c 20
-#SBATCH --mem=40G
+#SBATCH --gres=gpu:L40S:2
+#SBATCH -c 12
+#SBATCH --mem=60G
 #SBATCH -t 48:00:00
 #SBATCH -o exp/slurm_logs/%j.out
 #SBATCH -e exp/slurm_logs/%j.out
@@ -13,14 +13,21 @@
 cd /data/user_data/sbharad2/PhoneBench
 mkdir -p "exp/slurm_logs"
 # === Environment setup ===
-source ~/.zshrc
-conda deactivate
 source setup_uv.sh .venv
 # for w2v2ph these must be pre-built
 # export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 # export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
 ###########################
 ###########################
-python src/main.py "$@"
+# python src/main.py "$@"
+
+export NCCL_P2P_DISABLE=1
+srun python src/main.py \
+    experiment=train/fleurs_xeuspr \
+    trainer=ddp trainer.devices=-1 \
+    trainer.strategy=ddp_find_unused_parameters_true \
+    model.freeze_encoder=false \
+    data.batch_size=2 +trainer.precision=bf16 \
+    data.num_workers=5
 ###########################
 ###########################

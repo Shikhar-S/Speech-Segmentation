@@ -1,9 +1,11 @@
 defaults:
   - default
 
-strategy: ddp
-
 accelerator: gpu
-devices: 4
+
 num_nodes: 1
+devices: -1
+strategy: ddp_find_unused_parameters_true
+precision: bf16
+
 sync_batchnorm: True
