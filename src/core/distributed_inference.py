@@ -71,6 +71,7 @@ def run_distributed_inference_(
     num_workers: int = 1,
     out_file=None,
     passthrough_keys=[],
+    limit_samples: int = None,
 ):
     """Splits dataset and runs inference in parallel workers.
 
@@ -82,6 +83,7 @@ def run_distributed_inference_(
         out_file: output file to save results
         passthrough_keys: list of keys in dataset item to be written directly to
             output without processing
+        limit_samples: if set, limit the number of samples to process (useful for testing)
     """
 
     # fail fast
@@ -96,13 +98,16 @@ def run_distributed_inference_(
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Calculate effective number of samples
+    N = len(dataset)
+    if limit_samples is not None and limit_samples > 0:
+        N = min(N, limit_samples)
+        log.info(f"Limiting inference to {N} samples (out of {len(dataset)} total).")
+
     log.info(
-        f"Running inference on {len(dataset)} utterances on"
+        f"Running inference on {N} utterances on"
         f" {device} with {num_workers} workers."
     )
-    # split items from dataset, run against inference object replicas, gather results
-
-    N = len(dataset)
     cs = (N + num_workers - 1) // num_workers
     chunks = [
         range(i * cs, min((i + 1) * cs, N)) for i in range(num_workers) if i * cs < N
