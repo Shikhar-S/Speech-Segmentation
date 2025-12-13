@@ -81,6 +81,7 @@ class SwissGermanDataset(Dataset):
         return {
             "speech": wav,
             "speech_length": wav.shape[-1],
+            "lang_sym": "<unk>",  # for powsm, swiss-german not in powsm list, <deu>
             "sr": sr,
             "zipcode": row["zipcode"] if not pd.isna(row["zipcode"]) else 0,
             "latitude": latitude,

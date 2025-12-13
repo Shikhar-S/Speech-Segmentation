@@ -2,6 +2,18 @@ _target_: src.data.fleurs.common_datamodule.FleursLanguageId
 cache_dir: ${paths.cache_dir}/fleurs
 # FLEURS-11
 id_to_label: ["pl_pl", "yue_hant_hk", "pt_br", "es_419", "ml_in","ja_jp","fil_ph","en_us","ru_ru","mk_mk","fr_fr"]
+powsm_lang_sym_map:
+  pl_pl: "<pol>"        # Polish
+  yue_hant_hk: "<yue>"  # Cantonese (Traditional, Hong Kong)
+  pt_br: "<por>"        # Portuguese (Brazil)
+  es_419: "<spa>"       # Spanish (Latin America)
+  ml_in: "<mal>"        # Malayalam (India)
+  ja_jp: "<jpn>"        # Japanese
+  fil_ph: "<ceb>"       # Filipino → closest available POWSM tag (Cebuano)
+  en_us: "<eng>"        # English (US)
+  ru_ru: "<rus>"        # Russian
+  mk_mk: "<mkd>"        # Macedonian
+  fr_fr: "<fra>"        # French
 num_classes: 11  # Must match the number of languages in language_subset
 max_samples: 500  # Use only 500 samples per split (train/val/test) = 1500 total samples
 

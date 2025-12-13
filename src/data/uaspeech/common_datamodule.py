@@ -14,7 +14,6 @@ import tarfile
 from pathlib import Path
 from typing import Optional, List
 import json
-import fcntl
 
 import pandas as pd
 import torch
@@ -173,6 +172,7 @@ class UASpeechDataset(Dataset):
             "split": self.split,
             "speech": waveform.squeeze(0),
             "speech_length": waveform.shape[1],
+            "lang_sym": "<eng>",  # for powsm
             "target": item["label"],
             "text": item["text"],
             "phones": " ".join(phones),

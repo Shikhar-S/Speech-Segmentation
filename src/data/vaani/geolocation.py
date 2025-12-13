@@ -95,6 +95,9 @@ class VaaniParquetDataset(Dataset):
             "pincode": row["pincode"] if not pd.isna(row["pincode"]) else 0,
             "latitude": latitude,
             "longitude": longitude,
+            # for powsm # NOTE(shikhar): maybe this can be better handled,
+            # there is a self-reported (non-standard) language column
+            "lang_sym": "<unk>",
             "split": row["split"],
             "metadata_idx": i,
         }

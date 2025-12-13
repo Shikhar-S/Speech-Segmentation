@@ -99,7 +99,9 @@ declare -A dataset_configs=(
     ["cmul2arctic"]="cmul2arcticl1|7"
     ["speechocean"]="speechocean|11"
     ["fleurs"]="fleurs|11"
-    ['easycall']="easycall|4"
+    ["easycall"]="easycall|4"
+    ["uaspeech"]="uaspeech|5"
+    ["ultrasuite"]="ultrasuite_child|2"
 )
 
 get_base_model() {

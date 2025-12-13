@@ -156,6 +156,7 @@ class EasyCallDataset(Dataset):
             "split": self.split,
             "speech": waveform.squeeze(0),  # (T,)
             "speech_length": waveform.shape[1],
+            "lang_sym": "<ita>",  # for powsm
             "target": label,
             "text": text,
             "phones": " ".join(phone_list),

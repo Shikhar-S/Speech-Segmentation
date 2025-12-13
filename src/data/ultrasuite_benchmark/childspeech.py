@@ -1,37 +1,30 @@
-"""
-Ultrasuite Subset for the Phone Benchmark – Hugging Face Dataset Loader
+"""Ultrasuite Datamodule for child speech atypicality classification.
 
-This module provides a PyTorch Lightning–compatible DataModule and Dataset
-for the Ultrasuite Benchmark speech dataset hosted on Hugging Face.
-
-Dataset characteristics:
-- Audio-only speech dataset
+HF Dataset characteristics:
+- Speech dataset
 - Labels embedded directly in Parquet files
 - Metadata fields per sample:
     - audio (HF Audio, bytes-encoded)
     - label (int)
     - subject (string)
     - filename (string)
-- Train / validation / test splits handled by Hugging Face
-- All audio is resampled on-the-fly to a target sampling rate (default: 16 kHz)
 
-Example usage (script):
-
-python -m ultrasuite_datamodule \
-    --hf_repo kgrosero14/ultrasuite-benchmark \
-    --cache_dir exp/cache/ultrasuite
-
+Usage:
+    python -m src.data.ultrasuite_benchmark.childspeech \
+        --hf_repo kgrosero14/ultrasuite-benchmark \
+        --cache_dir exp/cache/ultrasuite
 """
 
 import io
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torchaudio
 from torch.utils.data import Dataset, DataLoader
 import lightning as L
 from datasets import load_dataset, Audio as HFAudio
+import os
 
 
 import io
@@ -59,15 +52,18 @@ def load_ultrasuite_data(
     ds = ds.cast_column("audio", HFAudio(decode=False))
     return ds
 
+
 class UltrasuiteDataset(Dataset):
     def __init__(
         self,
         hf_ds,
+        cache_dir: Union[Path, str],
         target_sr: int = 16000,
         split: str = "train",
         max_duration_sec: Optional[float] = None,
     ):
         self.hf_ds = hf_ds
+        self.cache_dir = Path(cache_dir)
         self.target_sr = target_sr
         self.split = split
         self.max_duration_sec = max_duration_sec
@@ -78,41 +74,37 @@ class UltrasuiteDataset(Dataset):
     def __len__(self):
         return len(self.hf_ds)
 
-    def _get_resampler(self, source_sr: int):
-        if source_sr == self.target_sr:
-            return None
-        if source_sr not in self._resamplers:
-            self._resamplers[source_sr] = torchaudio.transforms.Resample(
-                source_sr, self.target_sr
-            )
-        return self._resamplers[source_sr]
+    def _cache_audio(self, waveform, sr, target_path):
+        if os.path.exists(target_path):
+            return
+        if not os.path.exists(os.path.dirname(target_path)):
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        torchaudio.save(target_path, waveform, sr)
 
     def __getitem__(self, idx):
         sample = self.hf_ds[idx]
-
-        waveform, sr = torchaudio.load(
-            io.BytesIO(sample["audio"]["bytes"])
-        )
-
+        waveform, sr = torchaudio.load(io.BytesIO(sample["audio"]["bytes"]))
         if waveform.shape[0] > 1:
             waveform = waveform.mean(dim=0, keepdim=True)
 
-        # Resample if needed
-        resampler = self._get_resampler(sr)
-        if resampler is not None:
-            waveform = resampler(waveform)
+        assert sr == self.target_sr, f"Expected sr={self.target_sr}, got sr={sr}"
 
         if self.max_duration_sec is not None:
             max_samples = int(self.max_duration_sec * self.target_sr)
             waveform = waveform[:, :max_samples]
 
+        target_path = self.cache_dir / "saved" / self.split / f"{sample['filename']}"
+        self._cache_audio(waveform, sr, target_path)
+
         waveform = waveform.squeeze(0)
 
         return {
             "utt_id": sample["filename"],
+            "wavpath": str(target_path),
             "split": self.split,
             "speech": waveform,
             "speech_length": waveform.shape[0],
+            "lang_sym": "<eng>",  # TODO(shikhar,karen): confirm with karen
             "target": int(sample["label"]),
             "subject": sample["subject"],
             "orig_sr": sr,
@@ -145,13 +137,12 @@ def collate_fn(batch):
     }
 
 
-# Lightning DataModule
-
 class UltrasuiteDataModule(L.LightningDataModule):
     def __init__(
         self,
         hf_repo: str,
         cache_dir: str,
+        num_classes: int = 2,
         target_sr: int = 16000,
         batch_size: int = 32,
         num_workers: int = 4,
@@ -159,6 +150,7 @@ class UltrasuiteDataModule(L.LightningDataModule):
         max_duration_sec: Optional[float] = None,
     ):
         super().__init__()
+        self.num_classes = num_classes
         self.hf_repo = hf_repo
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -177,25 +169,23 @@ class UltrasuiteDataModule(L.LightningDataModule):
                 cache_dir=str(self.cache_dir),
             )
 
+    def _ds(self, split: str):
+        return UltrasuiteDataset(
+            load_ultrasuite_data(
+                self.hf_repo,
+                split=split,
+                cache_dir=str(self.cache_dir),
+            ),
+            target_sr=self.target_sr,
+            cache_dir=self.cache_dir,
+            split=split,
+            max_duration_sec=self.max_duration_sec,
+        )
+
     def setup(self, stage: Optional[str] = None):
-        self.train_ds = UltrasuiteDataset(
-            load_ultrasuite_data(self.hf_repo, "train", str(self.cache_dir)),
-            target_sr=self.target_sr,
-            split="train",
-            max_duration_sec=self.max_duration_sec,
-        )
-        self.val_ds = UltrasuiteDataset(
-            load_ultrasuite_data(self.hf_repo, "validation", str(self.cache_dir)),
-            target_sr=self.target_sr,
-            split="validation",
-            max_duration_sec=self.max_duration_sec,
-        )
-        self.test_ds = UltrasuiteDataset(
-            load_ultrasuite_data(self.hf_repo, "test", str(self.cache_dir)),
-            target_sr=self.target_sr,
-            split="test",
-            max_duration_sec=self.max_duration_sec,
-        )
+        self.train_ds = self._ds("train")
+        self.val_ds = self._ds("validation")
+        self.test_ds = self._ds("test")
 
     def _dl(self, dataset, shuffle: bool):
         return DataLoader(
@@ -219,9 +209,7 @@ class UltrasuiteDataModule(L.LightningDataModule):
 
 # Main
 def main():
-    parser = argparse.ArgumentParser(
-        description="Ultrasuite Benchmark HF DataModule"
-    )
+    parser = argparse.ArgumentParser(description="Ultrasuite Benchmark HF DataModule")
     parser.add_argument(
         "--hf_repo",
         type=str,
@@ -259,7 +247,7 @@ def main():
 
     batch = next(iter(dm.val_dataloader()))
     print("Loaded batch keys:", batch.keys())
-    print("Speech shape:", batch["speech"].shape)
+    print("Speech:", batch["speech"])
     print("Targets:", batch["target"])
 
 

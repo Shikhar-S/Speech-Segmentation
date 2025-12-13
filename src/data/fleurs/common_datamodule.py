@@ -17,6 +17,7 @@ from datasets import load_dataset, concatenate_datasets, Audio as HFAudio
 def load_fleurs_data(
     split: str,
     language_subset: List[str],
+    powsm_lang_sym_map: Optional[dict] = None,
     max_samples: Optional[int] = None,
     cache_dir: Optional[str] = None,
 ):
@@ -50,12 +51,16 @@ def load_fleurs_data(
     # Remap lang_ids to 0-indexed
     lang_to_id = {lang: idx for idx, lang in enumerate(langnames)}
 
-    def add_lang_id(example):
+    def add_lang_ids(example):
         example["lang_id"] = lang_to_id[example["language"]]
+        example["powsm_lang_sym"] = (
+            powsm_lang_sym_map.get(example["language"], "<unk>")
+            if powsm_lang_sym_map
+            else "<unk>"
+        )
         return example
 
-    dataset = dataset.map(add_lang_id)
-
+    dataset = dataset.map(add_lang_ids)
     return dataset
 
 
@@ -95,7 +100,6 @@ class FleursLanguageIdDataset(Dataset):
     def __init__(
         self,
         dataset,
-        id_to_label: list,
         split: str,
         target_sr: int = 16000,
         max_audio_length: float = 20.0,
@@ -106,8 +110,6 @@ class FleursLanguageIdDataset(Dataset):
         self.split = split
         self.target_sr = target_sr
         self.max_len = int(target_sr * max_audio_length)
-        self.id_to_label = id_to_label
-        self.label_to_id = {label: idx for idx, label in enumerate(id_to_label)}
 
     def __len__(self):
         return len(self.dataset)
@@ -132,6 +134,7 @@ class FleursLanguageIdDataset(Dataset):
             "speech": waveform.to(torch.float32),
             "sr": self.target_sr,
             "language": sample["language"],
+            "lang_sym": sample["powsm_lang_sym"],
             "target": sample["lang_id"],
             "split": self.split,
             "metadata_idx": i,
@@ -149,6 +152,7 @@ class FleursLanguageId(LightningDataModule):
         num_classes: int = 102,
         max_samples: Optional[int] = None,
         target_sr: int = 16000,
+        powsm_lang_sym_map: Optional[dict] = None,
         tokenizer: Optional[object] = None,
         max_audio_length: float = 20.0,
         cache_dir: Optional[str] = None,
@@ -175,22 +179,23 @@ class FleursLanguageId(LightningDataModule):
         # first call here to download
         for split in ["train", "validation", "test"]:
             load_fleurs_data(
-                split,
-                self.hparams.id_to_label,
-                self.hparams.max_samples,
-                self.hparams.cache_dir,
+                split=split,
+                language_subset=self.hparams.id_to_label,
+                powsm_lang_sym_map=self.hparams.powsm_lang_sym_map,
+                max_samples=self.hparams.max_samples,
+                cache_dir=self.hparams.cache_dir,
             )
 
     def _ds(self, split):
         return FleursLanguageIdDataset(
             dataset=load_fleurs_data(
-                split,
-                self.hparams.id_to_label,
-                self.hparams.max_samples,
-                self.hparams.cache_dir,
+                split=split,
+                language_subset=self.hparams.id_to_label,
+                powsm_lang_sym_map=self.hparams.powsm_lang_sym_map,
+                max_samples=self.hparams.max_samples,
+                cache_dir=self.hparams.cache_dir,
             ),
             split=split,
-            id_to_label=self.hparams.id_to_label,
             target_sr=self.hparams.target_sr,
             max_audio_length=self.hparams.max_audio_length,
             tokenizer=self.tokenizer,

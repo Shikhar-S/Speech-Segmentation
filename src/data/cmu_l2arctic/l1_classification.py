@@ -152,6 +152,7 @@ class CmuL2ArcticL1Dataset(Dataset):
             "speech": waveform,
             "speech_length": waveform.shape[0],
             "wav_path": audio_path,
+            "lang_sym": "<eng>",  # for powsm
             "label": row["l1_label"],
             "target": self.label_to_ids[row["l1_label"]],
             "split": row["split"],
