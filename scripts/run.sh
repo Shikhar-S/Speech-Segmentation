@@ -22,7 +22,7 @@ Usage: $0 [OPTIONS]
 
 Options:
   --model LIST        Models: logmel, powsm, powsmvr, ctag, lv60, xlsr53, zipactc, zipactc_ns, or "all"
-  --recipe LIST       Recipes: fab, fat, gsw, gva, l1c, l2a, lif, or "all"
+  --recipe LIST       Recipes: fab, fat, gsw, gva, l1c, l2a, lif, atyp_ec, atyp_ua, atyp_us, or "all"
   --data LIST         Datasets: buckeye, timit, geo_sw, geo_in, cmul2arctic, speechocean, fleurs, or "all"
   --cluster NAME      Cluster: dai, delta (default: dai)
   --fft               Enable full fine-tuning
@@ -85,6 +85,8 @@ declare -A recipe_configs=(
     ["l2as"]="l2as_speechocean"
     ["lid_fl"]="lid_fleurs"
     ["atyp_ec"]="atypical_easycall"
+    ["atyp_ua"]="atypical_uaspeech"
+    ["atyp_us"]="atypical_ultrasuite"
     ["inference"]="transcribe"
     ["cascade_rnn"]="rnn_cls"
     ["cascade_transformer"]="transformer_cls"
