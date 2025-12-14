@@ -234,7 +234,7 @@ run_experiment() {
             }
             ;;
     esac
-    IFS=$'\n' read -r -a cmds <<< "$cmd_list"
+    mapfile -t cmds <<< "$cmd_list"
     log "Run: $model_var on $recipe_code"
     echo "RUN: $model_var on $recipe_code" >> "$summary_log"
     for cmd in "${cmds[@]}"; do
