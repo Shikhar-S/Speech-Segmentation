@@ -111,10 +111,22 @@ class EasyCallDataset(Dataset):
         log.info(
             f"EasyCallDataset split={self.split}: using {len(self.indices)} / {len(self.hf_ds)} examples"
         )
-        self.epitran_transliterator = epitran.Epitran("ita-Latn")
+        self._epitran_lang_code = "ita-Latn"
+        self._epitran_transliterator = None
 
     def __len__(self):
         return len(self.indices)
+
+    def _get_epitran(self):
+        if self._epitran_transliterator is None:
+            self._epitran_transliterator = epitran.Epitran(self._epitran_lang_code)
+        return self._epitran_transliterator
+
+    def _cache_audio(self, waveform: torch.Tensor, sr: int, target_path: Path) -> None:
+        if target_path.exists():
+            return
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        torchaudio.save(str(target_path), waveform, sr)
 
     def _text_to_phonemes(self, text: str) -> List[str]:
         """
@@ -123,7 +135,7 @@ class EasyCallDataset(Dataset):
         """
         if not text:
             return []
-        ipa_string = self.epitran_transliterator.transliterate(text)
+        ipa_string = self._get_epitran().transliterate(text)
         try:
             phonemes_list = ipatok_tokenise(ipa_string)
         except Exception as e:
@@ -152,12 +164,16 @@ class EasyCallDataset(Dataset):
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
 
+        target_path = self.cache_dir / "saved" / self.split / f"{utt_id}.wav"
+        self._cache_audio(waveform, sr, target_path)
+
         text = str(sample["text"])
         phone_list = self._text_to_phonemes(text)
         phone_ids = self.tokenizer.tokens2ids(phone_list)
 
         return {
             "utt_id": utt_id,
+            "audio_path": str(target_path),
             "split": self.split,
             "speech": waveform.squeeze(0),  # (T,)
             "speech_length": waveform.shape[1],
@@ -287,6 +303,7 @@ class EasyCallDataModule(L.LightningDataModule):
             cache_dir=str(self.cache_dir),
             easycall_meta_csv=self.easycall_meta_csv,
             tokenizer=self.tokenizer,
+            cache_dir=self.cache_dir,
             target_sr=self.target_sr,
             max_duration_sec=self.max_duration_sec,
             split=split,
