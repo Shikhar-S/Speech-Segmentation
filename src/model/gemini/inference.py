@@ -64,7 +64,7 @@ class GeminiInference:
         self.clean_response = clean_response
         self.output_key = output_key
 
-    def __call__(self, audio_path: str | Path, **kwargs: Any) -> str:
+    def __call__(self, audio_path: str | Path, **kwargs: Any) -> Any:
         """
         Run inference on an audio file.
 
@@ -78,7 +78,7 @@ class GeminiInference:
                       in the prompt template (e.g., language, speaker_id).
 
         Returns:
-            Model's response text, optionally cleaned.
+            Dict containing raw and processed transcripts.
         """
         # 1. Format user prompt using template and kwargs
         try:
@@ -88,21 +88,29 @@ class GeminiInference:
             user_prompt = self.default_user_prompt or self.user_prompt_template
 
         # 2. Call client with formatted prompt
-        raw_response = self.client.generate(
+        raw_model_response = self.client.generate(
             prompt=user_prompt,
             system_prompt=self.system_prompt if self.system_prompt else None,
             files=audio_path,
         )
 
         # 3. Parse JSON response if output_key is specified
+        raw_transcript = raw_model_response
         if self.output_key:
-            raw_response = self._parse_json_response(raw_response, self.output_key)
+            raw_transcript = self._parse_json_response(raw_model_response, self.output_key)
 
         # 4. Optionally clean the response
-        if self.clean_response:
-            return self._clean_response(raw_response)
+        processed_transcript = (
+            self._clean_response(raw_transcript) if self.clean_response else raw_transcript
+        )
 
-        return raw_response
+        # Match the common naming used by other inference wrappers
+        # (e.g., wav2vec2phoneme_inference.py) for easier downstream handling.
+        return {
+            "processed_transcript": processed_transcript,
+            "predicted_transcript": raw_transcript,
+            "raw_model_response": raw_model_response,
+        }
 
     @staticmethod
     def _parse_json_response(response: str, key: str) -> str:
@@ -132,7 +140,7 @@ class GeminiInference:
         This method removes spaces, punctuation, and normalizes unicode characters.
         Useful for IPA transcription comparison.
 
-        Reference: src/api/tasks/pr_tusom_eval.py:PhoneRecognitionEvaluator.clean_text
+        Reference: src/metrics/phone_recognition.py:PhoneRecognitionEvaluator.clean_text
 
         Args:
             text: Raw response text from the model.
@@ -140,8 +148,8 @@ class GeminiInference:
         Returns:
             Cleaned and normalized text.
         """
-        # Remove whitespace
-        text = text.replace(" ", "")
+        # Remove whitespace (including newlines/tabs)
+        text = "".join(text.split())
 
         # Remove punctuation
         text = text.translate(str.maketrans("", "", string.punctuation))
