@@ -140,8 +140,6 @@ class GeminiInference:
         This method removes spaces, punctuation, and normalizes unicode characters.
         Useful for IPA transcription comparison.
 
-        Reference: src/metrics/phone_recognition.py:PhoneRecognitionEvaluator.clean_text
-
         Args:
             text: Raw response text from the model.
 

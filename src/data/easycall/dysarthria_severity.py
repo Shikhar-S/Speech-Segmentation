@@ -111,17 +111,11 @@ class EasyCallDataset(Dataset):
         log.info(
             f"EasyCallDataset split={self.split}: using {len(self.indices)} / {len(self.hf_ds)} examples"
         )
-        self._epitran_lang_code = "ita-Latn"
-        self._epitran_transliterator = None
+        self.epitran_transliterator = epitran.Epitran("ita-Latn")
 
     def __len__(self):
         return len(self.indices)
-
-    def _get_epitran(self):
-        if self._epitran_transliterator is None:
-            self._epitran_transliterator = epitran.Epitran(self._epitran_lang_code)
-        return self._epitran_transliterator
-
+    
     def _cache_audio(self, waveform: torch.Tensor, sr: int, target_path: Path) -> None:
         if target_path.exists():
             return
@@ -135,7 +129,7 @@ class EasyCallDataset(Dataset):
         """
         if not text:
             return []
-        ipa_string = self._get_epitran().transliterate(text)
+        ipa_string = self.epitran_transliterator.transliterate(text)
         try:
             phonemes_list = ipatok_tokenise(ipa_string)
         except Exception as e:
@@ -163,8 +157,8 @@ class EasyCallDataset(Dataset):
             max_samples = int(self.max_duration_sec * sr)
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
-
-        target_path = self.cache_dir / "saved" / self.split / f"{utt_id}.wav"
+                
+        target_path = Path(self.cache_dir) / "saved" / self.split / f"{utt_id}.wav"
         self._cache_audio(waveform, sr, target_path)
 
         text = str(sample["text"])
@@ -303,7 +297,6 @@ class EasyCallDataModule(L.LightningDataModule):
             cache_dir=str(self.cache_dir),
             easycall_meta_csv=self.easycall_meta_csv,
             tokenizer=self.tokenizer,
-            cache_dir=self.cache_dir,
             target_sr=self.target_sr,
             max_duration_sec=self.max_duration_sec,
             split=split,

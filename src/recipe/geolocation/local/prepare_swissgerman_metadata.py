@@ -12,6 +12,10 @@ import os
 from multiprocessing import Pool
 
 
+def _path_exists(path: str) -> bool:
+    return os.path.exists(path)
+
+
 def read_df_with_location(
     data_root: str, metadata_path: str, split: str, column_map: dict, dataset_name: str
 ) -> pd.DataFrame:
@@ -139,11 +143,10 @@ def main() -> None:
 
     #####################
     # drop paths with missing audio
-    def exists(path: str) -> bool:
-        return os.path.exists(path)
-
     with Pool() as p:
-        combined_metadata["audio_exists"] = p.map(exists, combined_metadata["audio_path"])
+        combined_metadata["audio_exists"] = p.map(
+            _path_exists, combined_metadata["audio_path"]
+        )
     print(
         "Number of missing audio files:",
         len(combined_metadata) - combined_metadata["audio_exists"].sum(),

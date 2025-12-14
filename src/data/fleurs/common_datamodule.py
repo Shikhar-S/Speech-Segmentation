@@ -5,6 +5,8 @@ Usage:
     python -m src.data.fleurs.common_datamodule
 """
 
+import os
+from pathlib import Path
 from typing import Optional, List
 
 import torch, io
@@ -104,12 +106,21 @@ class FleursLanguageIdDataset(Dataset):
         target_sr: int = 16000,
         max_audio_length: float = 20.0,
         tokenizer=None,
+        cache_dir: Optional[str] = None,
     ):
         self.tokenizer = tokenizer
         self.dataset = dataset
         self.split = split
         self.target_sr = target_sr
         self.max_len = int(target_sr * max_audio_length)
+        self.cache_dir = Path(cache_dir) if cache_dir else None
+
+    def _cache_audio(self, waveform: torch.Tensor, sr: int, target_path: Path) -> None:
+        target_path = Path(target_path)
+        if target_path.exists():
+            return
+        os.makedirs(target_path.parent, exist_ok=True)
+        torchaudio.save(str(target_path), waveform, sr)
 
     def __len__(self):
         return len(self.dataset)
@@ -121,6 +132,20 @@ class FleursLanguageIdDataset(Dataset):
         if waveform.ndim == 2 and waveform.size(0) > 1:
             waveform = waveform.mean(dim=0, keepdim=True)
         assert sr == self.target_sr, f"Expected sr={self.target_sr}, got sr={sr}"
+
+        hf_audio_path = None
+        if isinstance(sample.get("audio"), dict):
+            hf_audio_path = sample["audio"].get("path")
+
+        audio_path = hf_audio_path
+        if hf_audio_path:
+            name = f"{Path(hf_audio_path).stem}.wav"
+        else:
+            name = f"{self.split}_{i}.wav"
+        target_path = self.cache_dir / "saved" / self.split / name
+        self._cache_audio(waveform, sr, target_path)
+        audio_path = str(target_path)
+
         waveform = waveform.squeeze(0)  # (T,)
         if self.tokenizer:
             text = sample["transcription"]
@@ -139,6 +164,7 @@ class FleursLanguageIdDataset(Dataset):
             "split": self.split,
             "metadata_idx": i,
             "utt_id": f"{self.split}_{i}",
+            "audio_path": audio_path,
         }
         if self.tokenizer:
             return_dict["text"] = text
@@ -199,6 +225,7 @@ class FleursLanguageId(LightningDataModule):
             target_sr=self.hparams.target_sr,
             max_audio_length=self.hparams.max_audio_length,
             tokenizer=self.tokenizer,
+            cache_dir=self.hparams.cache_dir,
         )
 
     def setup(self, stage: Optional[str] = None):

@@ -62,7 +62,7 @@ class PhoneRecognitionEvaluator:
     @staticmethod
     def clean_text(s: str) -> str:
         """Normalize IPA text: remove spaces/punct, NFC->NFD, fix 'g'→'ɡ'."""
-        s = "".join(s.split()).translate(str.maketrans("", "", string.punctuation))
+        s = s.replace(" ", "").translate(str.maketrans("", "", string.punctuation))
         s = unicodedata.normalize("NFD", s)
         return s.replace("g", "ɡ").strip()
 
