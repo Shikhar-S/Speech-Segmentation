@@ -28,6 +28,7 @@ inference:
     _target_: src.model.gemini.inference.GeminiInference
     client_config:
       model_name: "gemini-2.5-flash"
+      api_key: ${oc.env:GEMINI_API_KEY}
       temperature: 1.0
       top_p: 1.0
       top_k: 1

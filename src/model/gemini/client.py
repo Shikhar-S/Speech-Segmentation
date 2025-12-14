@@ -53,7 +53,7 @@ class GeminiClient:
         Args:
             model_name: Identifier of the Gemini model to use.
             api_key: API key for authentication. If None, falls back to
-                     GEMINI_API_KEY or GOOGLE_API_KEY environment variables.
+                     GEMINI_API_KEY environment variable.
             temperature: Sampling temperature for generation (default: 1.0).
             top_p: Top-p (nucleus) sampling parameter (default: 1.0).
             top_k: Top-k sampling parameter (default: 1).
@@ -75,11 +75,11 @@ class GeminiClient:
                 - backoff_factor (float): Multiplier for delay (default: 2.0)
         """
         # Resolve API key
-        key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        key = api_key or os.getenv("GEMINI_API_KEY")
         if not key:
             raise ValueError(
                 "Gemini API key is not configured. Please provide api_key or set "
-                "the GEMINI_API_KEY / GOOGLE_API_KEY environment variables."
+                "the GEMINI_API_KEY environment variable."
             )
 
         self.model_name = model_name
