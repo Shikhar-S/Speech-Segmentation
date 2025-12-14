@@ -100,6 +100,7 @@ class VaaniParquetDataset(Dataset):
             "lang_sym": "<unk>",
             "split": row["split"],
             "metadata_idx": i,
+            "target": [latitude, longitude],
         }
 
 

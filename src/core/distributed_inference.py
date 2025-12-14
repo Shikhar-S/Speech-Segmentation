@@ -44,7 +44,8 @@ def work_chunk_(
     for i in tqdm(idxs, desc="Processing", leave=False):
         it = dataset[i]
         # keys from dataset override those in inference_call_args
-        pred = inference_obj(**(inference_call_args or {}), **it)
+        call_args = {**(inference_call_args or {}), **it}
+        pred = inference_obj(**call_args)
         # keys from dataset that must be passthroughly passed to
         # output to be written
         out.append((i, pred, {k: it[k] for k in (passthrough_keys or []) if k in it}))

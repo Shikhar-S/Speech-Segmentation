@@ -21,7 +21,7 @@ from typing import Optional, Union
 
 import torch
 import torchaudio
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import lightning as L
 from datasets import load_dataset, Audio as HFAudio
 import os
@@ -205,6 +205,11 @@ class UltrasuiteDataModule(L.LightningDataModule):
 
     def test_dataloader(self):
         return self._dl(self.test_ds, shuffle=False)
+
+    def predict_dataloader(self):
+        return self._dl(
+            ConcatDataset([self.train_ds, self.val_ds, self.test_ds]), shuffle=False
+        )
 
 
 # Main

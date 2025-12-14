@@ -25,36 +25,37 @@ from src.utils.pylogger import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
+def _keep_not_too_short(example):
+    return not example["too_short"]
+
+
+def _resample_and_markshort(example):
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    resampler = torchaudio.transforms.Resample(8000, 16000)
+    MIN_LENGTH = 8000  # 0.5 second at 16kHz
+    audio = example["audio"]
+    wav, _ = torchaudio.load(io.BytesIO(example["audio"]["bytes"]))
+    # wav = wav.to(device)
+    wav = resampler(wav)  # .cpu()
+    buf = io.BytesIO()
+    torchaudio.save(buf, wav, 16000, format="wav")
+    audio["bytes"] = buf.getvalue()
+    audio["sampling_rate"] = 16000
+    example["audio"] = audio
+    example["too_short"] = wav.shape[1] < MIN_LENGTH
+    return example
+
+
 def load_easycall_data(
     hf_repo: str,
     split: str,
-    max_samples: Optional[int] = None,
     cache_dir: Optional[str] = None,
 ):
     ds = load_dataset(hf_repo, split=split, cache_dir=cache_dir)
     ds = ds.cast_column("audio", HFAudio(decode=False))  # no torchcodec
-    if max_samples is not None:
-        max_samples = min(max_samples, len(ds))
-        ds = ds.select(range(max_samples))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    resampler = torchaudio.transforms.Resample(8000, 16000).to(device)
-    MIN_LENGTH = 8000  # 0.5 second at 16kHz
-
-    def _resample(example):
-        audio = example["audio"]
-        wav, _ = torchaudio.load(io.BytesIO(example["audio"]["bytes"]))
-        if wav.shape[1] < MIN_LENGTH:
-            return None  # filter out too short
-        wav = wav.to(device)
-        wav = resampler(wav).cpu()
-        buf = io.BytesIO()
-        torchaudio.save(buf, wav, 16000, format="wav")
-        audio["bytes"] = buf.getvalue()
-        audio["sampling_rate"] = 16000
-        example["audio"] = audio
-        return example
-
-    ds = ds.map(_resample)
+    ds = ds.map(_resample_and_markshort)
+    ds = ds.filter(_keep_not_too_short)
+    ds = ds.with_format(None)
     return ds
 
 
@@ -62,6 +63,8 @@ class EasyCallDataset(Dataset):
     def __init__(
         self,
         hf_ds,
+        hf_repo: str,
+        cache_dir: str,
         easycall_meta_csv: str,
         tokenizer,
         target_sr: int = 16000,
@@ -79,6 +82,8 @@ class EasyCallDataset(Dataset):
             max_duration_sec: Optional max duration in seconds.
         """
         self.hf_ds = hf_ds
+        self.hf_repo = hf_repo
+        self.cache_dir = cache_dir
         self.target_sr = target_sr
         self.split = split
         self.max_duration_sec = max_duration_sec
@@ -164,6 +169,25 @@ class EasyCallDataset(Dataset):
             "phone_length": len(phone_ids),
             "speaker_id": speaker,
         }
+
+    # These two functions are needed for dataset to be picklable which alllows
+    # distributed inference using spawn
+    def __getstate__(self):
+        st = self.__dict__.copy()
+        st["hf_ds"] = None  # HF Dataset breaks spawn pickling
+        st["epitran_transliterator"] = None  # recreate cleanly
+        return st
+
+    def __setstate__(self, st):
+        self.__dict__.update(st)
+        if self.hf_ds is None:
+            self.hf_ds = load_easycall_data(
+                hf_repo=self.hf_repo,
+                split=self.split,
+                cache_dir=self.cache_dir,
+            )
+        if self.epitran_transliterator is None:
+            self.epitran_transliterator = epitran.Epitran("ita-Latn")
 
 
 def collate_fn(batch):
@@ -253,13 +277,14 @@ class EasyCallDataModule(L.LightningDataModule):
 
     def _ds(self, split: str) -> EasyCallDataset:
         # reuse downloaded
-        hf_ds = load_easycall_data(
-            hf_repo=self.hf_repo,
-            split=split,
-            cache_dir=str(self.cache_dir),
-        )
         return EasyCallDataset(
-            hf_ds=hf_ds,
+            hf_ds=load_easycall_data(
+                hf_repo=self.hf_repo,
+                split=split,
+                cache_dir=str(self.cache_dir),
+            ),
+            hf_repo=self.hf_repo,
+            cache_dir=str(self.cache_dir),
             easycall_meta_csv=self.easycall_meta_csv,
             tokenizer=self.tokenizer,
             target_sr=self.target_sr,

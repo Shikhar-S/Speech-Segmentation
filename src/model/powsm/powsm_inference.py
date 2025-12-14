@@ -147,8 +147,8 @@ class PowsmInference:
         nbest: int = 1,
         normalize_length: bool = False,
         # default values that can be overwritten in __call__
-        lang_sym: str = "<eng>",
-        task_sym: str = "<asr>",
+        lang_sym: str = "<unk>",
+        task_sym: str = "<pr>",
     ):
 
         model.to(dtype=getattr(torch, dtype), device=device).eval()

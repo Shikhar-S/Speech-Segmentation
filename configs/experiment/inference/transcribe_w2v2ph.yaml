@@ -19,7 +19,7 @@ test: false
 distributed_predict: True
 
 inference:
-  num_workers: 10 # number of parallel workers for distributed inference, set acc to gpu memory
+  num_workers: 15 # number of parallel workers for distributed inference, set acc to gpu memory
   passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
   out_file: ${paths.output_dir}/transcription.json
   # an object (or fn that creates such an object) with __call__ method to transcribe single speech

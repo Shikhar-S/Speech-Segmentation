@@ -88,6 +88,7 @@ class SwissGermanDataset(Dataset):
             "longitude": longitude,
             "split": row["split"],
             "metadata_idx": i,
+            "target": [latitude, longitude],
         }
 
 
