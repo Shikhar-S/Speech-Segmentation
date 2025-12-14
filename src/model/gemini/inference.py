@@ -64,7 +64,7 @@ class GeminiInference:
         self.clean_response = clean_response
         self.output_key = output_key
 
-    def __call__(self, wav_path: str | Path, **kwargs: Any) -> str:
+    def __call__(self, audio_path: str | Path, **kwargs: Any) -> str:
         """
         Run inference on an audio file.
 
@@ -73,7 +73,7 @@ class GeminiInference:
         Gemini client for generation.
 
         Args:
-            wav_path: Path to the audio file to process.
+            audio_path: Path to the audio file to process.
             **kwargs: Additional fields from the dataset item. These can be used
                       in the prompt template (e.g., language, speaker_id).
 
@@ -91,7 +91,7 @@ class GeminiInference:
         raw_response = self.client.generate(
             prompt=user_prompt,
             system_prompt=self.system_prompt if self.system_prompt else None,
-            files=wav_path,
+            files=audio_path,
         )
 
         # 3. Parse JSON response if output_key is specified
