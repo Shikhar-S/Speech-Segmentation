@@ -39,6 +39,26 @@ import lightning as L
 from datasets import load_dataset, Audio as HFAudio
 
 
+def _keep_not_too_short(example):
+    return not example["too_short"]
+
+
+def _resample_and_markshort(example):
+    MIN_LENGTH = 8000  # 0.5 second at 16kHz
+    audio = example["audio"]
+    wav, sr = torchaudio.load(io.BytesIO(example["audio"]["bytes"]))
+    if sr != 16000:
+        resampler = torchaudio.transforms.Resample(sr, 16000)
+        wav = resampler(wav)
+        buf = io.BytesIO()
+        torchaudio.save(buf, wav, 16000, format="wav")
+        audio["bytes"] = buf.getvalue()
+        audio["sampling_rate"] = 16000
+        example["audio"] = audio
+    example["too_short"] = wav.shape[1] < MIN_LENGTH
+    return example
+
+
 def load_ultrasuite_data(
     hf_repo: str,
     split: str,
@@ -50,6 +70,9 @@ def load_ultrasuite_data(
         cache_dir=cache_dir,
     )
     ds = ds.cast_column("audio", HFAudio(decode=False))
+    ds = ds.map(_resample_and_markshort)
+    ds = ds.filter(_keep_not_too_short)
+    ds = ds.with_format(None)
     return ds
 
 
