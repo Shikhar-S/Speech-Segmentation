@@ -2,17 +2,26 @@
 
 Usage:
     python -m src.metrics.phone_recognition \
-        --prediction_file exp/runs/inf_doreco_powsm/20251220_083715/transcription.json \
+        --prediction_file exp/runs/inf_doreco_xlsr53/20251220_085642/transcription.withlang.json \
         --gt_field target \
         --key_field utt_id \
+        --language_field lang_sym
+    
+    python -m src.metrics.phone_recognition \
+        --prediction_file exp/runs/inf_doreco_lv60/20251220_085643/transcription.withlang.json \
+        --gt_field target \
+        --key_field utt_id \
+        --language_field lang_sym \
         --noisy_pr # for noisy phone recognition
 """
 
+import argparse
 import string
-import unicodedata
+import json
 from dataclasses import dataclass
 from typing import Dict, Tuple, Any, Union
 from tqdm import tqdm
+import unicodedata
 from collections import Counter
 from itertools import chain, combinations
 
@@ -250,7 +259,7 @@ class PhoneRecognitionEvaluator:
         del_err_sum = 0
 
         for utt_id, sample in tqdm(
-            test_data.items(), total=len(test_data), desc="Evaluating"
+            test_data.items(), total=len(test_data), desc="Evaluating", leave=False
         ):
             hyp = sample.get("prediction", "")
             ref = sample.get("transcription", "")
@@ -282,42 +291,27 @@ class PhoneRecognitionEvaluator:
 
         return summary, instance_metrics
 
-    def pretty_print(
-        self,
-        summary: PhoneRecognitionSummary,
-    ) -> None:
-        """Simple ASCII summary, no verbosity levels."""
-        title = "Phone Recognition Results"
-        print("\n" + title)
-        print("=" * max(len(title), 30))
+    @staticmethod
+    def pretty_print(summary: PhoneRecognitionSummary, **_kwargs: Any) -> None:
+        """Rich summary table."""
+        t = Table(title="Phone Recognition Results")
+        t.add_column("Metric")
+        t.add_column("Value", justify="right")
+        t.add_row("Utterances (N)", f"{summary.N}")
+        t.add_row("Total Phones", f"{summary.phones}")
+        t.add_row("PFER (avg per utt)", f"{summary.PFER:.4f}")
+        t.add_row("FER (%)", f"{summary.FER:.2f}")
+        t.add_row("FED (total)", f"{summary.FED:.2f}")
+        t.add_row("PER (%)", f"{summary.PER:.2f}")
+        t.add_row("SUB (%)", f"{summary.SUB:.2f}")
+        t.add_row("INS (%)", f"{summary.INS:.2f}")
+        t.add_row("DEL (%)", f"{summary.DEL:.2f}")
+        Console().print(t)
 
-        rows = [
-            ["Metric", "Value"],
-            ["-" * 15, "-" * 20],
-            ["Utterances (N)", f"{summary.N}"],
-            ["Total Phones", f"{summary.phones}"],
-            ["PFER (avg per utt)", f"{summary.PFER:.4f}"],
-            ["FER (%)", f"{summary.FER:.2f}"],
-            ["FED (total)", f"{summary.FED:.2f}"],
-            ["PER (%)", f"{summary.PER:.2f}"],
-            ["SUB (%)", f"{summary.SUB:.2f}"],
-            ["INS (%)", f"{summary.INS:.2f}"],
-            ["DEL (%)", f"{summary.DEL:.2f}"],
-        ]
+        PhoneRecognitionEvaluator.pretty_print_inventory_metrics(summary.inventory)
 
-        col_widths = [
-            max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))
-        ]
-        for row in rows:
-            print(" | ".join(str(val).ljust(w) for val, w in zip(row, col_widths)))
-        print()
-
-        self.pretty_print_inventory_metrics(summary.inventory)
-
-    @classmethod
-    def pretty_print_inventory_metrics(
-        cls, inventory_metrics: setkeydict[float]
-    ) -> None:
+    @staticmethod
+    def pretty_print_inventory_metrics(inventory_metrics: setkeydict[float]) -> None:
         t = Table(title="Phone Inventory Metrics")
         t.add_column("Exclusive\nMatch", justify="center")
         t.add_column("Featured", justify="center")
@@ -352,30 +346,65 @@ class PhoneRecognitionEvaluator:
         Console().print(t)
 
     def write_to_csv(
-        self, summary: PhoneRecognitionSummary, evalname: str, output_file: str
+        self,
+        summary: PhoneRecognitionSummary,
+        evalname: str,
+        output_file: str,
+        language: str,
     ) -> None:
-        """Write summary metrics to a CSV file."""
+        """Append summary metrics to a CSV file."""
         import csv
+        import os
 
-        with open(output_file, mode="w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(
+        base_key_elements = ["exclusive", "max", "featured"]
+        base_keys = chain.from_iterable(
+            combinations(base_key_elements, n)
+            for n in range(len(base_key_elements) + 1)
+        )
+        inv_headers = []
+        inv_values = []
+        for base_key in base_keys:
+            if "featured" not in base_key and "exclusive" in base_key:
+                continue
+            label = "none" if not base_key else "_".join(base_key)
+            prefix = f"inv_{label}"
+            inv_headers.extend(
+                [f"{prefix}_f1", f"{prefix}_precision", f"{prefix}_recall"]
+            )
+            inv_values.extend(
                 [
-                    "eval_name",
-                    "N",
-                    "Total Phones",
-                    "PFER",
-                    "FER (%)",
-                    "FED",
-                    "PER (%)",
-                    "SUB (%)",
-                    "INS (%)",
-                    "DEL (%)",
+                    f"{summary.inventory[base_key + ('f1_score',)]:.3f}",
+                    f"{summary.inventory[base_key + ('precision',)]:.3f}",
+                    f"{summary.inventory[base_key + ('recall',)]:.3f}",
                 ]
             )
+
+        write_header = (
+            not os.path.exists(output_file) or os.path.getsize(output_file) == 0
+        )
+        with open(output_file, mode="a", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            if write_header:
+                writer.writerow(
+                    [
+                        "eval_name",
+                        "language",
+                        "N",
+                        "Total Phones",
+                        "PFER",
+                        "FER (%)",
+                        "FED",
+                        "PER (%)",
+                        "SUB (%)",
+                        "INS (%)",
+                        "DEL (%)",
+                    ]
+                    + inv_headers
+                )
             writer.writerow(
                 [
                     evalname,
+                    language,
                     summary.N,
                     summary.phones,
                     f"{summary.PFER:.4f}",
@@ -386,15 +415,62 @@ class PhoneRecognitionEvaluator:
                     f"{summary.INS:.2f}",
                     f"{summary.DEL:.2f}",
                 ]
+                + inv_values
             )
 
 
-if __name__ == "__main__":
-    import argparse
-    import json
+def _load_predictions(
+    pred_file: str, language_field: str = None
+) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """
+    Loads prediction file from JSON format.
+    The returned structure is:
+    {'language': { utt_id: {"prediction": str, "transcription": str}, ... }}
+    If language_field is None, 'language' is set to the string '"combined"'.
+    """
+    with open(pred_file, "r") as f:
+        data = json.load(f)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--prediction_file", required=True)
+    all_languages = set()
+    if language_field is not None:
+        assert (
+            language_field in next(iter(data.values()))["passthrough"]
+        ), f"Language field '{language_field}' not found in prediction file."
+        all_languages = {item["passthrough"][language_field] for item in data.values()}
+    else:
+        all_languages = {"combined"}
+
+    all_languages = sorted(all_languages)
+    print(f"Found {len(all_languages)} languages: {all_languages}")
+    return_data = {}
+    for lang in tqdm(all_languages, desc="Loading predictions"):
+        D = {
+            item["passthrough"][args.key_field]: {
+                "prediction": item["pred"][0][args.pred_field],
+                "transcription": (
+                    item["passthrough"][args.gt_field]
+                    if not args.noisy_pr
+                    else "".join(
+                        [
+                            n
+                            for n in item["passthrough"]["masked_phones"]
+                            if n != "[NOISE]"
+                        ]
+                    )
+                ),
+            }
+            for _, item in data.items()
+            if item["passthrough"].get(language_field, "combined") == lang
+        }
+        return_data[lang] = D
+    return return_data
+
+
+def add_args(parser: argparse.ArgumentParser) -> None:
+    """Add phone recognition evaluation arguments to an argparse parser."""
+    parser.add_argument(
+        "--prediction_file", required=True, help="Path to prediction JSON file"
+    )
     parser.add_argument(
         "--gt_field",
         type=str,
@@ -421,42 +497,44 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_file", type=str, default=None, help="File to write results to"
     )
+    parser.add_argument(
+        "--language_field",
+        type=str,
+        default=None,
+        help="If provided, language field must exist in the prediction file and "
+        "will be used to produce per language metrics.",
+    )
     parser.add_argument("--evaluation_name", type=str, help="name for the evaluation")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    add_args(parser)
     args = parser.parse_args()
 
-    def _load_predictions(pred_file: str) -> Dict[str, Dict[str, str]]:
-        with open(pred_file, "r") as f:
-            data = json.load(f)
-        D = {
-            item["passthrough"][args.key_field]: {
-                "prediction": item["pred"][0][args.pred_field],
-                "transcription": (
-                    item["passthrough"][args.gt_field]
-                    if not args.noisy_pr
-                    else "".join(
-                        [
-                            n
-                            for n in item["passthrough"]["masked_phones"]
-                            if n != "[NOISE]"
-                        ]
-                    )
-                ),
-            }
-            for _, item in data.items()
-        }
-        return D
+    loaded_predictions = _load_predictions(args.prediction_file, args.language_field)
+    print(
+        f"Loaded predictions for {len(loaded_predictions)} languages containing {sum(len(v) for v in loaded_predictions.values())} utterances."
+    )
+    inventories = []
+    langs_used = list(loaded_predictions.keys())
+    for lang, preds in tqdm(loaded_predictions.items(), desc="Evaluating languages"):
+        evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)
+        summary, _ = evaluator.evaluate(preds)
+        inventories.append(summary.inventory)
+        if args.output_file:
+            assert args.evaluation_name is not None, "Please provide --evaluation_name"
+            write_file = args.output_file
+            evaluator.write_to_csv(summary, args.evaluation_name, write_file, lang)
+            print(f"Appended results to {write_file}")
 
-    # Load predictions
-    test_data = _load_predictions(args.prediction_file)
-    log.info(f"Loaded predictions for {len(test_data)} utterances.")
-
-    # Evaluate
-    evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)
-    summary, instance_metrics = evaluator.evaluate(test_data)
-    evaluator.pretty_print(summary)
-
-    # Write results to file
-    if args.output_file:
-        assert args.evaluation_name is not None, "Please provide --evaluation_name"
-        evaluator.write_to_csv(summary, args.evaluation_name, args.output_file)
-        log.info(f"Wrote results to {args.output_file}")
+    all_keys = set().union(*[inv.keys() for inv in inventories])
+    macro_inv_dict = {}
+    for k in all_keys:
+        vals = [inv[k] for inv in inventories]
+        macro_inv_dict[k] = sum(vals) / len(vals)
+    macro_inventory = setkeydict(list(macro_inv_dict.items()))
+    Console().print(
+        f"\nMacro-averaged Phone Inventory Metrics over {len(langs_used)} languages:"
+    )
+    PhoneRecognitionEvaluator.pretty_print_inventory_metrics(macro_inventory)
