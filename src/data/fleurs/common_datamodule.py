@@ -137,11 +137,9 @@ class FleursLanguageIdDataset(Dataset):
         if isinstance(sample.get("audio"), dict):
             hf_audio_path = sample["audio"].get("path")
 
+        assert hf_audio_path, "FLEURS audio path not found in dataset sample"
         audio_path = hf_audio_path
-        if hf_audio_path:
-            name = f"{Path(hf_audio_path).stem}.wav"
-        else:
-            name = f"{self.split}_{i}.wav"
+        name = f"{Path(hf_audio_path).stem}.wav"
         target_path = self.cache_dir / "saved" / self.split / name
         self._cache_audio(waveform, sr, target_path)
         audio_path = str(target_path)
