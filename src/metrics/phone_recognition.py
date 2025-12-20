@@ -14,6 +14,7 @@ from tqdm import tqdm
 from collections import Counter
 from itertools import chain, combinations
 
+import panphon
 import panphon.distance
 from phone_inventory_metric import get_metrics as get_inventory_metrics
 from phone_inventory_metric.common import setkeydict
@@ -190,9 +191,10 @@ class PhoneRecognitionEvaluator:
         """
         def get_inventory(key: str) -> list[str]:
             c = Counter()
+            ft = panphon.FeatureTable()
             for _, sample in test_data.items():
                 datum = sample.get(key, "")
-                c.update(datum)
+                c.update(ft.ipa_segs(datum))
             # This will return phones in order of descending frequency.  For
             # the reference set, this is not taken into account, but for the
             # predictions, it used to calculate an upper bound onf the
