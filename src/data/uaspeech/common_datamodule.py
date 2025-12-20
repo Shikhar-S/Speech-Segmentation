@@ -3,7 +3,7 @@
 Usage:
     python -m src.data.uaspeech.common_datamodule \
         --data_dir exp/download/uaspeech \
-        --cache_dir /scratch/sbharad2/PhoneBench/exp/cache/uaspeech \
+        --cache_dir exp/cache/uaspeech \
         --uaspeech_meta_csv src/data/uaspeech/uaspeech_meta.csv \
         --uaspeech_wordlist_csv src/data/uaspeech/uaspeech_wordlist.csv
 """
@@ -321,10 +321,14 @@ if __name__ == "__main__":
         tokenizer=IPATokenizer(),
         batch_size=2,
         num_workers=1,
+        num_classes=5,
     )
 
     dm.prepare_data()
     dm.setup()
+    print("Length of train dataset:", len(dm.train_dataset))
+    print("Length of val dataset:", len(dm.val_dataset))
+    print("Length of test dataset:", len(dm.test_dataset))
 
     for batch in dm.train_dataloader():
         print(batch)

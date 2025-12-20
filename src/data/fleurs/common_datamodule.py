@@ -1,5 +1,4 @@
 """FLEURS Dataset and DataModule.
-TODO(shikhar): use fleurs-11 config to use this for geolocation as well.
 
 Usage:
     python -m src.data.fleurs.common_datamodule
@@ -150,7 +149,7 @@ class FleursLanguageId(LightningDataModule):
         self,
         id_to_label: list,
         num_classes: int = 102,
-        max_samples: Optional[int] = None,
+        max_samples: Optional[dict] = None,
         target_sr: int = 16000,
         powsm_lang_sym_map: Optional[dict] = None,
         tokenizer: Optional[object] = None,
@@ -176,13 +175,13 @@ class FleursLanguageId(LightningDataModule):
         self.bs_dev = batch_size
 
     def prepare_data(self):
-        # first call here to download
+        # first call here to download/cache
         for split in ["train", "validation", "test"]:
             load_fleurs_data(
                 split=split,
                 language_subset=self.hparams.id_to_label,
                 powsm_lang_sym_map=self.hparams.powsm_lang_sym_map,
-                max_samples=self.hparams.max_samples,
+                max_samples=self.hparams.max_samples.get(split, None),
                 cache_dir=self.hparams.cache_dir,
             )
 
@@ -192,7 +191,7 @@ class FleursLanguageId(LightningDataModule):
                 split=split,
                 language_subset=self.hparams.id_to_label,
                 powsm_lang_sym_map=self.hparams.powsm_lang_sym_map,
-                max_samples=self.hparams.max_samples,
+                max_samples=self.hparams.max_samples.get(split, None),
                 cache_dir=self.hparams.cache_dir,
             ),
             split=split,
@@ -241,13 +240,38 @@ def test_datamodule():
 
     tokenizer = CharacterTokenizer()
     tokenizer.build_vocab(["abcdefghijklmnopqrstuvwxyz"])
-    # tokenizer.save_vocab(tokenizer.vocab, "exp/cache/envocab.json")
+
     dm = FleursLanguageId(
-        id_to_label=["en_us"],
-        num_classes=1,
-        max_samples=500,
+        id_to_label=[
+            "as_in",
+            "ast_es",
+            "fa_ir",
+            "fil_ph",
+            "gu_in",
+            "he_il",
+            "hy_am",
+            "ig_ng",
+            "kam_ke",
+            "kea_cv",
+            "km_kh",
+            "kn_in",
+            "ckb_iq",
+            "lb_lu",
+            "lg_ug",
+            "ln_cd",
+            "luo_ke",
+            "lv_lv",
+            "ne_np",
+            "nso_za",
+            "oc_fr",
+            "ps_af",
+            "umb_ao",
+            "wo_sn",
+        ],
+        num_classes=24,
+        max_samples={"train": 50, "validation": 50, "test": 50},
         batch_size=8,
-        cache_dir="/scratch/sbharad2/PhoneBench/exp/cache/fleurs",
+        cache_dir="exp/cache/fleurs",
         tokenizer=tokenizer,
     )
     dm.prepare_data()

@@ -1,7 +1,5 @@
 _target_: src.data.fleurs.common_datamodule.FleursLanguageId
 cache_dir: ${paths.cache_dir}/fleurs
-# FLEURS-11
-id_to_label: ["pl_pl", "yue_hant_hk", "pt_br", "es_419", "ml_in","ja_jp","fil_ph","en_us","ru_ru","mk_mk","fr_fr"]
 powsm_lang_sym_map:
   pl_pl: "<pol>"        # Polish
   yue_hant_hk: "<yue>"  # Cantonese (Traditional, Hong Kong)
@@ -14,8 +12,19 @@ powsm_lang_sym_map:
   ru_ru: "<rus>"        # Russian
   mk_mk: "<mkd>"        # Macedonian
   fr_fr: "<fra>"        # French
-num_classes: 11  # Must match the number of languages in language_subset
-max_samples: 500  # Use only 500 samples per split (train/val/test) = 1500 total samples
+max_samples:
+  test: 200
+  train: 200
+  validation: 100
+# total= 500 samples x 24 languages = 12,000 samples
+
+# FLEURS-11 (geolocation)
+# id_to_label: ["pl_pl", "yue_hant_hk", "pt_br", "es_419", "ml_in","ja_jp","fil_ph","en_us","ru_ru","mk_mk","fr_fr"]
+# num_classes: 11
+
+# FLEURS-24
+id_to_label: ["as_in", "ast_es", "fa_ir", "fil_ph", "gu_in", "he_il", "hy_am", "ig_ng", "kam_ke", "kea_cv", "km_kh", "kn_in", "ckb_iq", "lb_lu", "lg_ug", "ln_cd", "luo_ke", "lv_lv", "ne_np", "nso_za", "oc_fr", "ps_af", "umb_ao", "wo_sn"]
+num_classes: 24  # Must match the number of languages in language_subset
 
 target_sr: 16000
 max_audio_length: 20.0

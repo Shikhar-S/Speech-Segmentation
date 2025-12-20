@@ -65,6 +65,14 @@ def save_json(data, out_file):
     log.info(f"Saved: {out_file}")
 
 
+def load_json(in_file):
+    """Load data from a json file"""
+    with open(in_file, "r") as f:
+        data = json.load(f)
+    log.info(f"Loaded: {in_file}")
+    return data
+
+
 def run_distributed_inference_(
     dataset,
     inference_config,
@@ -122,6 +130,7 @@ def run_distributed_inference_(
         device=device,
     )
 
+    # TODO(shikhar): switch to jsonl append pattern
     with mp.get_context("spawn").Pool(num_workers, initializer=_init_worker) as pool:
         out = []
         worker_id = 0
@@ -142,10 +151,11 @@ def run_distributed_inference_(
     log.info("Finished distributed inference.")
 
     # collect all results
-    save_json(
-        {i: {"pred": pred, "passthrough": passthrough} for i, pred, passthrough in out},
-        out_file,
-    )
+    merged = {}
+    for w_id in range(num_workers):
+        part = load_json(f"{out_file}.part{w_id}.json")
+        merged.update(part)
+    save_json(merged, out_file)
     log.info(f"Saved final output to {out_file}.")
 
     # cleanup partial files

@@ -26,8 +26,9 @@ def pad_collate(batch):
         "speech_length": torch.tensor(L),
         "sr": batch[0]["sr"],
         "pincode": [b["pincode"] for b in batch],
-        "latitude": torch.tensor([b["latitude"] for b in batch]),
-        "longitude": torch.tensor([b["longitude"] for b in batch]),
+        "target": torch.stack(
+            [torch.tensor(b["target"], dtype=torch.float32) for b in batch]
+        ),
         "split": [b.get("split", "none") for b in batch],
         "metadata_idx": [b["metadata_idx"] for b in batch],
     }
@@ -93,8 +94,6 @@ class VaaniParquetDataset(Dataset):
             "speech_length": wav.shape[-1],
             "sr": sr,
             "pincode": row["pincode"] if not pd.isna(row["pincode"]) else 0,
-            "latitude": latitude,
-            "longitude": longitude,
             # for powsm # NOTE(shikhar): maybe this can be better handled,
             # there is a self-reported (non-standard) language column
             "lang_sym": "<unk>",
@@ -175,8 +174,9 @@ class VaaniGeolocation(LightningDataModule):
 
 
 def _naive_baseline():
-    metadata_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/vaani_geolocation/data/tmp/vaani_geolocation_metadata.train10.csv"
+    metadata_path = "exp/cache/vaani_geolocation/vaani_geolocation_metadata.train10.csv"
     import pandas as pd
+    from tqdm import tqdm
 
     metadata = pd.read_csv(metadata_path)
     trainset = metadata[metadata["split"] == "train"]
@@ -184,27 +184,29 @@ def _naive_baseline():
     long_av = trainset["longitude"].mean()
     print(f"Train set average latitude: {lat_av}")
     print(f"Train set average longitude: {long_av}")
+    pred_lat = math.radians(lat_av) if not math.isnan(lat_av) else 0.0
+    pred_long = math.radians(long_av) if not math.isnan(long_av) else 0.0
+    pred_x = math.cos(pred_lat) * math.cos(pred_long)
+    pred_y = math.cos(pred_lat) * math.sin(pred_long)
+    pred_z = math.sin(pred_lat)
+    pred_tensor = torch.tensor([[pred_x, pred_y, pred_z]])
 
     test_set = metadata[metadata["split"] == "test"]
-    from src.recipe.geolocation.model_module import GeolocationAngularLoss
+    from src.recipe.common.geolocation_loss import GeolocationAngularLoss
 
     loss_fn = GeolocationAngularLoss()
     total_loss = 0.0
     count = 0
-    for idx, row in test_set.iterrows():
+    for idx, row in tqdm(test_set.iterrows(), total=len(test_set)):
         true_lat = (
             math.radians(row["latitude"]) if not math.isnan(row["latitude"]) else 0.0
         )
         true_long = (
             math.radians(row["longitude"]) if not math.isnan(row["longitude"]) else 0.0
         )
-        pred_lat = math.radians(lat_av) if not math.isnan(lat_av) else 0.0
-        pred_long = math.radians(long_av) if not math.isnan(long_av) else 0.0
         loss_val = loss_fn(
-            pred_lat=torch.tensor([pred_lat]),
-            pred_long=torch.tensor([pred_long]),
-            true_lat=torch.tensor([true_lat]),
-            true_long=torch.tensor([true_long]),
+            prediction=pred_tensor,
+            target=torch.tensor([[true_lat, true_long]]),
         )
         total_loss += loss_val.item()
         count += 1

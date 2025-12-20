@@ -2,14 +2,14 @@
 
 # This config executes inference with wav2vec2-phoneme:
 # Set data field when calling
-# eg. python src/main.py experiment=inference/transcribe_w2v2ph data=fleurs task_name=inf_w2v2ph_fleurs
+# eg. python src/main.py experiment=inference/transcribe_w2v2ph data=vaanigeo task_name=inf_vaanigeo_ctag inference.inference_runner.hf_repo=ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns
 
 defaults:
   - override /logger: csv
   - override /model: null
   - override /model/net: null
 
-task_name: ??? # pass inf_<model>_<data> when calling. This will create output dirs accordingly
+task_name: ??? # pass inf_<data>_<model> when calling. This will create output dirs accordingly
 tags: ["w2v2ph","inference"]
 
 seed: 42

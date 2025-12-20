@@ -13,7 +13,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "atypical_uaspeech_w2v2ph"
-tags: ["uaspeech", "w2v2ph", "atypical"]
+tags: ["uaspeech", "w2v2ph", "atypical", "regression"]
 
 seed: 42
 
@@ -26,16 +26,25 @@ trainer:
     - learning_rate_monitor
 
 model:
+  head:
+    task_type: "regression"
   freeze_encoder: true
   optimizer:
     lr: 0.0002
   scheduler:
-    total_iters: 500
+    total_iters: 200
 
 data:
-  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
+  batch_size: 48
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/pcc"
+    mode: "max"
+    save_top_k: 1
 
 logger:
   wandb:
     tags: ${tags}
     group: "atypical_uaspeech_w2v2ph"
+    name: ${task_name}

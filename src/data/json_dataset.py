@@ -39,7 +39,8 @@ def collate_fn(batch: List[Dict[str, Any]], pad_id: int = 0) -> Dict[str, Any]:
     text_ids = [torch.tensor(b["text_ids"], dtype=torch.long) for b in batch]
     lengths = torch.tensor([len(seq) for seq in text_ids], dtype=torch.long)
     text_padded = pad_sequence(text_ids, batch_first=True, padding_value=pad_id)
-    target = torch.tensor([b["target"] for b in batch], dtype=torch.long)
+    # (B,) or (B,2) - for geolocation
+    target = torch.tensor([b["target"] for b in batch], dtype=torch.float)
     return {
         "text": text_padded,
         "lengths": lengths,
@@ -56,6 +57,7 @@ class TranscriptionDataset(Dataset):
         tokenizer: CharacterTokenizer,
     ) -> None:
         self.samples = samples
+        self.max_length = 512
         self.tokenizer = tokenizer
 
     def __len__(self) -> int:
@@ -64,12 +66,17 @@ class TranscriptionDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
         text_ids: List[int] of token IDs
-        target: int
+        target: int or List of 2 floats (for geolocation)
         utt_id: str
         sample_index: str
         """
         sample = self.samples[idx]
-        textids = self.tokenizer.encode(sample["processed_transcript"])
+        transcript = sample["processed_transcript"]
+        if len(transcript) == 0:
+            transcript = "?"
+        if len(transcript) > self.max_length:
+            transcript = transcript[: self.max_length]
+        textids = self.tokenizer.encode(transcript)
         return {
             "text_ids": textids,
             "target": sample["target"],
@@ -143,8 +150,10 @@ class TranscriptionDataModule(LightningDataModule):
                 )
             pred = datum["pred"]
             passthrough = datum["passthrough"]
-            if {"processed_transcript", "predicted_transcript"} - set(pred[0].keys()):
-                raise ValueError(f"Invalid pred format for sample {ix}, skipping.")
+            if {"processed_transcript"} - set(pred[0].keys()):
+                raise ValueError(
+                    f"Missing the key 'processed_transcript' in predictions for sample {ix}!"
+                )
             if {
                 "target",
                 "split",
@@ -156,11 +165,12 @@ class TranscriptionDataModule(LightningDataModule):
             sample = {
                 "sample_index": ix,
                 "processed_transcript": pred[0]["processed_transcript"],
-                "predicted_transcript": pred[0]["predicted_transcript"],
                 "target": passthrough["target"],
                 "split": passthrough["split"],
                 "utt_id": passthrough["utt_id"],
             }
+            if "predicted_transcript" in pred[0]:
+                sample["predicted_transcript"] = pred[0]["predicted_transcript"]
 
             split = sample["split"]
             if split == "train":

@@ -16,70 +16,10 @@ from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
 from src.model.common.utils import get_kv_pooling_mask
+from src.recipe.common.geolocation_loss import GeolocationAngularLoss
 
 
-class GeolocationRegressionLoss(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        # https://par.nsf.gov/servlets/purl/10544360
-        # not used currently to make training stable
-        self.earth_radius_km = 6378.1
-
-    def forward(
-        self,
-        pred_v: torch.Tensor,
-        true_lat: torch.Tensor,
-        true_long: torch.Tensor,
-    ) -> torch.Tensor:
-        x = torch.cos(true_lat) * torch.cos(true_long)
-        y = torch.cos(true_lat) * torch.sin(true_long)
-        z = torch.sin(true_lat)
-        true_v = torch.stack([x, y, z], dim=-1)
-        d_regression = (pred_v - true_v).pow(2).sum(dim=-1)
-        total_loss = torch.mean(d_regression)
-        return total_loss
-
-
-class GeolocationAngularLoss(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        # https://par.nsf.gov/servlets/purl/10544360
-        # not used currently to make training stable
-        self.earth_radius_km = 6378.1
-
-    def forward(
-        self,
-        pred_lat: torch.Tensor,
-        pred_long: torch.Tensor,
-        true_lat: torch.Tensor,
-        true_long: torch.Tensor,
-    ) -> torch.Tensor:
-        cos_val = torch.sin(true_lat) * torch.sin(pred_lat) + torch.cos(
-            true_lat
-        ) * torch.cos(pred_lat) * torch.cos(pred_long - true_long)
-        cos_val = torch.clamp(cos_val, -1.0 + 1e-7, 1.0 - 1e-7)
-        d_angular = torch.acos(cos_val)
-        total_loss = torch.mean(d_angular)
-        return total_loss
-
-
-class GeolocationRadianRegressionLoss(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(
-        self,
-        pred_lat: torch.Tensor,
-        pred_long: torch.Tensor,
-        true_lat: torch.Tensor,
-        true_long: torch.Tensor,
-    ) -> torch.Tensor:
-        d_lat = (pred_lat - true_lat).pow(2)
-        d_long = (pred_long - true_long).pow(2)
-        total_loss = torch.mean(d_lat + d_long)
-        return total_loss
-
-
+# TODO(shikhar): switch with attn_mlp with task_type=GEOLOCATION
 class GeolocationHead(nn.Module):
     def __init__(self, in_dim):
         super().__init__()
@@ -91,13 +31,28 @@ class GeolocationHead(nn.Module):
         )
 
     def forward(self, x):
-        v = self.mlp(x)
-        x_, y_, z_ = v.unbind(-1)
-        # [-π, π]
-        lon = torch.atan2(y_, x_)
-        # [-π/2, π/2]
-        lat = torch.atan2(z_, torch.clamp(torch.sqrt(x_ * x_ + y_ * y_), 1e-8))
-        return v, lat, lon
+        return self.mlp(x)
+
+
+class GeolocationVMFHead(nn.Module):
+    def __init__(self, in_dim):
+        super().__init__()
+        self.backbone = nn.Sequential(
+            nn.Linear(in_dim, in_dim // 2),
+            nn.Tanh(),
+        )
+        self.mu_layer = nn.Linear(in_dim // 2, 3)
+        self.kappa_layer = nn.Linear(in_dim // 2, 1)
+
+    def forward(self, x):
+        feat = self.backbone(x)
+        mu = self.mu_layer(feat)
+        mu = F.normalize(mu, p=2, dim=-1)  # Project to unit sphere
+
+        # Use softplus to ensure kappa > 0.
+        # Adding 1.0 makes kappa=1 the "starting" concentration.
+        kappa = F.softplus(self.kappa_layer(feat)) + 1.0
+        return mu, kappa
 
 
 class GeolocationModel(LightningModule):
@@ -147,22 +102,19 @@ class GeolocationModel(LightningModule):
         )[0].squeeze(0)
         h = F.normalize(h, dim=-1, eps=1e-8)
         # (B, D)
-        pred = self.geohead(h)  # (B, 3), (B,), (B,)  # (xyz), lat, lon
+        pred = self.geohead(h)  # (B, 3) - xyz
         return pred
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         speech = batch["speech"]
         speech_length = batch["speech_length"]
-        y_lat = batch["latitude"]
-        y_long = batch["longitude"]
-        coordinates, pred_lat, pred_long = self(speech, speech_length)
-        loss = self.criterion(pred_lat, pred_long, y_lat, y_long)  # angular loss
-        # loss = self.criterion(coordinates, y_lat, y_long)
+        target = batch["target"]  # (B,2) : lat, long
+        coordinates = self(speech, speech_length)
+        loss = self.criterion(coordinates, target)
         return {
             "loss": loss,
-            "pred_coord": coordinates,
-            "targets": torch.stack([y_lat, y_long], dim=1),
-            "preds": torch.stack([pred_lat, pred_long], dim=1),
+            "targets": target,
+            "preds": coordinates.detach(),
         }
 
     def on_before_optimizer_step(self, optimizer):

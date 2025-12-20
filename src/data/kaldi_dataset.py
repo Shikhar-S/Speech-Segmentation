@@ -28,6 +28,7 @@ class KaldiDataset(Dataset):
         log.info(
             f"Loaded dataset: {len(self.key2lang)} lang keys, {len(self.keys)} samples"
         )
+        log.info(f"Number of unique languages: {len(set(self.key2lang.values()))}")
 
     def _load_wav_scp(self, path):
         wav_scp = {}
@@ -84,11 +85,17 @@ class KaldiDataset(Dataset):
         waveform = waveform.squeeze(0)  # (1, T) -> (T,)
         return {
             "key": key,
-            "speech": waveform,
+            "utt_id": key,
+            "speech": waveform.to(torch.float32),
             "speech_length": waveform.shape[-1],
-            "text": transcription,
+            "sr": self.sampling_rate,
             "wavpath": wav_path,
-            "language": self.key2lang[key],
+            # powsm lang sym. default is <unk> if missing in vocab
+            "lang_sym": self.key2lang[key],
+            "split": "test",
+            "metadata_idx": idx,
+            "target": transcription,
+            "text": transcription,
         }
 
 
@@ -151,7 +158,7 @@ class KaldiDataModule(L.LightningDataModule):
         speech_lengths = torch.tensor([item["speech_length"] for item in batch])
         texts = [item["text"] for item in batch]
         wavpaths = [item["wavpath"] for item in batch]
-        languages = [item["language"] for item in batch]
+        languages = [item["lang_sym"] for item in batch]
 
         # Pad speeches to the max length in the batch
         max_length = max(speech_lengths)
@@ -165,7 +172,7 @@ class KaldiDataModule(L.LightningDataModule):
             "speech_length": speech_lengths,
             "text": texts,
             "wavpath": wavpaths,
-            "language": languages,
+            "lang_sym": languages,
         }
 
 
@@ -195,3 +202,12 @@ def build_kaldi_datamodule(
         batch_size=batch_size,
         num_workers=num_workers,
     )
+
+
+if __name__ == "__main__":
+    # Test with: python -m src.data.kaldi_dataset
+    datamodule = build_kaldi_datamodule("doreco", batch_size=2, num_workers=1)
+    datamodule.setup()
+    for batch in datamodule.predict_dataloader().dataset:
+        print(batch)
+        break

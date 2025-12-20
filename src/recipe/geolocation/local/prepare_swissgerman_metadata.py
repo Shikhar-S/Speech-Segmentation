@@ -12,6 +12,7 @@ data_root = "/work/hdd/bbjs/shared/corpora/swiss_german"
 save_path = (
     "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/swissgerman/metadata.csv"
 )
+SAMPLES_PER_ZIPCODE = 100
 
 
 def read_df_with_location(
@@ -92,6 +93,29 @@ test_df = test_df[test_df["zipcode"].isin(selected_zipcodes.index)]
 train_df.reset_index(drop=True, inplace=True)
 valid_df.reset_index(drop=True, inplace=True)
 test_df.reset_index(drop=True, inplace=True)
+
+
+# Group by pincoce and select up to SAMPLES_PER_ZIPCODE
+def limit_samples_per_zipcode(df, max_samples: int) -> pd.DataFrame:
+    limited_df_list = []
+    for zipcode, group in df.groupby("zipcode"):
+        if len(group) > max_samples:
+            limited_group = group.sample(n=max_samples, random_state=42)
+        else:
+            limited_group = group
+        limited_df_list.append(limited_group)
+    limited_df = pd.concat(limited_df_list, ignore_index=True)
+    return limited_df
+
+
+train_df = limit_samples_per_zipcode(train_df, max_samples=SAMPLES_PER_ZIPCODE)
+valid_df = limit_samples_per_zipcode(valid_df, max_samples=SAMPLES_PER_ZIPCODE)
+test_df = limit_samples_per_zipcode(test_df, max_samples=SAMPLES_PER_ZIPCODE)
+train_df.reset_index(drop=True, inplace=True)
+valid_df.reset_index(drop=True, inplace=True)
+test_df.reset_index(drop=True, inplace=True)
+
+
 print(f"Train size: {len(train_df)}")
 print(f"Valid size: {len(valid_df)}")
 print(f"Test size: {len(test_df)}")
@@ -102,6 +126,7 @@ print(
     valid_df.duration.sum() / 3600,
     test_df.duration.sum() / 3600,
 )
+
 train_df["split"] = "train"
 valid_df["split"] = "valid"
 test_df["split"] = "test"
@@ -110,20 +135,20 @@ print("Total data points before filtering:", len(combined_metadata))
 
 
 #####################
-# drop paths with missing audio
-def exists(path):
-    return os.path.exists(path)
+# # drop paths with missing audio
+# def exists(path):
+#     return os.path.exists(path)
 
 
-with Pool() as p:
-    combined_metadata["audio_exists"] = p.map(exists, combined_metadata["audio_path"])
-print(
-    "Number of missing audio files:",
-    len(combined_metadata) - combined_metadata["audio_exists"].sum(),
-)
-combined_metadata = combined_metadata[combined_metadata["audio_exists"]]
-combined_metadata.drop(columns=["audio_exists"], inplace=True)
-combined_metadata.reset_index(drop=True, inplace=True)
+# with Pool() as p:
+#     combined_metadata["audio_exists"] = p.map(exists, combined_metadata["audio_path"])
+# print(
+#     "Number of missing audio files:",
+#     len(combined_metadata) - combined_metadata["audio_exists"].sum(),
+# )
+# combined_metadata = combined_metadata[combined_metadata["audio_exists"]]
+# combined_metadata.drop(columns=["audio_exists"], inplace=True)
+# combined_metadata.reset_index(drop=True, inplace=True)
 #####################
 print("Total data points after filtering:", len(combined_metadata))
 print(

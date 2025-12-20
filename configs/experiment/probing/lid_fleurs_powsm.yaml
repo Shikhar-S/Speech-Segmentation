@@ -13,29 +13,37 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-# TODO(shikhar): add a nesting level to separate out experiment 
-# configs for probing, cascade, inference
-
 task_name: "lid_fleurs_powsm"
-tags: ["fleurs", "powsm", "lid"]
+tags: ["fleurs", "powsm", "lid", "classification"]
 
 seed: 42
 
 trainer:
   min_epochs: 10
-  max_epochs: 50
+  max_epochs: 200
   gradient_clip_val: 1.0
   val_check_interval: 0.25  # validate 4 times per epoch
 
-data:
-  batch_size: 48
-
 model:
+  head:
+    task_type: "classification"
   freeze_encoder: true
   optimizer:
-    lr: 0.0001
+    lr: 0.0002
+  scheduler:
+    total_iters: 200
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/f1"
+    mode: "max"
+    save_top_k: 1
+
+data:
+  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
 
 logger:
   wandb:
     tags: ${tags}
-    group: "lid_fleurs_powsm"
+    group: ${task_name}
+    name: ${task_name}

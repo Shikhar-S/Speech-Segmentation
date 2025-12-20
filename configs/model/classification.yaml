@@ -22,7 +22,7 @@ optimizer:
 scheduler:
   _target_: torch.optim.lr_scheduler.LinearLR
   _partial_: true
-  total_iters: 100
+  total_iters: 200
   last_epoch: -1
 
 # Encoder must be provided via model/net group

@@ -237,7 +237,7 @@ class PowsmInference:
         task_sym = task_sym if task_sym is not None else self.task_sym
         predict_time = predict_time if predict_time is not None else self.predict_time
 
-        lang_id = self.converter.token2id[lang_sym]
+        lang_id = self.converter.token2id.get(lang_sym, self.converter.unk_id)
         task_id = self.converter.token2id[task_sym]
         notime_id = self.converter.token2id[self.preprocessor_conf["notime_symbol"]]
 

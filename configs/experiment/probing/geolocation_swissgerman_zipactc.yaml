@@ -29,11 +29,10 @@ model:
     lr: 0.0002
 
 data:
-  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
+  batch_size: 24 # 48 on delta-ai, 24 on delta (1gpu)
 
 logger:
   wandb:
     tags: ${tags}
-    group: "geolocation_swissgerman_zipactc"
-  aim:
-    experiment: "geolocation_swissgerman_zipactc"
+    group: ${task_name}
+    name: ${task_name}
