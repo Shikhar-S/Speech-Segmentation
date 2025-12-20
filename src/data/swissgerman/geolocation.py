@@ -80,6 +80,7 @@ class SwissGermanDataset(Dataset):
 
         return {
             "speech": wav,
+            "audio_path": full_audio_path,
             "speech_length": wav.shape[-1],
             "lang_sym": "<unk>",  # for powsm, swiss-german not in powsm list, <deu>
             "sr": sr,

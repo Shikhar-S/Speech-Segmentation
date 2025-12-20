@@ -169,6 +169,7 @@ class UASpeechDataset(Dataset):
 
         return {
             "utt_id": item["file"],
+            "audio_path": item["path"],
             "split": self.split,
             "speech": waveform.squeeze(0),
             "speech_length": waveform.shape[1],

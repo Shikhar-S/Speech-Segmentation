@@ -123,7 +123,7 @@ class UltrasuiteDataset(Dataset):
 
         return {
             "utt_id": sample["filename"],
-            "wavpath": str(target_path),
+            "audio_path": str(target_path),
             "split": self.split,
             "speech": waveform,
             "speech_length": waveform.shape[0],

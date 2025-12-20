@@ -19,15 +19,16 @@ test: false
 distributed_predict: True
 
 inference:
-  num_workers: 4
+  num_workers: 1 # NOTE: Keep num_workers=1 to ensure cache_path/error_log_path writes happen in a single process
   passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
   out_file: ${paths.output_dir}/transcription.json
-  limit_samples: 10  # Set to null for full run
+  limit_samples: null  # Set to null for full run
 
   inference_runner:
     _target_: src.model.gemini.inference.GeminiInference
     client_config:
       model_name: "gemini-2.5-flash"
+      api_key: ${oc.env:GEMINI_API_KEY}
       temperature: 1.0
       top_p: 1.0
       top_k: 1
@@ -69,3 +70,7 @@ inference:
       default_user_prompt: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
     output_key: "transcription"  # Extract this key from JSON response
     clean_response: True
+    cache_key_field: "metadata_idx"
+    cache_path: "${inference.out_file}.cache.jsonl"
+    error_log_path: "${inference.out_file}.errors.jsonl"
+    resume: True
