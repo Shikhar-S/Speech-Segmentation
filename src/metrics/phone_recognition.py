@@ -2,7 +2,9 @@
 
 Usage:
     python -m src.metrics.phone_recognition \
-        --prediction_file something.json \
+        --prediction_file exp/runs/inf_doreco_powsm/20251220_083715/transcription.json \
+        --gt_field target \
+        --key_field utt_id \
         --noisy_pr # for noisy phone recognition
 """
 
@@ -65,6 +67,16 @@ class PhoneRecognitionEvaluator:
         s = s.replace(" ", "").translate(str.maketrans("", "", string.punctuation))
         s = unicodedata.normalize("NFD", s)
         return s.replace("g", "ɡ").strip()
+
+    @staticmethod
+    def scrub_transcription_for_inventory(s: str) -> str:
+        """Remove unwanted characters from transcription for inventory metrics."""
+        s = s.replace("/", "")
+        s = s.replace(" ", "")
+        s = s.replace("g", "ɡ")
+        s = s.replace("͡", "")
+        s = s.replace("͜", "")
+        return s
 
     def _prepare(self, text: str) -> str:
         return self.clean_text(text) if self.normalize_ipa else text
@@ -164,7 +176,9 @@ class PhoneRecognitionEvaluator:
         return out
 
     @classmethod
-    def _get_phone_inventory_metrics(cls, test_data: dict[str, dict[str, Any]]) -> setkeydict[float]:
+    def _get_phone_inventory_metrics(
+        cls, test_data: dict[str, dict[str, Any]]
+    ) -> setkeydict[float]:
         """
         Compute the phone inventory metrics on the dataset.
 
@@ -188,10 +202,12 @@ class PhoneRecognitionEvaluator:
 
 
         """
+
         def get_inventory(key: str) -> list[str]:
             c = Counter()
             for _, sample in test_data.items():
                 datum = sample.get(key, "")
+                datum = cls.scrub_transcription_for_inventory(datum)
                 c.update(datum)
             # This will return phones in order of descending frequency.  For
             # the reference set, this is not taken into account, but for the
@@ -308,7 +324,9 @@ class PhoneRecognitionEvaluator:
         self.pretty_print_inventory_metrics(summary.inventory)
 
     @classmethod
-    def pretty_print_inventory_metrics(cls, inventory_metrics: setkeydict[float]) -> None:
+    def pretty_print_inventory_metrics(
+        cls, inventory_metrics: setkeydict[float]
+    ) -> None:
         t = Table(title="Phone Inventory Metrics")
         t.add_column("Exclusive\nMatch", justify="center")
         t.add_column("Featured", justify="center")
@@ -320,7 +338,8 @@ class PhoneRecognitionEvaluator:
         # powerset
         base_key_elements = ["exclusive", "max", "featured"]
         base_keys = chain.from_iterable(
-            combinations(base_key_elements, n) for n in range(len(base_key_elements) + 1)
+            combinations(base_key_elements, n)
+            for n in range(len(base_key_elements) + 1)
         )
 
         for base_key in base_keys:
