@@ -16,6 +16,7 @@ from tqdm import tqdm
 from collections import Counter
 from itertools import chain, combinations
 
+import panphon
 import panphon.distance
 from phone_inventory_metric import get_metrics as get_inventory_metrics
 from phone_inventory_metric.common import setkeydict
@@ -67,16 +68,6 @@ class PhoneRecognitionEvaluator:
         s = s.replace(" ", "").translate(str.maketrans("", "", string.punctuation))
         s = unicodedata.normalize("NFD", s)
         return s.replace("g", "ɡ").strip()
-
-    @staticmethod
-    def scrub_transcription_for_inventory(s: str) -> str:
-        """Remove unwanted characters from transcription for inventory metrics."""
-        s = s.replace("/", "")
-        s = s.replace(" ", "")
-        s = s.replace("g", "ɡ")
-        s = s.replace("͡", "")
-        s = s.replace("͜", "")
-        return s
 
     def _prepare(self, text: str) -> str:
         return self.clean_text(text) if self.normalize_ipa else text
@@ -205,10 +196,10 @@ class PhoneRecognitionEvaluator:
 
         def get_inventory(key: str) -> list[str]:
             c = Counter()
+            ft = panphon.FeatureTable()
             for _, sample in test_data.items():
                 datum = sample.get(key, "")
-                datum = cls.scrub_transcription_for_inventory(datum)
-                c.update(datum)
+                c.update(ft.ipa_segs(datum))
             # This will return phones in order of descending frequency.  For
             # the reference set, this is not taken into account, but for the
             # predictions, it used to calculate an upper bound onf the
