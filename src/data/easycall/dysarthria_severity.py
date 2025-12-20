@@ -115,6 +115,12 @@ class EasyCallDataset(Dataset):
 
     def __len__(self):
         return len(self.indices)
+    
+    def _cache_audio(self, waveform: torch.Tensor, sr: int, target_path: Path) -> None:
+        if target_path.exists():
+            return
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        torchaudio.save(str(target_path), waveform, sr)
 
     def _text_to_phonemes(self, text: str) -> List[str]:
         """
@@ -151,6 +157,9 @@ class EasyCallDataset(Dataset):
             max_samples = int(self.max_duration_sec * sr)
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
+                
+        target_path = Path(self.cache_dir) / "saved" / self.split / f"{utt_id}.wav"
+        self._cache_audio(waveform, sr, target_path)
 
         text = str(sample["text"])
         phone_list = self._text_to_phonemes(text)
@@ -158,6 +167,7 @@ class EasyCallDataset(Dataset):
 
         return {
             "utt_id": utt_id,
+            "audio_path": str(target_path),
             "split": self.split,
             "speech": waveform.squeeze(0),  # (T,)
             "speech_length": waveform.shape[1],

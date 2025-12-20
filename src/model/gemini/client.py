@@ -6,6 +6,7 @@ It handles file upload, inference, and cleanup with retry logic.
 """
 
 import os
+import random
 import shutil
 import tempfile
 import time
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from google import genai
-from google.genai import types
+from google.genai import errors as genai_errors, types
 
 
 @dataclass
@@ -53,7 +54,7 @@ class GeminiClient:
         Args:
             model_name: Identifier of the Gemini model to use.
             api_key: API key for authentication. If None, falls back to
-                     GEMINI_API_KEY or GOOGLE_API_KEY environment variables.
+                     GEMINI_API_KEY environment variable.
             temperature: Sampling temperature for generation (default: 1.0).
             top_p: Top-p (nucleus) sampling parameter (default: 1.0).
             top_k: Top-k sampling parameter (default: 1).
@@ -75,11 +76,11 @@ class GeminiClient:
                 - backoff_factor (float): Multiplier for delay (default: 2.0)
         """
         # Resolve API key
-        key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        key = api_key or os.getenv("GEMINI_API_KEY")
         if not key:
             raise ValueError(
                 "Gemini API key is not configured. Please provide api_key or set "
-                "the GEMINI_API_KEY / GOOGLE_API_KEY environment variables."
+                "the GEMINI_API_KEY environment variable."
             )
 
         self.model_name = model_name
@@ -94,6 +95,18 @@ class GeminiClient:
         # Retry configuration
         default_retry = {"max_retries": 5, "initial_delay": 1.0, "backoff_factor": 2.0}
         self.retry_config = {**default_retry, **(retry_config or {})}
+
+    def _is_retryable_api_error(self, e: Exception) -> bool:
+        """Return True if exception should be retried based on status code / type."""
+        if isinstance(e, genai_errors.APIError):
+            # Retry transient failures (quota/rate limiting and server errors)
+            return e.code in {429, 500, 502, 503, 504}
+
+        # Common transient/network-ish failures
+        if isinstance(e, (TimeoutError, ConnectionError, OSError)):
+            return True
+
+        return False
 
     def _build_schema(self, schema_config: dict) -> types.Schema:
         """
@@ -302,11 +315,29 @@ class GeminiClient:
 
         config = types.GenerateContentConfig(**config_kwargs)
 
-        # Generate response
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=contents,
-            config=config,
-        )
+        last_error: Optional[Exception] = None
+        delay: float = float(self.retry_config["initial_delay"])
+        max_retries: int = int(self.retry_config["max_retries"])
+        backoff: float = float(self.retry_config["backoff_factor"])
 
-        return (response.text or "").strip()
+        for attempt in range(max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=contents,
+                    config=config,
+                )
+                return (response.text or "").strip()
+            except Exception as e:
+                last_error = e
+                should_retry = self._is_retryable_api_error(e)
+                if not should_retry or attempt >= max_retries - 1:
+                    raise
+
+                jitter = random.uniform(0.0, min(0.25, delay * 0.1))
+                time.sleep(delay + jitter)
+                delay *= backoff
+
+        raise RuntimeError(
+            f"Failed to generate content after {max_retries} attempts"
+        ) from last_error

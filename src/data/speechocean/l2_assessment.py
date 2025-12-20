@@ -118,6 +118,7 @@ class SpeechOceanDataset(Dataset):
         )
 
         return {
+            "audio_path": audio_path,
             "speech": wav,
             "speech_length": wav.shape[0],
             "target": target,
