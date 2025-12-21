@@ -1,7 +1,6 @@
 """Wav2Vec2Phoneme model implementation using Hugging Face Transformers.
 Functionalities:
 1. TODO(shikhar): Model fine-tuning with ctc loss
-3. TODO(shikhar): CTC-Decoding via an inference file.
 
 This file supports the following pretrained models:
 - facebook/wav2vec2-lv-60-espeak-cv-ft
@@ -12,10 +11,14 @@ Note:
 "facebook" models use phonemizer which needs espeak-ng
 If you see an error like: "TypeError: Received a bool for argument tokenizer, but a PreTrainedTokenizerBase was expected"
 Build espeak-ng following https://github.com/espeak-ng/espeak-ng/blob/master/docs/building.md
+1. git clone https://github.com/espeak-ng/espeak-ng.git
+2. cd espeak-ng
+3. ./autogen.sh
+4. ./configure --prefix=PREFIX (to store built files in PREFIX)
+5. make
 Then export the following paths:
-export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
-export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
-Here the prefix is the path passed to ./configure --prefix=/usr during build.
+export PHONEMIZER_ESPEAK_LIBRARY="path/to/cloned/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
+export ESPEAK_DATA_PATH="path/to/cloned/espeak-ng/espeak-ng-data"
 Both of these exports are necessary.
 
 Usage:
@@ -210,9 +213,10 @@ class Wav2Vec2PhonemeModel(nn.Module):
 
 if __name__ == "__main__":
     # Example usage
-    model = Wav2Vec2PhonemeModel(
-        "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
-    )
+    # model = Wav2Vec2PhonemeModel(
+    #     "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
+    # )
+    model = Wav2Vec2PhonemeModel("facebook/wav2vec2-lv-60-espeak-cv-ft")
     dummy_speech = [
         torch.randn(16000),
         torch.randn(8000),
