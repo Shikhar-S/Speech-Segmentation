@@ -379,6 +379,7 @@ class PhoneRecognitionEvaluator:
                 ]
             )
 
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
         write_header = (
             not os.path.exists(output_file) or os.path.getsize(output_file) == 0
         )

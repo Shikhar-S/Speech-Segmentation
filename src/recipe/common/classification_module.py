@@ -19,10 +19,12 @@ from torchmetrics.classification import (
     MulticlassAccuracy,
     MulticlassF1Score,
 )
+from torchmetrics.regression import PearsonCorrCoef, MeanAbsoluteError
 
 from src.model.heads.base_head import BaseHead, InputType, TaskType
 from src.utils import RankedLogger
 from src.recipe.common.geolocation_loss import GeolocationAngularLoss
+from src.metrics.kendalltau import KendallTau
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -74,6 +76,13 @@ class ClassificationModel(LightningModule):
             "test": {},
         }
         self._register_task_metrics()
+        self.passthrough_keys = [
+            "split",
+            "utt_id",
+            "metadata_idx",
+            "lang_sym",
+            "audio_path",
+        ]
 
     def _register_task_metrics(self):
         # Always track losses
@@ -107,9 +116,9 @@ class ClassificationModel(LightningModule):
             TaskType.REGRESSION,
         ):
             # Ordinal-focused metrics
-            self.metrics["train"]["mae"] = MeanMetric()
-            self.metrics["val"]["mae"] = MeanMetric()
-            self.metrics["test"]["mae"] = MeanMetric()
+            self.metrics["train"]["mae"] = MeanAbsoluteError()
+            self.metrics["val"]["mae"] = MeanAbsoluteError()
+            self.metrics["test"]["mae"] = MeanAbsoluteError()
 
             self.metrics["val"]["cohenkappa"] = CohenKappa(
                 task="multiclass", num_classes=self.num_classes, weights="quadratic"
@@ -118,35 +127,15 @@ class ClassificationModel(LightningModule):
                 task="multiclass", num_classes=self.num_classes, weights="quadratic"
             )
 
-            self.metrics["val"]["pcc"] = MeanMetric()
-            self.metrics["test"]["pcc"] = MeanMetric()
+            self.metrics["val"]["pcc"] = PearsonCorrCoef()
+            self.metrics["test"]["pcc"] = PearsonCorrCoef()
+
+            self.metrics["val"]["kendalltau"] = KendallTau()
+            self.metrics["test"]["kendalltau"] = KendallTau()
 
         for stage, stage_metrics in self.metrics.items():
             for name, metric in stage_metrics.items():
                 setattr(self, f"{stage}_{name}", metric)
-
-    @staticmethod
-    def _compute_pcc(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Computes Pearson Correlation Coefficient (PCC)."""
-        x = x.float()
-        y = y.float()
-
-        # Mean subtraction
-        x_centered = x - x.mean()
-        y_centered = y - y.mean()
-
-        # Numerator (Covariance)
-        numerator = (x_centered * y_centered).sum()
-
-        # Denominator (Product of standard deviations)
-        denominator = torch.sqrt((x_centered**2).sum()) * torch.sqrt(
-            (y_centered**2).sum()
-        )
-
-        if denominator == 0:
-            return torch.tensor(0.0, device=x.device)
-
-        return numerator / denominator
 
     def on_fit_start(self) -> None:
         for stage_metrics in self.metrics.values():
@@ -197,19 +186,21 @@ class ClassificationModel(LightningModule):
             self.metrics[stage]["f1"](preds, targets)
 
         if "mae" in self.metrics[stage]:
-            err = (preds - targets).abs().float()
-            self.metrics[stage]["mae"](err.mean())
+            self.metrics[stage]["mae"](preds.float(), targets.float())
 
         if stage in {"val", "test"}:
             if "cohenkappa" in self.metrics[stage]:
                 self.metrics[stage]["cohenkappa"](preds, targets)
-            # Calculate PCC on continuous logits
             if "pcc" in self.metrics[stage]:
                 # Use the mean of the K-1 logits as the single continuous score for ranking correlation
                 # in regression this is just the output value
                 continuous_score = logits.mean(dim=-1)
-                pcc_value = self._compute_pcc(continuous_score, targets)
-                self.metrics[stage]["pcc"](pcc_value)
+                self.metrics[stage]["pcc"](
+                    continuous_score.flatten(), targets.flatten().float()
+                )  # pcc on continuous values
+            if "kendalltau" in self.metrics[stage]:
+                # kendalltau on predicted class labels
+                self.metrics[stage]["kendalltau"](preds, targets)
 
     def _log_stage_metrics(
         self,
@@ -357,6 +348,48 @@ class ClassificationModel(LightningModule):
             raise ValueError(
                 f"Unsupported task type: {self.classification_head.task_type}"
             )
+
+    def predict_step(
+        self, batch: Dict[str, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
+    ) -> Any:
+        out = self.model_step(batch)
+        logits, targets, preds = out["logits"], out["targets"], out["preds"]
+
+        # Calculate per-example loss
+        if self.classification_head.task_type == TaskType.CLASSIFICATION:
+            loss_vec = torch.nn.functional.cross_entropy(
+                logits, targets.long(), reduction="none"
+            )
+        elif self.classification_head.task_type == TaskType.ORDINAL_REGRESSION:
+            y_ord = self._ordinal_targets(targets.long())
+            loss_vec = torch.nn.functional.binary_cross_entropy_with_logits(
+                logits, y_ord, reduction="none"
+            ).mean(dim=-1)
+        elif self.classification_head.task_type == TaskType.REGRESSION:
+            loss_vec = torch.nn.functional.mse_loss(
+                logits.squeeze(-1), targets.float(), reduction="none"
+            )
+        else:
+            raise NotImplementedError(
+                "Per-example metrics not implemented for Geolocation task."
+            )
+
+        # Prepare passthrough data (pre-indexing to avoid redundant lookups in loop)
+        passthrough = {k: batch[k] for k in self.passthrough_keys if k in batch}
+
+        return [
+            {
+                "target": targets[i].cpu().tolist(),
+                "prediction": preds[i].cpu().tolist(),
+                "logit": logits[i].cpu().tolist(),
+                "loss": loss_vec[i].cpu().tolist(),
+                **{
+                    k: v[i] if isinstance(v, (list, torch.Tensor)) else v
+                    for k, v in passthrough.items()
+                },
+            }
+            for i in range(targets.size(0))
+        ]
 
     def on_validation_epoch_end(self) -> None:
         loss = self.metrics["val"]["loss"].compute()

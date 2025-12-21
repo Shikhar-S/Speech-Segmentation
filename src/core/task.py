@@ -2,7 +2,9 @@
 
 from typing import Any, Dict, List, Tuple
 
+import json
 import hydra
+import os
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
@@ -128,8 +130,17 @@ class Task:
             test_metrics = self.test(trainer, model, datamodule, ckpt_path)
             metrics.update(test_metrics)
 
-        if self.task_cfg.get("predict", False):
+        if (
+            self.task_cfg.get("predict", False)
+            or self.task_cfg.get("pred_file", None) is not None
+        ):
             preds = self.predict(trainer, model, datamodule, ckpt_path)
             object_dict["predictions"] = preds
+            # Write predictions
+            pred_file = self.task_cfg.get("pred_file", None)
+            if pred_file is not None:
+                os.makedirs(os.path.dirname(pred_file), exist_ok=True)
+                json.dump(preds, open(pred_file, "w", encoding="utf-8"), indent=2)
+                log.info(f"Wrote predictions to {pred_file}")
 
         return metrics, object_dict

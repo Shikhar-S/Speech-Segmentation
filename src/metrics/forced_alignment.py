@@ -4,8 +4,9 @@ from collections import defaultdict
 import numpy as np
 
 from src.utils.pylogger import RankedLogger
+from src.utils import RankedLogger
 
-log = RankedLogger(__name__)
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 @dataclass

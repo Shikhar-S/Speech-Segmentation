@@ -34,7 +34,9 @@ train: True # set False to skip model training
 # evaluate on test set, using best model weights achieved during training
 # lightning chooses best weights based on the metric specified in checkpoint callback
 test: True
+# prediction stage runs if 'predict' is True or 'pred_file' is not None
 predict: False # run prediction on new/unseen data
+pred_file: null # path to write predictions to
 
 # useful to resume training from a checkpoint path
 ckpt_path: null
