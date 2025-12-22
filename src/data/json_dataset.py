@@ -154,20 +154,23 @@ class TranscriptionDataModule(LightningDataModule):
                 raise ValueError(
                     f"Missing the key 'processed_transcript' in predictions for sample {ix}!"
                 )
-            if {
-                "target",
-                "split",
-                "utt_id",
-            } - set(passthrough.keys()):
-                raise ValueError(
-                    f"Invalid passthrough format for sample {ix}, skipping."
-                )
+            # TODO(shikhar): enable this check later
+            # if {
+            #     "target",
+            #     "split",
+            #     "utt_id",
+            # } - set(passthrough.keys()):
+            #     raise ValueError(
+            #         f"Invalid passthrough format for sample {ix}, skipping."
+            #     )
             sample = {
                 "sample_index": ix,
                 "processed_transcript": pred[0]["processed_transcript"],
                 "target": passthrough["target"],
                 "split": passthrough["split"],
-                "utt_id": passthrough["utt_id"],
+                "utt_id": passthrough.get(
+                    "utt_id", passthrough.get("metadata_idx", ix)
+                ),
             }
             if "predicted_transcript" in pred[0]:
                 sample["predicted_transcript"] = pred[0]["predicted_transcript"]

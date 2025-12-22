@@ -94,6 +94,7 @@ declare -A recipe_configs=(
     ["inference"]="transcribe"
     ["cascade_rnn_cls"]="rnn_classification"
     ["cascade_rnn_reg"]="rnn_regression"
+    ["cascade_rnn_geo"]="rnn_geolocation"
     ["cascade_transformer"]="transformer_cls"
 )
 
@@ -103,7 +104,7 @@ declare -A dataset_configs=(
     ["timit"]="timit|"
     ["doreco"]="doreco|"
     ["geo_sw"]="swissgermangeo|"
-    ["geo_in"]="vaanigeo|"
+    ["geo_in"]="vaanigeo|1"
     ["cmul2arctic"]="cmul2arcticl1|7"
     ["speechocean"]="speechocean|11"
     ["fleurs"]="fleurs|24"
