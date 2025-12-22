@@ -196,7 +196,11 @@ construct_cmd_for_inference() {
 _construct_adhoc_args_for_cascade() {
     local dataset_name=$1 model_var=$2
     # Pick the latest non-empty transcription.json under the run tree
-    local runs_dir="exp/runs/inf_${dataset_name}_${model_var}"
+    prefix="./"
+    if [[ $(hostname) == *babel* ]]; then
+        prefix="/data/group_data/wavlab_icme25/PhoneBench/"
+    fi
+    local runs_dir="${prefix}exp/runs/inf_${dataset_name}_${model_var}"
     local transcription_json
     transcription_json="$(
         find "$runs_dir" -type f -name 'transcription.json' -size +0c \

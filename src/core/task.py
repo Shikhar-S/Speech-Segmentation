@@ -51,7 +51,7 @@ class Task:
         #     log.error("Testing ckpt not provided!")
         # else:
         log.info(f"Ckpt path: {ckpt_path}")
-        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path or None)
+        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path or None, weights_only=False)
         return dict(trainer.callback_metrics)
 
     def predict(
@@ -65,7 +65,7 @@ class Task:
             ckpt_path = self.task_cfg.ckpt_path
         log.info("Starting prediction!")
         return trainer.predict(
-            model=model, datamodule=datamodule, ckpt_path=ckpt_path or None
+            model=model, datamodule=datamodule, ckpt_path=ckpt_path or None, weights_only=False
         )
 
     def run_distributed_inference(self):
