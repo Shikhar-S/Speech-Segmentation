@@ -13,9 +13,9 @@ powsm_lang_sym_map:
   mk_mk: "<mkd>"        # Macedonian
   fr_fr: "<fra>"        # French
 max_samples:
-  test: 200
-  train: 200
-  validation: 100
+  test: 4800
+  train: 4800
+  validation: 2400
 # total= 500 samples x 24 languages = 12,000 samples
 
 # FLEURS-11 (geolocation)
