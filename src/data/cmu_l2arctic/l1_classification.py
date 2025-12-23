@@ -118,6 +118,7 @@ class CmuL2ArcticL1Dataset(Dataset):
             dict with:
                 - speech: Tensor of shape (T,), float32
                 - speech_length: int, actual audio length in samples
+                - audio_path: str, path to the audio file (for API-based models)
                 - label: str, L1 class label
                 - split: str, data split
                 - metadata_idx: int, index in metadata CSV
@@ -150,6 +151,8 @@ class CmuL2ArcticL1Dataset(Dataset):
         return {
             "speech": waveform,
             "speech_length": waveform.shape[0],
+            "audio_path": audio_path,
+            "lang_sym": "<eng>",  # for powsm
             "label": row["l1_label"],
             "target": self.label_to_ids[row["l1_label"]],
             "split": row["split"],

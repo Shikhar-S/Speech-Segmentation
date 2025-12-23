@@ -19,10 +19,14 @@ class TaskType(Enum):
 
     - CLASSIFICATION: output_dim is the number of classes.
     - REGRESSION: output_dim is the dimension of continuous target (e.g., 1 for scalar).
+    - ORDINAL_REGRESSION: output_dim is the number of classes-1 (Coral style). Reference:https://arxiv.org/pdf/1901.07884
+    - GEOLOCATION: output_dim is 3. head predicts 3D coordinates.
     """
 
     CLASSIFICATION = "classification"
     REGRESSION = "regression"
+    ORDINAL_REGRESSION = "ordinal_regression"
+    GEOLOCATION = "geolocation"
 
 
 class BaseHead(nn.Module, ABC):
@@ -33,7 +37,7 @@ class BaseHead(nn.Module, ABC):
     by the recipe (LightningModule), not the head.
 
     Attributes:
-        task_type: The type of downstream task (classification or regression).
+        task_type: The type of downstream task (classification or regression or ordinal regression).
         output_dim: The output dimension. For classification, this is the number of
             classes. For regression, this is the dimension of the target.
     """

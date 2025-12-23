@@ -1,0 +1,10 @@
+_target_: src.data.ultrasuite_benchmark.childspeech.UltrasuiteDataModule
+hf_repo: kgrosero14/ultrasuite-benchmark
+cache_dir: ${paths.cache_dir}/ultrasuite
+num_classes: 2 # atypical vs typical
+
+target_sr: 16000
+batch_size: 32 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+num_workers: 10
+pin_memory: False
+max_duration_sec: 20 # Optional: maximum audio duration in seconds for truncation

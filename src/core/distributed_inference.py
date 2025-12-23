@@ -44,7 +44,8 @@ def work_chunk_(
     for i in tqdm(idxs, desc="Processing", leave=False):
         it = dataset[i]
         # keys from dataset override those in inference_call_args
-        pred = inference_obj(**(inference_call_args or {}), **it)
+        call_args = {**(inference_call_args or {}), **it}
+        pred = inference_obj(**call_args)
         # keys from dataset that must be passthroughly passed to
         # output to be written
         out.append((i, pred, {k: it[k] for k in (passthrough_keys or []) if k in it}))
@@ -64,6 +65,14 @@ def save_json(data, out_file):
     log.info(f"Saved: {out_file}")
 
 
+def load_json(in_file):
+    """Load data from a json file"""
+    with open(in_file, "r") as f:
+        data = json.load(f)
+    log.info(f"Loaded: {in_file}")
+    return data
+
+
 def run_distributed_inference_(
     dataset,
     inference_config,
@@ -71,6 +80,7 @@ def run_distributed_inference_(
     num_workers: int = 1,
     out_file=None,
     passthrough_keys=[],
+    limit_samples: int = None,
 ):
     """Splits dataset and runs inference in parallel workers.
 
@@ -82,6 +92,7 @@ def run_distributed_inference_(
         out_file: output file to save results
         passthrough_keys: list of keys in dataset item to be written directly to
             output without processing
+        limit_samples: if set, limit the number of samples to process (useful for testing)
     """
 
     # fail fast
@@ -96,13 +107,16 @@ def run_distributed_inference_(
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Calculate effective number of samples
+    N = len(dataset)
+    if limit_samples is not None and limit_samples > 0:
+        N = min(N, limit_samples)
+        log.info(f"Limiting inference to {N} samples (out of {len(dataset)} total).")
+
     log.info(
-        f"Running inference on {len(dataset)} utterances on"
+        f"Running inference on {N} utterances on"
         f" {device} with {num_workers} workers."
     )
-    # split items from dataset, run against inference object replicas, gather results
-
-    N = len(dataset)
     cs = (N + num_workers - 1) // num_workers
     chunks = [
         range(i * cs, min((i + 1) * cs, N)) for i in range(num_workers) if i * cs < N
@@ -116,6 +130,7 @@ def run_distributed_inference_(
         device=device,
     )
 
+    # TODO(shikhar): switch to jsonl append pattern
     with mp.get_context("spawn").Pool(num_workers, initializer=_init_worker) as pool:
         out = []
         worker_id = 0
@@ -136,10 +151,11 @@ def run_distributed_inference_(
     log.info("Finished distributed inference.")
 
     # collect all results
-    save_json(
-        {i: {"pred": pred, "passthrough": passthrough} for i, pred, passthrough in out},
-        out_file,
-    )
+    merged = {}
+    for w_id in range(num_workers):
+        part = load_json(f"{out_file}.part{w_id}.json")
+        merged.update(part)
+    save_json(merged, out_file)
     log.info(f"Saved final output to {out_file}.")
 
     # cleanup partial files

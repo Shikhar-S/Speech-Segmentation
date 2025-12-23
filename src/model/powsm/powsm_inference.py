@@ -147,8 +147,8 @@ class PowsmInference:
         nbest: int = 1,
         normalize_length: bool = False,
         # default values that can be overwritten in __call__
-        lang_sym: str = "<eng>",
-        task_sym: str = "<asr>",
+        lang_sym: str = "<unk>",
+        task_sym: str = "<pr>",
     ):
 
         model.to(dtype=getattr(torch, dtype), device=device).eval()
@@ -237,7 +237,7 @@ class PowsmInference:
         task_sym = task_sym if task_sym is not None else self.task_sym
         predict_time = predict_time if predict_time is not None else self.predict_time
 
-        lang_id = self.converter.token2id[lang_sym]
+        lang_id = self.converter.token2id.get(lang_sym, self.converter.unk_id)
         task_id = self.converter.token2id[task_sym]
         notime_id = self.converter.token2id[self.preprocessor_conf["notime_symbol"]]
 

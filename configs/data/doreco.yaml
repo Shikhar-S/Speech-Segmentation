@@ -1,0 +1,4 @@
+_target_: src.data.kaldi_dataset.build_kaldi_datamodule
+dataset_name: doreco
+batch_size: 32
+num_workers: 10

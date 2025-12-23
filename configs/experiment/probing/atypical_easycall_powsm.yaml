@@ -13,7 +13,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "atypical_easycall_powsm"
-tags: ["easycall", "powsm", "atypical"]
+tags: ["easycall", "powsm", "atypical", "regression"]
 
 seed: 42
 
@@ -23,17 +23,27 @@ trainer:
   gradient_clip_val: 1.0
   val_check_interval: 0.25  # validate 4 times per epoch
 
+
+model:
+  head:
+    task_type: "regression"
+  freeze_encoder: true
+  optimizer:
+    lr: 0.0002
+  scheduler:
+    total_iters: 200
+
 data:
   batch_size: 48
 
-model:
-  freeze_encoder: true
-  optimizer:
-    lr: 0.0001
-  scheduler:
-    total_iters: 500
+callbacks:
+  model_checkpoint:
+    monitor: "val/pcc"
+    mode: "max"
+    save_top_k: 1
 
 logger:
   wandb:
     tags: ${tags}
     group: "atypical_easycall_powsm"
+    name: ${task_name}

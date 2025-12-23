@@ -3,7 +3,7 @@
 Usage:
     python -m src.data.uaspeech.common_datamodule \
         --data_dir exp/download/uaspeech \
-        --cache_dir /scratch/sbharad2/PhoneBench/exp/cache/uaspeech \
+        --cache_dir exp/cache/uaspeech \
         --uaspeech_meta_csv src/data/uaspeech/uaspeech_meta.csv \
         --uaspeech_wordlist_csv src/data/uaspeech/uaspeech_wordlist.csv
 """
@@ -14,7 +14,6 @@ import tarfile
 from pathlib import Path
 from typing import Optional, List
 import json
-import fcntl
 
 import pandas as pd
 import torch
@@ -170,9 +169,11 @@ class UASpeechDataset(Dataset):
 
         return {
             "utt_id": item["file"],
+            "audio_path": item["path"],
             "split": self.split,
             "speech": waveform.squeeze(0),
             "speech_length": waveform.shape[1],
+            "lang_sym": "<eng>",  # for powsm
             "target": item["label"],
             "text": item["text"],
             "phones": " ".join(phones),
@@ -321,10 +322,14 @@ if __name__ == "__main__":
         tokenizer=IPATokenizer(),
         batch_size=2,
         num_workers=1,
+        num_classes=5,
     )
 
     dm.prepare_data()
     dm.setup()
+    print("Length of train dataset:", len(dm.train_dataset))
+    print("Length of val dataset:", len(dm.val_dataset))
+    print("Length of test dataset:", len(dm.test_dataset))
 
     for batch in dm.train_dataloader():
         print(batch)

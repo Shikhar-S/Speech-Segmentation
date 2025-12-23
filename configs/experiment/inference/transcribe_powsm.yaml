@@ -2,14 +2,14 @@
 
 # This config executes inference with PoWSM:
 # Set data field when calling
-# eg. python src/main.py experiment=inference/transcribe_powsm data=fleurs task_name=inf_powsm_fleurs
+# eg. python src/main.py experiment=inference/transcribe_powsm data=doreco task_name=inf_doreco_powsm
 
 defaults:
   - override /logger: csv
   - override /model: null
   - override /model/net: null
 
-task_name: ??? # pass inf_<model>_<data> when calling. This will create output dirs accordingly
+task_name: ??? # pass inf_<data>_<model> when calling. This will create output dirs accordingly
 tags: ["powsm","inference"]
 
 seed: 42
@@ -19,8 +19,8 @@ test: false
 distributed_predict: True
 
 inference:
-  num_workers: 25 # number of parallel workers for distributed inference, 25 for 90GB gpu
-  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  num_workers: 10 # number of parallel workers for distributed inference, 25 for 90GB gpu
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx", "lang_sym"]
   out_file: ${paths.output_dir}/transcription.json
   # an object (or fn that creates such an object) with __call__ method to transcribe single speech
   inference_runner:

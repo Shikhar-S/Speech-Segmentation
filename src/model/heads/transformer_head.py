@@ -21,6 +21,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.model.heads.base_head import BaseHead, TaskType
+from src.utils.pylogger import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class PositionalEncodingType(str, Enum):
@@ -267,6 +270,11 @@ class TransformerHead(BaseHead):
         """
         # Convert string task_type to enum
         task_type_enum = TaskType(task_type)
+        if task_type_enum == TaskType.ORDINAL_REGRESSION:
+            log.info(
+                f"Using ORDINAL_REGRESSION task type: adjusting output_dim to {output_dim - 1}"
+            )
+            output_dim = output_dim - 1  # Adjust output dim for ordinal regression
         super().__init__(task_type=task_type_enum, output_dim=output_dim)
 
         self.input_dim = input_dim

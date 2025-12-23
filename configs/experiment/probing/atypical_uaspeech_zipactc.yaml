@@ -1,10 +1,10 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/main.py experiment=probing/l1cls_cmul2arctic_zipactc
+# python src/main.py experiment=probing/atypical_uaspeech_zipactc
 
 defaults:
-  - override /data: cmul2arcticl1
+  - override /data: uaspeech
   - override /model: classification
   - override /model/head: attnmlp
   - override /model/net: zipactc
@@ -12,8 +12,8 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "l1cls_cmul2arctic_zipactc"
-tags: ["cmul2arctic", "zipactc", "l1cls"]
+task_name: "atypical_uaspeech_zipactc"
+tags: ["uaspeech", "zipactc", "atypical", "regression"]
 
 seed: 42
 
@@ -27,25 +27,24 @@ trainer:
 
 model:
   head:
-    task_type: "classification"
+    task_type: "regression"
   freeze_encoder: true
   optimizer:
     lr: 0.0002
   scheduler:
     total_iters: 200
 
+data:
+  batch_size: 48
+
 callbacks:
   model_checkpoint:
-    monitor: "val/f1"
+    monitor: "val/pcc"
     mode: "max"
     save_top_k: 1
-
-
-data:
-  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
 
 logger:
   wandb:
     tags: ${tags}
-    group: "l1cls_cmul2arctic_zipactc"
+    group: "atypical_uaspeech_zipactc"
     name: ${task_name}

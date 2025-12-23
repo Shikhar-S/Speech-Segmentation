@@ -1,0 +1,76 @@
+# @package _global_
+
+# This config executes inference with Gemini:
+# Set data field when calling
+# eg. python src/main.py experiment=inference/transcribe_gemini data=cmul2arcticl1 task_name=inf_gemini_l2arctic
+
+defaults:
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: ??? # pass inf_<model>_<data> when calling. This will create output dirs accordingly
+tags: ["gemini","inference"]
+
+seed: 42
+
+train: false
+test: false
+distributed_predict: True
+
+inference:
+  num_workers: 1 # NOTE: Keep num_workers=1 to ensure cache_path/error_log_path writes happen in a single process
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  out_file: ${paths.output_dir}/transcription.json
+  limit_samples: null  # Set to null for full run
+
+  inference_runner:
+    _target_: src.model.gemini.inference.GeminiInference
+    client_config:
+      model_name: "gemini-2.5-flash"
+      api_key: ${oc.env:GEMINI_API_KEY}
+      temperature: 1.0
+      top_p: 1.0
+      top_k: 1
+      seed: ${seed}
+      thinking_budget: 0  # Set to 0 for non-thinking mode
+      response_schema:  # Structured output schema for JSON response
+        type: "OBJECT"
+        required: ["transcription"]
+        properties:
+          transcription:
+            type: "STRING"
+      retry_config:
+        max_retries: 3
+        initial_delay: 1.0
+        backoff_factor: 2.0
+    prompt_config:
+      system_prompt: |
+        ### Role
+        You are an expert phonetician and linguist specializing in acoustic phonetics. Your auditory perception is calibrated to detect subtle nuances in articulation, stress, and intonation.
+
+        ### Task
+        Listen to the provided audio clip and transcribe the speech into standard International Phonetic Alphabet (IPA) symbols.
+
+        ### Guidelines for Accuracy
+        1.  **Analyze Context:** Implicitly identify the speaker's accent/dialect to ensure vowel qualities are accurate.
+        2.  **Resolve Ambiguity:** If a sound is unclear, use your linguistic expertise to determine the single most probable phoneme. Do not provide alternatives.
+        3.  **Strict IPA:** Use standard IPA notation only.
+
+        ### Output Format & Schema Adherence
+        -   **Strict Adherence:** You must generate the output following the defined schema structure exactly.
+        -   **Pure Data:** Return raw data only. Do NOT use Markdown code blocks (e.g., ```json), and do not include any conversational filler.
+        -   **Field `transcription`:**
+            -   Must contain **EXACTLY ONE** string sequence of IPA symbols.
+            -   No slashes `/` or brackets `[]`.
+            -   Example: "həˈləʊ" (Correct) / "/həˈləʊ/" (Incorrect)
+
+        Analyze the audio and produce the structured output now.
+      user_prompt_template: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
+      default_user_prompt: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
+    output_key: "transcription"  # Extract this key from JSON response
+    clean_response: True
+    cache_key_field: "metadata_idx"
+    cache_path: "${inference.out_file}.cache.jsonl"
+    error_log_path: "${inference.out_file}.errors.jsonl"
+    resume: True

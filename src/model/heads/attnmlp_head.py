@@ -9,6 +9,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from src.model.heads.base_head import BaseHead, TaskType
 from src.model.common.utils import get_kv_pooling_mask
+from src.utils.pylogger import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class AttentionMLPHead(BaseHead):
@@ -29,6 +32,18 @@ class AttentionMLPHead(BaseHead):
             task_type: Task type ("classification" or "regression").
         """
         task_type_enum = TaskType(task_type)
+        if task_type_enum == TaskType.ORDINAL_REGRESSION:
+            log.info(
+                f"Using ORDINAL_REGRESSION task type: adjusting output_dim to {output_dim - 1}"
+            )
+            output_dim = output_dim - 1  # Adjust output dim for ordinal regression
+        elif task_type_enum == TaskType.REGRESSION:
+            log.info(f"Using REGRESSION task type: setting output_dim to 1")
+            output_dim = 1  # For standard regression, output dim is 1
+        elif task_type_enum == TaskType.GEOLOCATION:
+            log.info(f"Using GEOLOCATION task type: setting output_dim to 3")
+            output_dim = 3  # For geolocation, output dim is 3 (3D coordinates)
+
         super().__init__(task_type=task_type_enum, output_dim=output_dim)
         self.input_dim = input_dim
         self.query_vector = nn.Parameter(torch.randn(1, 1, self.input_dim))
@@ -57,7 +72,9 @@ class AttentionMLPHead(BaseHead):
             encoder_out_lengths: Lengths of encoder outputs (batch,).
 
         Returns:
-            Logits tensor of shape (batch, output_dim).
+            Logits tensor of shape:
+            Classification: (batch, num_classes)
+            Ordinal Regression: (batch, num_classes-1)
         """
         b, t, d = encoder_out.size()
         h = F.normalize(encoder_out, dim=-1, eps=1e-8)
@@ -72,4 +89,4 @@ class AttentionMLPHead(BaseHead):
             key_padding_mask=key_mask,
         )[0].squeeze(0)
         h = F.normalize(h, dim=-1, eps=1e-8)
-        return self.f(h)  # (batch, output_dim)
+        return self.f(h)

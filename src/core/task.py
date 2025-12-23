@@ -2,7 +2,9 @@
 
 from typing import Any, Dict, List, Tuple
 
+import json
 import hydra
+import os
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
@@ -49,7 +51,7 @@ class Task:
         #     log.error("Testing ckpt not provided!")
         # else:
         log.info(f"Ckpt path: {ckpt_path}")
-        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path or None)
+        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path or None, weights_only=False)
         return dict(trainer.callback_metrics)
 
     def predict(
@@ -63,13 +65,14 @@ class Task:
             ckpt_path = self.task_cfg.ckpt_path
         log.info("Starting prediction!")
         return trainer.predict(
-            model=model, datamodule=datamodule, ckpt_path=ckpt_path or None
+            model=model, datamodule=datamodule, ckpt_path=ckpt_path or None, weights_only=False
         )
 
     def run_distributed_inference(self):
         """Wraps the utility function for distributed inference."""
         log.info("Starting distributed prediction!")
         datamodule: LightningDataModule = hydra.utils.instantiate(self.task_cfg.data)
+        datamodule.prepare_data()
         datamodule.setup(stage="predict")  # in the experiment flow, trainer calls setup
         run_distributed_inference_(
             dataset=datamodule.predict_dataloader().dataset,
@@ -80,6 +83,7 @@ class Task:
             num_workers=self.task_cfg.inference.num_workers,
             out_file=self.task_cfg.inference.out_file,
             passthrough_keys=self.task_cfg.inference.get("passthrough_keys", []),
+            limit_samples=self.task_cfg.inference.get("limit_samples", None),
         )
 
     def run_experiment(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -126,8 +130,17 @@ class Task:
             test_metrics = self.test(trainer, model, datamodule, ckpt_path)
             metrics.update(test_metrics)
 
-        if self.task_cfg.get("predict", False):
+        if (
+            self.task_cfg.get("predict", False)
+            or self.task_cfg.get("pred_file", None) is not None
+        ):
             preds = self.predict(trainer, model, datamodule, ckpt_path)
             object_dict["predictions"] = preds
+            # Write predictions
+            pred_file = self.task_cfg.get("pred_file", None)
+            if pred_file is not None:
+                os.makedirs(os.path.dirname(pred_file), exist_ok=True)
+                json.dump(preds, open(pred_file, "w", encoding="utf-8"), indent=2)
+                log.info(f"Wrote predictions to {pred_file}")
 
         return metrics, object_dict

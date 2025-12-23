@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Copyright 2025  Carnegie Mellon University (Author: Shikhar Bharadwaj)
-# TODO(shikhar): support for cascade setup
 set -euo pipefail
 log() {
     echo "$(date '+%Y-%m-%dT%H:%M:%S') [${BASH_SOURCE[1]##*/}:${BASH_LINENO[0]}] $*"
@@ -16,13 +15,15 @@ run_name=""
 sbatch_args=""
 extra_args=""
 wait_time=1s
+nseeds=1
+seedlist=""
 
 help_message=$(cat << 'EOF'
 Usage: $0 [OPTIONS]
 
 Options:
   --model LIST        Models: logmel, powsm, powsmvr, ctag, lv60, xlsr53, zipactc, zipactc_ns, or "all"
-  --recipe LIST       Recipes: fab, fat, gsw, gva, l1c, l2a, lif, or "all"
+  --recipe LIST       Recipes: fab, fat, geo_sw, geo_in, l1cls, l2as, lid_fl, atyp_ec, atyp_ua, atyp_us, inference, cascade_rnn_cls, cascade_transformer
   --data LIST         Datasets: buckeye, timit, geo_sw, geo_in, cmul2arctic, speechocean, fleurs, or "all"
   --cluster NAME      Cluster: dai, delta (default: dai)
   --fft               Enable full fine-tuning
@@ -30,6 +31,8 @@ Options:
   --run_name STR      Run name (default: timestamp)
   --sbatch_args STR   Extra sbatch arguments
   --extra_args STR    Extra training arguments passed at the end to override all config values
+  --nseeds INT        Number of seeds for training (default: 1)
+  --seedlist STR      Comma-separated list of seeds (overrides --nseeds)
   --wait_time STR    Wait time between job submissions (default: 2s)
 
 Examples:
@@ -42,7 +45,7 @@ EOF
 setup="probing"
 if [ "$recipe" = "inference" ]; then
     setup="inference"
-elif [ "$recipe" = "cascade_rnn" ] || [ "$recipe" = "cascade_transformer" ]; then
+elif [[ "$recipe" == *cascade* ]]; then
     setup="cascade"
 fi
 if [ "$setup" != "probing" ] && [ -z "$data" ]; then
@@ -73,6 +76,7 @@ declare -A model_configs=(
     ["xlsr53"]="w2v2ph|facebook/wav2vec2-xlsr-53-espeak-cv-ft"
     ["zipactc"]="zipactc|anyspeech/zipa-large-crctc-500k"
     ["zipactc_ns"]="zipactc|anyspeech/zipa-large-crctc-ns-800k"
+    ["gemini"]="gemini|"
 )
 
 # Recipe = task_dataset
@@ -85,8 +89,12 @@ declare -A recipe_configs=(
     ["l2as"]="l2as_speechocean"
     ["lid_fl"]="lid_fleurs"
     ["atyp_ec"]="atypical_easycall"
+    ["atyp_ua"]="atypical_uaspeech"
+    ["atyp_us"]="atypical_ultrasuite"
     ["inference"]="transcribe"
-    ["cascade_rnn"]="rnn_cls"
+    ["cascade_rnn_cls"]="rnn_classification"
+    ["cascade_rnn_reg"]="rnn_regression"
+    ["cascade_rnn_geo"]="rnn_geolocation"
     ["cascade_transformer"]="transformer_cls"
 )
 
@@ -94,12 +102,15 @@ declare -A recipe_configs=(
 declare -A dataset_configs=(
     ["buckeye"]="buckeye|"
     ["timit"]="timit|"
+    ["doreco"]="doreco|"
     ["geo_sw"]="swissgermangeo|"
-    ["geo_in"]="vaanigeo|"
+    ["geo_in"]="vaanigeo|1"
     ["cmul2arctic"]="cmul2arcticl1|7"
     ["speechocean"]="speechocean|11"
-    ["fleurs"]="fleurs|11"
-    ['easycall']="easycall|4"
+    ["fleurs"]="fleurs|24"
+    ["easycall"]="easycall|4"
+    ["uaspeech"]="uaspeech|5"
+    ["ultrasuite"]="ultrasuite_child|2"
 )
 
 get_base_model() {
@@ -136,9 +147,12 @@ construct_config_name() {
     local model_var=$1 recipe_code=$2
     local base=$(get_base_model "$model_var")
     local recipe_full="${recipe_configs[$recipe_code]}"
-    echo "configs/experiment/${setup}/${recipe_full}_${base}.yaml"
+    if [ "$setup" = "cascade" ]; then
+        echo "configs/experiment/${setup}/${recipe_full}.yaml"
+    else
+        echo "configs/experiment/${setup}/${recipe_full}_${base}.yaml"
+    fi
 }
-
 construct_cmd_for_probing() {
     local model_var=$1 config_file=$2
     local repo=$(get_hf_repo "$model_var")
@@ -152,7 +166,10 @@ construct_cmd_for_probing() {
     fi
     [ -n "$extra_args" ] && cmd+=" $extra_args"
     local cmds=()
-    cmds+=("$cmd")
+    # Generate commands with multiple seeds
+    for seed in "${seed_array[@]}"; do
+        cmds+=("${cmd} seed=$seed")
+    done
     printf '%s\n' "${cmds[@]}"
 }
 
@@ -166,7 +183,7 @@ construct_cmd_for_inference() {
     for dataset_code in "${datasets[@]}"; do
         [ -z "$dataset_code" ] && continue
         local dataset_name="${dataset_configs[$dataset_code]%%|*}"
-        task_name="inf_${dataset_name}_${model_var}"
+        local task_name="inf_${dataset_name}_${model_var}"
         local cmd="sbatch${sbatch_args:+ $sbatch_args} $script experiment=${setup}/${config_file##*/} data=$dataset_name task_name=$task_name"
         if [ -n "$repo" ]; then
             cmd+=" inference.inference_runner.hf_repo=$repo"
@@ -177,7 +194,37 @@ construct_cmd_for_inference() {
     printf '%s\n' "${cmds[@]}"
 }
 
-construct_cmd_for_cascade() {    
+_construct_adhoc_args_for_cascade() {
+    local dataset_name=$1 model_var=$2
+    # Pick the latest non-empty transcription.json under the run tree
+    prefix="./"
+    if [[ $(hostname) == *babel* ]]; then
+        prefix="/data/group_data/wavlab_icme25/PhoneBench/"
+    fi
+    local runs_dir="${prefix}exp/runs/inf_${dataset_name}_${model_var}"
+    local transcription_json
+    transcription_json="$(
+        find "$runs_dir" -type f -name 'transcription.json' -size +0c \
+          -printf '%T@ %p\n' 2>/dev/null \
+        | sort -nr \
+        | head -n 1 \
+        | cut -d' ' -f2-
+    )"
+    echo "Found $transcription_json" >&2
+    [ -z "$transcription_json" ] && return 1
+    # Construct vocabulary size = number of unique symbols in transcription.json
+    local vocab_size
+    vocab_size="$(
+        python3 - <<PY
+import re
+s = open("$transcription_json", encoding="utf-8", errors="ignore").read()
+print(len(set(s)))
+PY
+    )"
+    printf 'data.json_path=%s model.net.vocab_size=%s' "$transcription_json" "$vocab_size"
+}
+
+construct_cmd_for_cascade() {
     local model_var=$1 config_file=$2
     shift 2
     local datasets=("$@")
@@ -188,12 +235,18 @@ construct_cmd_for_cascade() {
         [ -z "$dataset_code" ] && continue
         local dataset_conf="${dataset_configs[$dataset_code]}"
         local dataset_name="${dataset_conf%%|*}"
+        local adhoc_args="$(_construct_adhoc_args_for_cascade "$dataset_name" "$model_var")" || continue
+        local task_name="cascade.${dataset_code}_${model_var}"
         local num_classes="${dataset_conf#*|}"
-        local cmd="sbatch${sbatch_args:+ $sbatch_args} $script experiment=${setup}/${config_file##*/} data=$dataset_name"
-        $fft && cmd+=" model.freeze_encoder=false tags+=[\\\"fft\\\"]"
+        local cmd="sbatch${sbatch_args:+ $sbatch_args} $script experiment=${setup}/${config_file##*/} $adhoc_args"
+        cmd+=" task_name=$task_name"
+        cmd+=" tags=[\\\"$setup\\\",\\\"$dataset_code\\\",\\\"$model_var\\\"]"
         [ -n "$num_classes" ] && cmd+=" data.num_classes=$num_classes"
         [ -n "$extra_args" ] && cmd+=" $extra_args"
-        cmds+=("$cmd")
+        # Generate commands with multiple seeds
+        for seed in "${seed_array[@]}"; do
+            cmds+=("${cmd} seed=$seed")
+        done
     done
     printf '%s\n' "${cmds[@]}"
 }
@@ -232,7 +285,7 @@ run_experiment() {
             }
             ;;
     esac
-    IFS=$'\n' read -r -a cmds <<< "$cmd_list"
+    mapfile -t cmds <<< "$cmd_list"
     log "Run: $model_var on $recipe_code"
     echo "RUN: $model_var on $recipe_code" >> "$summary_log"
     for cmd in "${cmds[@]}"; do
@@ -262,6 +315,18 @@ run_experiment() {
 models=$(generate_list "$model" model_configs)
 recipes=$(generate_list "$recipe" recipe_configs)
 read -ra datasets <<< "$(generate_list "$data" dataset_configs)"
+# generate seeds
+# if seedlist is provided use it to generate seedlist 
+# else generate using a sequence from 1 to nseeds
+if [ -n "$seedlist" ]; then
+    IFS=',' read -ra seed_array <<< "$seedlist"
+    nseeds=${#seed_array[@]}
+else
+    seed_array=()
+    for seed in $(seq 1 "$nseeds"); do
+        seed_array+=("$seed")
+    done
+fi
 
 log "Models: $models"
 log "Recipes: $recipes"

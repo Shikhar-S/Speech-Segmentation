@@ -118,9 +118,11 @@ class SpeechOceanDataset(Dataset):
         )
 
         return {
+            "audio_path": audio_path,
             "speech": wav,
             "speech_length": wav.shape[0],
             "target": target,
+            "lang_sym": "<eng>",  # for powsm
             "speaker_id": str(row["speaker_id"]),
             "utt_id": str(row["utt_id"]),
             "split": row["split"],

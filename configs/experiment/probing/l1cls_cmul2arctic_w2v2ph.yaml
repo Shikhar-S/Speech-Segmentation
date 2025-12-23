@@ -13,7 +13,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "l1cls_cmul2arctic_w2v2ph"
-tags: ["cmu_l2arctic", "w2v2ph", "l1cls"]
+tags: ["cmul2arctic", "w2v2ph", "l1cls"]
 
 seed: 42
 
@@ -26,11 +26,20 @@ trainer:
     - learning_rate_monitor
 
 model:
+  head:
+    task_type: "classification"
   freeze_encoder: true
   optimizer:
     lr: 0.0002
   scheduler:
-    total_iters: 500
+    total_iters: 200
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/f1"
+    mode: "max"
+    save_top_k: 1
+
 
 data:
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
@@ -39,3 +48,4 @@ logger:
   wandb:
     tags: ${tags}
     group: "l1cls_cmul2arctic_w2v2ph"
+    name: ${task_name}

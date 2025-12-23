@@ -20,6 +20,9 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from src.model.heads.base_head import BaseHead, TaskType
+from src.utils.pylogger import RankedLogger
+
+log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class PoolingType(str, Enum):
@@ -101,7 +104,9 @@ class AttentionPooling(nn.Module):
 
         # Create mask for valid positions
         # Reference: PyTorch sequence masking pattern
-        mask = torch.arange(max_len, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
+        mask = torch.arange(max_len, device=x.device).unsqueeze(0) < lengths.unsqueeze(
+            1
+        )
 
         # Apply mask (set invalid positions to -inf before softmax)
         scores = scores.masked_fill(~mask, float("-inf"))
@@ -159,6 +164,18 @@ class RNNHead(BaseHead):
         """
         # Convert string task_type to enum
         task_type_enum = TaskType(task_type)
+        if task_type_enum == TaskType.ORDINAL_REGRESSION:
+            log.info(
+                f"Using ORDINAL_REGRESSION task type: adjusting output_dim to {output_dim - 1}"
+            )
+            output_dim = output_dim - 1  # Adjust output dim for ordinal regression
+        elif task_type_enum == TaskType.REGRESSION:
+            log.info(f"Using REGRESSION task type: setting output_dim to 1")
+            output_dim = 1  # For standard regression, output dim is 1
+        elif task_type_enum == TaskType.GEOLOCATION:
+            log.info(f"Using GEOLOCATION task type: setting output_dim to 3")
+            output_dim = 3  # For geolocation, output dim is 3 (3D coordinates)
+
         super().__init__(task_type=task_type_enum, output_dim=output_dim)
 
         self.input_dim = input_dim
@@ -196,10 +213,8 @@ class RNNHead(BaseHead):
 
         # Classifier/regressor
         self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(rnn_output_dim, output_dim)
-
-        # Optional layer norm before classifier (improves stability)
         self.layer_norm = nn.LayerNorm(rnn_output_dim)
+        self.classifier = nn.Linear(rnn_output_dim, output_dim)
 
     def _pool_last(
         self,
@@ -257,7 +272,9 @@ class RNNHead(BaseHead):
         batch_size, max_len, hidden_dim = rnn_out.shape
 
         # Create mask for valid positions
-        mask = torch.arange(max_len, device=rnn_out.device).unsqueeze(0) < lengths.unsqueeze(1)
+        mask = torch.arange(max_len, device=rnn_out.device).unsqueeze(
+            0
+        ) < lengths.unsqueeze(1)
         mask = mask.unsqueeze(-1).expand_as(rnn_out)
 
         # Zero out invalid positions and compute mean

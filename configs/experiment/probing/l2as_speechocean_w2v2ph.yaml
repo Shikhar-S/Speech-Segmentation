@@ -13,7 +13,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "l2as_speechocean_w2v2ph"
-tags: ["speechocean", "w2v2ph", "l2as"]
+tags: ["speechocean", "w2v2ph", "l2as", "regression"]
 
 seed: 42
 
@@ -26,14 +26,26 @@ trainer:
     - learning_rate_monitor
 
 model:
+  head:
+    task_type: "regression"
   freeze_encoder: true
   optimizer:
     lr: 0.0002
+  scheduler:
+    total_iters: 200
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/pcc"
+    mode: "max"
+    save_top_k: 1
 
 data:
+  target_key: total
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
 
 logger:
   wandb:
     tags: ${tags}
     group: "l2as_speechocean_w2v2ph"
+    name: ${task_name}
