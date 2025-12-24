@@ -24,7 +24,10 @@ pre-commit      # hooks for applying linters on commit
 rich            # beautiful text formatting in terminal
 pytest          # tests
 # sh            # for running bash commands in some tests (linux/macos only)
-espnet==202509
+
+# espnet==202509
+git+https://github.com/Shikhar-S/espnet.git@flashattn
+
 huggingface_hub==0.35.3
 datasets==4.4.1
 pyarrow==22.0.0
@@ -50,3 +53,4 @@ seaborn
 #easycall
 ipatok==0.1.0
 epitran==1.34.0
+tensorboard

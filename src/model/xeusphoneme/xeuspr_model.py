@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 import argparse
 import yaml
+import json
 
 import torch
 from espnet2.torch_utils.device_funcs import force_gatherable
-from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
+from espnet2.legacy.nets.pytorch_backend.nets_utils import make_pad_mask
 
 from src.model.powsm.ctc import CTC
 from src.model.powsm.specaug import SpecAug
@@ -89,6 +90,7 @@ class XeusPRModel(torch.nn.Module):
         loss, stats, weight = force_gatherable(
             (loss_ctc, stats, speech.shape[0]), loss_ctc.device
         )
+        # loss = loss / weight  # normalize by batch size
         return {"loss": loss, "stats": stats, "weight": weight}
 
     def _extract_feats(
@@ -132,14 +134,14 @@ class XeusPRModel(torch.nn.Module):
 
     def ctc_collapse_batch(self, x: torch.Tensor, max_length: int, pad: int = -1):
         B, T = x.shape
-        if T > max_length:
-            x = x[:, :max_length]
-        elif T < max_length:
-            pad_tensor = torch.full(
-                (B, max_length - T), pad, device=x.device, dtype=x.dtype
-            )
-            x = torch.cat([x, pad_tensor], dim=1)
-        T = max_length
+        # if T > max_length:
+        #     x = x[:, :max_length]
+        # elif T < max_length:
+        #     pad_tensor = torch.full(
+        #         (B, max_length - T), pad, device=x.device, dtype=x.dtype
+        #     )
+        #     x = torch.cat([x, pad_tensor], dim=1)
+        # T = max_length
         blank = self.blank_id
         x_prev = torch.cat(
             [torch.full((B, 1), blank, device=x.device, dtype=x.dtype), x[:, :-1]],
@@ -148,10 +150,23 @@ class XeusPRModel(torch.nn.Module):
         keep = (x != blank) & ((x_prev == blank) | (x != x_prev))
         pos = keep.long().cumsum(1) - 1
         lengths = keep.sum(1)
-        out = torch.full_like(x, pad)
+        out = torch.full((B, T), pad, device=x.device, dtype=x.dtype)
+        # Compute batch indices and output positions for kept elements
+        batch_idx = (
+            torch.arange(B, device=x.device, dtype=torch.long).unsqueeze(1).expand_as(x)
+        )
+        output_pos = pos.clone()
+        # Only use positions where keep is True
+        batch_idx_keep = batch_idx[keep]
+        output_pos_keep = output_pos[keep]
+        # Flatten the output and set values at correct positions
         flat_out = out.view(-1)
-        flat_idx = (torch.arange(B, device=x.device).unsqueeze(1) * T + pos)[keep]
+        flat_idx = batch_idx_keep * T + output_pos_keep
         flat_out[flat_idx] = x[keep]
+        out = flat_out.view(B, T)
+        ##### Trim to max_length from ground truth lengths
+        out = out[:, :max_length]
+        lengths = torch.clamp(lengths, max=max_length)
         return out, lengths
 
     def _calc_ctc_loss(
@@ -170,7 +185,7 @@ class XeusPRModel(torch.nn.Module):
         with torch.no_grad():
             ys_hat = self.ctc.ctc_lo(encoder_out).argmax(dim=-1)
             ys_hat = self.ctc_collapse_batch(
-                ys_hat, max_length=ys_pad.shape[1], pad=self.ignore_id
+                ys_hat.detach(), max_length=ys_pad.shape[1], pad=self.ignore_id
             )[0]
             acc = (
                 ys_hat.eq(ys_pad)
@@ -207,19 +222,27 @@ class XeusPRModel(torch.nn.Module):
         return trainable_params
 
 
-def build_xeus_pr(config_file: str, checkpoint: Optional[str] = None) -> XeusPRModel:
+def build_xeus_pr(
+    config_file: str, checkpoint: Optional[str] = None, vocab_file: Optional[str] = None
+) -> XeusPRModel:
     """Build Xeus PR model from config and optional checkpoint.
 
     Args:
         config_file: Path to config yaml file
         checkpoint: Path to model checkpoint (pretrained or fully trained)
+        vocab_file: Path to vocabulary file. If None, use vocab in config.
 
     Returns:
         XeusPRModel
     """
     with open(config_file, "r", encoding="utf-8") as f:
         args = argparse.Namespace(**yaml.safe_load(f))
-    if isinstance(args.token_list, str):
+    if vocab_file is not None:
+        with open(vocab_file) as f:
+            tok2id = json.load(f)
+            id2tok = {v: k for k, v in tok2id.items()}
+            token_list = [id2tok[i] for i in range(len(id2tok))]
+    elif isinstance(args.token_list, str):
         with open(args.token_list, encoding="utf-8") as f:
             token_list = [line.rstrip() for line in f]
     else:
@@ -284,6 +307,7 @@ def build_xeus_pr_from_hf(
     force: bool = False,
     config_file: Optional[str] = None,
     checkpoint: Optional[str] = None,
+    vocab_file: Optional[str] = None,
 ) -> XeusPRModel:
     """Build Xeus PR model from local files or HuggingFace repo.
 
@@ -296,6 +320,7 @@ def build_xeus_pr_from_hf(
             Takes precedence over hf_repo download.
         checkpoint: Path to checkpoint file. If None, use default path in work_dir.
             Takes precedence over hf_repo download.
+        vocab_file: Path to vocabulary file. If None, use path in config.
 
     Returns:
         XeusPRModel
@@ -325,7 +350,7 @@ def build_xeus_pr_from_hf(
     log.info(f"Building model from config: {cfg}")
     log.info(f"Loading checkpoint: {ckpt}")
 
-    return build_xeus_pr(config_file=cfg, checkpoint=ckpt)
+    return build_xeus_pr(config_file=cfg, checkpoint=ckpt, vocab_file=vocab_file)
 
 
 if __name__ == "__main__":

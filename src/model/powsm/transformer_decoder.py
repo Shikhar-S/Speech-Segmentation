@@ -8,17 +8,19 @@ from typing import Any, List, Tuple
 import torch
 from typeguard import typechecked
 
-from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
-from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
-from espnet.nets.pytorch_backend.transformer.decoder_layer import DecoderLayer
-from espnet.nets.pytorch_backend.transformer.embedding import PositionalEncoding
-from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
-from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
-from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import (
+from espnet2.legacy.nets.pytorch_backend.nets_utils import make_pad_mask
+from espnet2.legacy.nets.pytorch_backend.transformer.attention import (
+    MultiHeadedAttention,
+)
+from espnet2.legacy.nets.pytorch_backend.transformer.decoder_layer import DecoderLayer
+from espnet2.legacy.nets.pytorch_backend.transformer.embedding import PositionalEncoding
+from espnet2.legacy.nets.pytorch_backend.transformer.layer_norm import LayerNorm
+from espnet2.legacy.nets.pytorch_backend.transformer.mask import subsequent_mask
+from espnet2.legacy.nets.pytorch_backend.transformer.positionwise_feed_forward import (
     PositionwiseFeedForward,
 )
-from espnet.nets.pytorch_backend.transformer.repeat import repeat
-from espnet.nets.scorer_interface import (
+from espnet2.legacy.nets.pytorch_backend.transformer.repeat import repeat
+from espnet2.legacy.nets.scorer_interface import (
     BatchScorerInterface,
     MaskParallelScorerInterface,
 )
@@ -416,7 +418,7 @@ class TransformerDecoder(BaseTransformerDecoder):
                 )
 
                 use_flash_attn = is_flash_attn_supported()
-                import flash_attn  # noqa
+                import flash_attn_interface  # noqa
             except Exception:
                 use_flash_attn = False
 

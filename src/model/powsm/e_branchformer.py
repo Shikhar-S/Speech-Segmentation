@@ -20,25 +20,25 @@ from src.model.powsm.ctc import CTC
 from src.model.powsm.layers.fastformer import FastSelfAttention
 from src.model.powsm.layers.cgmlp import ConvolutionalGatingMLP
 
-from espnet.nets.pytorch_backend.nets_utils import get_activation, make_pad_mask
-from espnet.nets.pytorch_backend.transformer.attention import (  # noqa: H301
+from espnet2.legacy.nets.pytorch_backend.nets_utils import get_activation, make_pad_mask
+from espnet2.legacy.nets.pytorch_backend.transformer.attention import (  # noqa: H301
     LegacyRelPositionMultiHeadedAttention,
     MultiHeadedAttention,
     RelPositionMultiHeadedAttention,
 )
-from espnet.nets.pytorch_backend.transformer.embedding import (  # noqa: H301
+from espnet2.legacy.nets.pytorch_backend.transformer.embedding import (  # noqa: H301
     ConvolutionalPositionalEmbedding,
     LegacyRelPositionalEncoding,
     PositionalEncoding,
     RelPositionalEncoding,
     ScaledPositionalEncoding,
 )
-from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
-from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import (
+from espnet2.legacy.nets.pytorch_backend.transformer.layer_norm import LayerNorm
+from espnet2.legacy.nets.pytorch_backend.transformer.positionwise_feed_forward import (
     PositionwiseFeedForward,
 )
-from espnet.nets.pytorch_backend.transformer.repeat import repeat
-from espnet.nets.pytorch_backend.transformer.subsampling import (
+from espnet2.legacy.nets.pytorch_backend.transformer.repeat import repeat
+from espnet2.legacy.nets.pytorch_backend.transformer.subsampling import (
     Conv1dSubsampling1,
     Conv1dSubsampling2,
     Conv1dSubsampling3,
@@ -358,10 +358,9 @@ class EBranchformerEncoder(torch.nn.Module):
                     )
 
                     use_flash_attn = is_flash_attn_supported()
-                    import flash_attn  # noqa
+                    import flash_attn_interface  # noqa
                 except Exception:
                     use_flash_attn = False
-
             encoder_selfattn_layer = MultiHeadedAttention
             encoder_selfattn_layer_args = (
                 attention_heads,

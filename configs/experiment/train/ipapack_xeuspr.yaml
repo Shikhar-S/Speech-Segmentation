@@ -1,0 +1,53 @@
+# @package _global_
+
+# export HF_HOME="exp/cache/hf"
+# python src/main.py experiment=train/ipapack_xeuspr
+
+defaults:
+  - override /data: null # defined below
+  - override /model: phone_recognition
+  - override /model/net: xeuspr
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: train_ipapack_xeuspr
+tags: ["ipapack", "xeuspr", "phone_recognition"]
+
+seed: 42
+
+trainer:
+  devices: -1  # use all available GPUs
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 5
+  max_epochs: 10
+  gradient_clip_val: 1.0
+  val_check_interval: 10000  # validate every 10000 training steps
+
+data:
+  _target_: src.data.kaldi_dataset.build_kaldi_datamodule
+  dataset_name: pr_fixed
+  dataset_config_path: configs/data/ipapack_index.yaml
+  vocab_file: ${model.net.vocab_file}
+  batch_size: 8
+  num_workers: 5
+
+model:
+  freeze_encoder: false
+  optimizer:
+    lr: 0.00005
+
+callbacks:
+  model_checkpoint:
+    monitor: "epoch"
+    mode: "max"
+    save_top_k: 10
+    save_last: True
+    every_n_epochs: 1
+  early_stopping: null  # disable early stopping
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}
+    project: "PhoneBench"

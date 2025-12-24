@@ -2,27 +2,43 @@
 #SBATCH -A bbjs-dtai-gh
 #SBATCH -p ghx4
 #SBATCH -J main
-#SBATCH -N 1
-#SBATCH --gpus-per-node=1
-#SBATCH -c 72
-#SBATCH --mem=120G
+#SBATCH -N 1                       # Default to 1, override via CLI
+#SBATCH --ntasks-per-node=4        # Matches number of GPUs per node
+#SBATCH --gpus-per-node=4          
+#SBATCH -c 72                      # 288 CPUs / 4 tasks = 72 CPUs per task
+#SBATCH --mem=480G                 # Slurm treats this as memory per node
 #SBATCH -t 48:00:00
 #SBATCH -o exp/slurm_logs/%j.out
 #SBATCH -e exp/slurm_logs/%j.out
 
 # === Directory Setup ===
-cd /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
 mkdir -p "exp/slurm_logs"
+
 # === Environment setup ===
 source ~/.bashrc
 conda deactivate
 source setup_uv.sh .venv_dai requirements-dai.txt
-# for w2v2ph these must be pre-built
-export HF_HOME="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/hf"
+# if [[ "$SLURM_PROCID" == "0" ]]; then
+#   source setup_uv.sh .venv_dai requirements-dai.txt
+# fi
+# # srun --wait=0 true
+echo "Environment setup complete."
+
+export HF_HOME="/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf"
 export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
-###########################
-###########################
-python src/main.py "$@"
-###########################
-###########################
+
+export NCCL_DEBUG=INFO
+export PYTHONFAULTHANDLER=1
+export HYDRA_FULL_ERROR=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+echo "Running on $SLURM_JOB_NUM_NODES nodes with $SLURM_GPUS_ON_NODE GPUs per node. Tasks= $SLURM_NTASKS"
+
+srun python src/main.py \
+    experiment=train/ipapack_xeuspr \
+    data.batch_size=16 \
+    data.num_workers=12 \
+    trainer.num_nodes=${SLURM_JOB_NUM_NODES} \
+    trainer.devices=-1 "$@"

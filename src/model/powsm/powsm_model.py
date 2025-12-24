@@ -9,9 +9,9 @@ from torch.cuda.amp import autocast
 from typeguard import typechecked
 import argparse
 
-from espnet.nets.e2e_asr_common import ErrorCalculator
-from espnet.nets.pytorch_backend.nets_utils import pad_list, th_accuracy
-from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (
+from espnet2.legacy.nets.e2e_asr_common import ErrorCalculator
+from espnet2.legacy.nets.pytorch_backend.nets_utils import pad_list, th_accuracy
+from espnet2.legacy.nets.pytorch_backend.transformer.label_smoothing_loss import (
     LabelSmoothingLoss,
 )
 from src.model.powsm.ctc import CTC

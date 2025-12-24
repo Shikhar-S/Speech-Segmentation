@@ -11,11 +11,11 @@ import torch
 import torch.nn.functional as F
 from typeguard import typechecked
 
-from espnet.nets.beam_search import Hypothesis
-from espnet.nets.batch_beam_search import BatchBeamSearch
-from espnet.nets.scorer_interface import BatchScorerInterface
-from espnet.nets.scorers.ctc import CTCPrefixScorer
-from espnet.nets.scorers.length_bonus import LengthBonus
+from espnet2.legacy.nets.beam_search import Hypothesis
+from espnet2.legacy.nets.batch_beam_search import BatchBeamSearch
+from espnet2.legacy.nets.scorer_interface import BatchScorerInterface
+from espnet2.legacy.nets.scorers.ctc import CTCPrefixScorer
+from espnet2.legacy.nets.scorers.length_bonus import LengthBonus
 
 from src.utils import RankedLogger
 from src.model.sentencepieces_tokenizer import SentencepiecesTokenizer
