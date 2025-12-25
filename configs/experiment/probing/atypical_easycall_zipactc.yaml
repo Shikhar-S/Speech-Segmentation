@@ -39,9 +39,14 @@ data:
 
 callbacks:
   model_checkpoint:
-    monitor: "val/pcc"
+    monitor: "val/kendalltau"
     mode: "max"
     save_top_k: 1
+  early_stopping:
+    monitor: "val/kendalltau"
+    patience: 5
+    mode: "max"
+
 
 logger:
   wandb:
