@@ -1,0 +1,10 @@
+_target_: src.data.edacc.l1_classification.EdAccL1Classification
+hf_repo: shikhar7ssu/edacc-l1cls
+cache_dir: ${paths.cache_dir}/edacc
+target_sr: 16000
+batch_size: 32 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+num_workers: 10
+val_split_ratio: 0.2
+num_classes: 13 # Number of accent clusters from 41 L1s
+pin_memory: False
+max_duration_sec: 20 # Optional: maximum audio duration in seconds for truncation

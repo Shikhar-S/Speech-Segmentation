@@ -2,8 +2,8 @@
 #SBATCH -p preempt
 #SBATCH -J main
 #SBATCH -N 1
-#SBATCH --gpus-per-node=1
-#SBATCH -c 20
+#SBATCH --gres=gpu:1
+#SBATCH -c 14
 #SBATCH --mem=40G
 #SBATCH -t 20:00:00
 #SBATCH -o exp/slurm_logs/%j.out
@@ -13,14 +13,17 @@
 cd /data/user_data/sbharad2/PhoneBench
 mkdir -p "exp/slurm_logs"
 # === Environment setup ===
-source ~/.zshrc
-conda deactivate
 source setup_uv.sh .venv
 # for w2v2ph these must be pre-built
+export HYDRA_FULL_ERROR=1
 export HF_HOME="/data/group_data/wavlab_icme25/PhoneBench/exp/cache/hf"
 export PHONEMIZER_ESPEAK_LIBRARY="/data/group_data/wavlab_icme25/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/data/group_data/wavlab_icme25/espeak-ng/espeak-ng-data"
 ###########################
+echo "RUNNING ON NODE: $(hostname)"
+echo "START TIME: $(date)"
+echo "SLURM_JOB_ID: $SLURM_JOB_ID"
+nvidia-smi
 ###########################
 python src/main.py "$@"
 ###########################

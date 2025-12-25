@@ -1,0 +1,54 @@
+# @package _global_
+
+# L1 Classification experiment with POWSM encoder
+# To execute this experiment run:
+# python src/main.py experiment=probing/l1cls_edacc_powsm
+
+defaults:
+  - override /data: edacc
+  - override /model: classification
+  - override /model/head: attnmlp
+  - override /model/net: powsm
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "l1cls_edacc_powsm"
+tags: ["powsm", "l1cls", "edacc_accent13"]
+
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 50
+  gradient_clip_val: 1.0
+  val_check_interval: 0.25  # validate 4 times per epoch
+
+model:
+  head:
+    task_type: "classification"
+  freeze_encoder: true
+  optimizer:
+    lr: 0.0002
+  scheduler:
+    total_iters: 200
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/f1"
+    mode: "max"
+    save_top_k: 1
+  early_stopping:
+    monitor: "val/f1"
+    patience: 5
+    mode: "max"
+
+
+data:
+  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}
+    name: ${task_name}

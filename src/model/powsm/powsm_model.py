@@ -1,13 +1,9 @@
 from pathlib import Path
-from src.core.utils import download_hf_snapshot
 
 from typing import Dict, List, Optional, Tuple, Union, Any
-import yaml
 import torch
 import torchaudio
-from torch.cuda.amp import autocast
 from typeguard import typechecked
-import argparse
 
 from espnet.nets.e2e_asr_common import ErrorCalculator
 from espnet.nets.pytorch_backend.nets_utils import pad_list, th_accuracy
@@ -16,10 +12,20 @@ from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (
 )
 from src.model.powsm.ctc import CTC
 from src.model.powsm.utils import force_gatherable
-from src.model.powsm.frontend import DefaultFrontend, GlobalMVN
-from src.model.powsm.specaug import SpecAug
 from src.model.powsm.e_branchformer import EBranchformerEncoder
 from src.model.powsm.transformer_decoder import TransformerDecoder
+from src.model.powsm.builders_common import (
+    load_token_list,
+    load_config,
+    build_frontend,
+    build_specaug,
+    build_normalize,
+    build_ctc,
+    resolve_model_paths,
+    POWSM_REL_CONFIG,
+    POWSM_REL_CKPT,
+    POWSM_REL_STATS,
+)
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=False)
@@ -508,36 +514,32 @@ def build_powsm_from_files(
     model_file: str,
     stats_file: str,
 ) -> PowsmModel:
-    with open(config_file, "r", encoding="utf-8") as f:
-        args = yaml.safe_load(f)
-    args = argparse.Namespace(**args)
-    args.normalize_conf["stats_file"] = stats_file  # pass absolute path to stats file
+    """Build PowsmModel from config, model, and stats files.
 
-    if isinstance(args.token_list, str):
-        with open(args.token_list, encoding="utf-8") as f:
-            token_list = [line.rstrip() for line in f]
-        args.token_list = list(token_list)
-    elif isinstance(args.token_list, (tuple, list)):
-        token_list = list(args.token_list)
-    else:
-        raise RuntimeError("token_list must be str or list")
+    Args:
+        config_file: Path to YAML configuration file.
+        model_file: Path to model checkpoint file.
+        stats_file: Path to feature statistics file.
 
+    Returns:
+        PowsmModel instance with loaded weights.
+    """
+    args = load_config(config_file)
+
+    # Load token list
+    token_list = load_token_list(args.token_list)
+    args.token_list = token_list
     vocab_size = len(token_list)
     log.info(f"Vocabulary size: {vocab_size}")
 
     # 1. frontend
-    assert args.input_size is None, "Set frontend in the powsm config."
-    assert args.frontend == "default", "Only default frontend is supported!"
-    frontend = DefaultFrontend(**args.frontend_conf)
-    input_size = frontend.output_size()
+    frontend, input_size = build_frontend(args)
 
     # 2. Data augmentation for spectrogram
-    assert args.specaug == "specaug", "Only SpecAug is supported!"
-    specaug = SpecAug(**args.specaug_conf)
+    specaug = build_specaug(args)
 
     # 3. Normalization layer
-    assert args.normalize == "global_mvn", "Only GlobalMVN is supported!"
-    normalize = GlobalMVN(**args.normalize_conf)
+    normalize = build_normalize(args, stats_file)
 
     # 4. Encoder
     assert args.encoder == "e_branchformer", "Only Branchformer is supported!"
@@ -553,7 +555,7 @@ def build_powsm_from_files(
     )
 
     # 6. CTC
-    ctc = CTC(odim=vocab_size, encoder_output_size=encoder_output_size, **args.ctc_conf)
+    ctc = build_ctc(vocab_size, encoder_output_size, args.ctc_conf)
 
     # 7. Build model
     model = PowsmModel(
@@ -598,28 +600,20 @@ def build_powsm(
           Takes precedence over hf_repo.
         stats_file: Path to stats file. If None, use default path in hf repo.
           Takes precedence over hf_repo.
-    Returns: PowsmModel
+
+    Returns:
+        PowsmModel instance.
     """
-    # Relative paths from hf repo structure (espnet style)
-    # TODO(shikhar): Convert to patterns and match patterns within downloaded files.
-    REL_CONFIG = "exp/s2t_train_s2t_ebf_conv2d_size768_e9_d9_piecewise_lr5e-4_warmup60k_flashattn_raw_bpe40000/config.yaml"
-    REL_CKPT = "exp/s2t_train_s2t_ebf_conv2d_size768_e9_d9_piecewise_lr5e-4_warmup60k_flashattn_raw_bpe40000/valid.acc.ave_5best.till45epoch.pth"
-    REL_STATS = "exp/s2t_stats_raw_bpe40000/train/feats_stats.npz"
-
-    if hf_repo:
-        download_hf_snapshot(
-            repo_id=hf_repo,
-            force_download=force,
-            work_dir=work_dir,
-        )
-
-    root = Path(work_dir)
-    cfg = config_file or str(root / REL_CONFIG)
-    mdl = model_file or str(root / REL_CKPT)
-    stats = stats_file or str(root / REL_STATS)
-    # assert files exist
-    assert Path(cfg).exists(), f"Config file not found: {cfg}"
-    assert Path(mdl).exists(), f"Model file not found: {mdl}"
-    assert Path(stats).exists(), f"Stats file not found: {stats}"
+    cfg, mdl, stats = resolve_model_paths(
+        work_dir=work_dir,
+        hf_repo=hf_repo,
+        force_download=force,
+        config_file=config_file,
+        model_file=model_file,
+        stats_file=stats_file,
+        rel_config=POWSM_REL_CONFIG,
+        rel_ckpt=POWSM_REL_CKPT,
+        rel_stats=POWSM_REL_STATS,
+    )
 
     return build_powsm_from_files(cfg, mdl, stats)
