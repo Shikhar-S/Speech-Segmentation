@@ -22,7 +22,8 @@ def _resample_and_markshort(example):
 
     audio = example["audio"]
     # Load from bytes to avoid backend-specific decoding issues
-    wav, _ = torchaudio.load(io.BytesIO(example["audio"]["bytes"]))
+    wav, sr = torchaudio.load(io.BytesIO(example["audio"]["bytes"]))
+    assert sr == 32000, "Expected original sample rate of 32000 Hz"
 
     # Standardize to mono if necessary
     if wav.shape[0] > 1:
@@ -49,7 +50,7 @@ def load_edacc_data(hf_repo: str, split: str, cache_dir: Optional[str] = None):
     return ds
 
 
-class EDACCDataset(Dataset):
+class EdAccDataset(Dataset):
     def __init__(
         self,
         hf_ds,
@@ -70,14 +71,14 @@ class EDACCDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.hf_ds[idx]
         speaker = str(sample["speaker"]).strip()
-        utt_id = f"{speaker}_{idx}"
+        utt_id = f"{speaker}_{self.split}_{idx}"
 
         # Target: Native Language (L1) classification
         l1_str = sample["l1"]
         label = self.l1_to_idx.get(l1_str, -1)
 
         waveform, sr = torchaudio.load(io.BytesIO(sample["audio"]["bytes"]))
-        if self.max_duration_sec is not None:
+        if self.max_duration_sec:
             max_samples = int(self.max_duration_sec * sr)
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
@@ -88,6 +89,7 @@ class EDACCDataset(Dataset):
             "speech_length": waveform.shape[1],
             "lang_sym": "<eng>",  # Hardcoded for POWSM
             "target": label,
+            "split": self.split,
             "speaker_id": speaker,
         }
 
@@ -114,16 +116,18 @@ def collate_fn(batch):
     }
 
 
-class EDACCDataModule(L.LightningDataModule):
+class EdAccL1Classification(L.LightningDataModule):
     def __init__(
         self,
         hf_repo: str = "edinburghcstr/edacc",
         cache_dir: str = "exp/cache/edacc",
         target_sr: int = 16000,
-        val_split_ratio: float = 0.1,  # 10% of HF validation split for dev
+        val_split_ratio: float = 0.2,  # 20% of HF validation split for dev
         batch_size: int = 32,
         num_workers: int = 4,
         seed: int = 42,
+        num_classes: int = 41,
+        pin_memory: bool = False,
         max_duration_sec: Optional[float] = None,
     ):
         super().__init__()
@@ -135,6 +139,8 @@ class EDACCDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.seed = seed
         self.max_duration_sec = max_duration_sec
+        self.pin_memory = pin_memory
+        self.num_classes = num_classes
 
         self.l1_to_idx = {}
         self.train_dataset = None
@@ -154,7 +160,9 @@ class EDACCDataModule(L.LightningDataModule):
         # Build consistent label mapping from all seen L1s
         all_l1s = sorted(list(set(full_val_ds["l1"]) | set(test_ds["l1"])))
         self.l1_to_idx = {l1: i for i, l1 in enumerate(all_l1s)}
-        self.num_classes = len(self.l1_to_idx)
+        assert self.num_classes == len(
+            self.l1_to_idx
+        ), f"Expected {self.num_classes} classes, but found {len(self.l1_to_idx)}"
         print(f"EDACC: Mapped {self.num_classes} L1 target classes.")
 
         # Split HF 'validation' into internal 'train' and 'dev' sets
@@ -162,19 +170,19 @@ class EDACCDataModule(L.LightningDataModule):
             test_size=self.val_split_ratio, seed=self.seed
         )
 
-        self.train_dataset = EDACCDataset(
+        self.train_dataset = EdAccDataset(
             split_ds["train"],
             self.l1_to_idx,
             "train",
             max_duration_sec=self.max_duration_sec,
         )
-        self.val_dataset = EDACCDataset(
+        self.val_dataset = EdAccDataset(
             split_ds["test"],
             self.l1_to_idx,
             "val",
             max_duration_sec=self.max_duration_sec,
         )
-        self.test_dataset = EDACCDataset(
+        self.test_dataset = EdAccDataset(
             test_ds, self.l1_to_idx, "test", max_duration_sec=self.max_duration_sec
         )
 
@@ -184,7 +192,7 @@ class EDACCDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=shuffle,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             collate_fn=collate_fn,
         )
 
@@ -200,9 +208,12 @@ class EDACCDataModule(L.LightningDataModule):
 
 if __name__ == "__main__":
     # python -m src.data.edacc.l1_classification
-    dm = EDACCDataModule(batch_size=2, num_workers=0, max_duration_sec=20)
+    dm = EdAccL1Classification(batch_size=2, num_workers=0, max_duration_sec=20)
     dm.prepare_data()
     dm.setup()
+    print(len(dm.train_dataloader()))
+    print(len(dm.val_dataloader()))
+    print(len(dm.test_dataloader()))
 
     for batch in dm.train_dataloader():
         print(batch)
