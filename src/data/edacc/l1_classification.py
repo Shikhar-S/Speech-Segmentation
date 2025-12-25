@@ -54,6 +54,7 @@ class EdAccDataset(Dataset):
             "utt_id": utt_id,
             "speech": waveform.squeeze(0),  # (T,)
             "speech_length": waveform.shape[1],
+            "metadata_idx": idx,
             "lang_sym": "<eng>",  # Hardcoded for POWSM
             "target": label,
             "split": self.split,
@@ -181,6 +182,11 @@ class EdAccL1Classification(L.LightningDataModule):
 
     def test_dataloader(self):
         return self._dl(self.test_dataset)
+
+    def predict_dataloader(self):
+        return self._dl(
+            ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset])
+        )
 
 
 if __name__ == "__main__":

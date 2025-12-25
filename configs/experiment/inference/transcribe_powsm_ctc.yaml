@@ -20,7 +20,7 @@ distributed_predict: True
 
 inference:
   num_workers: 10
-  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx", "lang_sym"]
   out_file: ${paths.output_dir}/transcription.json
   
   # CTC inference runner
