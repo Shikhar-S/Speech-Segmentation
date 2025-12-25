@@ -14,13 +14,13 @@ defaults:
   - override /logger: wandb
 
 task_name: "l1cls_edacc_powsm"
-tags: ["edacc", "powsm", "l1cls"]
+tags: ["powsm", "l1cls", "edacc_accent13"]
 
 seed: 42
 
 trainer:
   min_epochs: 10
-  max_epochs: 25
+  max_epochs: 50
   gradient_clip_val: 1.0
   val_check_interval: 0.25  # validate 4 times per epoch
 
@@ -38,6 +38,11 @@ callbacks:
     monitor: "val/f1"
     mode: "max"
     save_top_k: 1
+  early_stopping:
+    monitor: "val/f1"
+    patience: 5
+    mode: "max"
+
 
 data:
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)

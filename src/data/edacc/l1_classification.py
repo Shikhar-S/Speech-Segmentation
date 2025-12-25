@@ -11,42 +11,9 @@ from src.utils.pylogger import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-def _keep_not_too_short(example):
-    return not example["too_short"]
-
-
-def _resample_and_markshort(example):
-    """Resamples from EDACC's native 32kHz to 16kHz and marks short clips."""
-    resampler = torchaudio.transforms.Resample(32000, 16000)
-    MIN_LENGTH = 8000  # 0.5 second at 16kHz
-
-    audio = example["audio"]
-    # Load from bytes to avoid backend-specific decoding issues
-    wav, sr = torchaudio.load(io.BytesIO(example["audio"]["bytes"]))
-    assert sr == 32000, "Expected original sample rate of 32000 Hz"
-
-    # Standardize to mono if necessary
-    if wav.shape[0] > 1:
-        wav = wav.mean(dim=0, keepdim=True)
-
-    wav = resampler(wav)
-
-    buf = io.BytesIO()
-    torchaudio.save(buf, wav, 16000, format="wav")
-
-    audio["bytes"] = buf.getvalue()
-    audio["sampling_rate"] = 16000
-    example["audio"] = audio
-    example["too_short"] = wav.shape[1] < MIN_LENGTH
-    return example
-
-
 def load_edacc_data(hf_repo: str, split: str, cache_dir: Optional[str] = None):
     ds = load_dataset(hf_repo, split=split, cache_dir=cache_dir)
     ds = ds.cast_column("audio", HFAudio(decode=False))
-    # Resampling occurs here and is cached by HF datasets
-    ds = ds.map(_resample_and_markshort, desc=f"Preprocessing {split}")
-    ds = ds.filter(_keep_not_too_short)
     return ds
 
 
@@ -58,12 +25,14 @@ class EdAccDataset(Dataset):
         split: str,
         target_sr: int = 16000,
         max_duration_sec: Optional[float] = None,
+        target_key: str = "accent_cluster",
     ):
         self.hf_ds = hf_ds
         self.l1_to_idx = l1_to_idx
         self.split = split
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
+        self.target_key = target_key
 
     def __len__(self):
         return len(self.hf_ds)
@@ -72,10 +41,8 @@ class EdAccDataset(Dataset):
         sample = self.hf_ds[idx]
         speaker = str(sample["speaker"]).strip()
         utt_id = f"{speaker}_{self.split}_{idx}"
-
-        # Target: Native Language (L1) classification
-        l1_str = sample["l1"]
-        label = self.l1_to_idx.get(l1_str, -1)
+        l1_str = sample[self.target_key]
+        label = self.l1_to_idx[l1_str]
 
         waveform, sr = torchaudio.load(io.BytesIO(sample["audio"]["bytes"]))
         if self.max_duration_sec:
@@ -119,7 +86,7 @@ def collate_fn(batch):
 class EdAccL1Classification(L.LightningDataModule):
     def __init__(
         self,
-        hf_repo: str = "edinburghcstr/edacc",
+        hf_repo: str = "shikhar7ssu/edacc-l1cls",
         cache_dir: str = "exp/cache/edacc",
         target_sr: int = 16000,
         val_split_ratio: float = 0.2,  # 20% of HF validation split for dev
@@ -129,6 +96,7 @@ class EdAccL1Classification(L.LightningDataModule):
         num_classes: int = 41,
         pin_memory: bool = False,
         max_duration_sec: Optional[float] = None,
+        target_key: str = "accent_cluster",
     ):
         super().__init__()
         self.hf_repo = hf_repo
@@ -141,6 +109,7 @@ class EdAccL1Classification(L.LightningDataModule):
         self.max_duration_sec = max_duration_sec
         self.pin_memory = pin_memory
         self.num_classes = num_classes
+        self.target_key = target_key
 
         self.l1_to_idx = {}
         self.train_dataset = None
@@ -154,36 +123,44 @@ class EdAccL1Classification(L.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None):
         # Load datasets
-        full_val_ds = load_edacc_data(self.hf_repo, "validation", str(self.cache_dir))
+        train_ds = load_edacc_data(self.hf_repo, "train", str(self.cache_dir))
+        val_ds = load_edacc_data(self.hf_repo, "validation", str(self.cache_dir))
         test_ds = load_edacc_data(self.hf_repo, "test", str(self.cache_dir))
 
         # Build consistent label mapping from all seen L1s
-        all_l1s = sorted(list(set(full_val_ds["l1"]) | set(test_ds["l1"])))
+        all_l1s = sorted(
+            list(
+                set(val_ds[self.target_key])
+                | set(test_ds[self.target_key])
+                | set(train_ds[self.target_key])
+            )
+        )
         self.l1_to_idx = {l1: i for i, l1 in enumerate(all_l1s)}
         assert self.num_classes == len(
             self.l1_to_idx
         ), f"Expected {self.num_classes} classes, but found {len(self.l1_to_idx)}"
         print(f"EDACC: Mapped {self.num_classes} L1 target classes.")
 
-        # Split HF 'validation' into internal 'train' and 'dev' sets
-        split_ds = full_val_ds.train_test_split(
-            test_size=self.val_split_ratio, seed=self.seed
-        )
-
         self.train_dataset = EdAccDataset(
-            split_ds["train"],
+            train_ds,
             self.l1_to_idx,
             "train",
             max_duration_sec=self.max_duration_sec,
+            target_key=self.target_key,
         )
         self.val_dataset = EdAccDataset(
-            split_ds["test"],
+            val_ds,
             self.l1_to_idx,
             "val",
             max_duration_sec=self.max_duration_sec,
+            target_key=self.target_key,
         )
         self.test_dataset = EdAccDataset(
-            test_ds, self.l1_to_idx, "test", max_duration_sec=self.max_duration_sec
+            test_ds,
+            self.l1_to_idx,
+            "test",
+            max_duration_sec=self.max_duration_sec,
+            target_key=self.target_key,
         )
 
     def _dl(self, dataset, shuffle=False):
