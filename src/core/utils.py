@@ -28,6 +28,20 @@ def download_hf_snapshot(
     Returns:
         The path to the local snapshot folder (i.e. work_dir)
     """
+    # If the caller explicitly requested a re-download, skip local-only mode.
+    if force_download:
+        logging.info(f"Force-downloading snapshot for {repo_id} into {work_dir}...")
+        path = snapshot_download(
+            repo_id=repo_id,
+            revision=revision,
+            local_dir=work_dir,
+            force_download=True,
+            local_files_only=False,
+            **kwargs,
+        )
+        logging.info(f"Downloaded snapshot for {repo_id} to {path}")
+        return path
+
     # First try local-only (no network)
     try:
         path = snapshot_download(
@@ -40,13 +54,13 @@ def download_hf_snapshot(
         logging.info(f"Using existing local snapshot for {repo_id} at {path}")
         return path
     except LocalEntryNotFoundError:
-        # Local snapshot doesn't exist — go ahead and download
+        # Local snapshot doesn't exist — allow network and download.
         logging.info(f"No local snapshot found for {repo_id}. Downloading now...")
         path = snapshot_download(
             repo_id=repo_id,
             revision=revision,
             local_dir=work_dir,
-            force_download=force_download,
+            local_files_only=False,
             **kwargs,
         )
         logging.info(f"Downloaded snapshot for {repo_id} to {path}")
