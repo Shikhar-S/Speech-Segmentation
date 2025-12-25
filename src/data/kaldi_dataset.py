@@ -6,17 +6,30 @@ import kaldiio
 from torch.utils.data import Dataset
 import lightning as L
 import yaml
+from typing import Optional, Dict, List
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
 class KaldiDataset(Dataset):
-    def __init__(self, wav_scp_file, text_file, lang_file, sampling_rate=16000):
+    def __init__(
+        self,
+        wav_scp_file,
+        text_file,
+        lang_file,
+        sampling_rate=16000,
+        vocab_file: Optional[str] = None,
+        ignore_id: int = -1,
+    ):
         self.sampling_rate = sampling_rate
+        self.ignore_id = ignore_id
         self.wav_scp = self._load_wav_scp(wav_scp_file)
         self.text = self._load_text(text_file)
         self.key2lang = self._extract_language(lang_file)
+
+        # Load vocabulary for tokenization
+        self.vocab = self._load_vocab(vocab_file) if vocab_file else None
 
         assert set(self.wav_scp.keys()).issubset(
             set(self.text.keys())
@@ -28,7 +41,10 @@ class KaldiDataset(Dataset):
         log.info(
             f"Loaded dataset: {len(self.key2lang)} lang keys, {len(self.keys)} samples"
         )
-        log.info(f"Number of unique languages: {len(set(self.key2lang.values()))}")
+        if vocab_file:
+            log.info(
+                f"Loaded vocabulary with {len(self.vocab)} tokens from {vocab_file}"
+            )
 
     def _load_wav_scp(self, path):
         wav_scp = {}
@@ -65,6 +81,44 @@ class KaldiDataset(Dataset):
                 key2lang[key] = tag.split("><")[0][1:].strip()
         return key2lang
 
+    def _load_vocab(self, vocab_file: str) -> Dict[str, int]:
+        """Load vocabulary mapping from file.
+
+        Args:
+            vocab_file: Path to vocabulary file. Each line should contain a token.
+
+        Returns:
+            Dictionary mapping token string to token ID.
+        """
+        vocab = {}
+        with open(vocab_file) as f:
+            for idx, line in enumerate(f):
+                token = line.rstrip("\n")
+                vocab[token] = idx
+        return vocab
+
+    def _tokenize_text(self, text: str) -> List[int]:
+        """Tokenize text into token IDs using loaded vocabulary.
+
+        Args:
+            text: Text string (typically phonetic transcription).
+
+        Returns:
+            List of token IDs. Unknown tokens are replaced with ignore_id.
+        """
+        if self.vocab is None:
+            raise ValueError("Vocabulary not loaded. Provide vocab_file parameter.")
+
+        tokens = []
+        for token in text.split():
+            if token in self.vocab:
+                tokens.append(self.vocab[token])
+            else:
+                # Replace unknown tokens with ignore_id
+                log.warning(f"Unknown token: {token}, replacing with ignore_id")
+                tokens.append(self.ignore_id)
+        return tokens
+
     def __len__(self):
         return len(self.keys)
 
@@ -83,12 +137,17 @@ class KaldiDataset(Dataset):
             waveform = torchaudio.functional.resample(waveform, sr, self.sampling_rate)
 
         waveform = waveform.squeeze(0)  # (1, T) -> (T,)
+
+        # Tokenize text if vocabulary is loaded
+        text_tokens = self._tokenize_text(transcription) if self.vocab else None
+
         return {
             "key": key,
             "utt_id": key,
             "speech": waveform.to(torch.float32),
             "speech_length": waveform.shape[-1],
-            "sr": self.sampling_rate,
+            "text": transcription,
+            "text_tokens": text_tokens,
             "wavpath": wav_path,
             # powsm lang sym. default is <unk> if missing in vocab
             "lang_sym": self.key2lang[key],
@@ -108,10 +167,12 @@ class KaldiDataModule(L.LightningDataModule):
         sampling_rate=16000,
         batch_size=16,
         num_workers=4,
+        vocab_file: Optional[str] = None,
+        ignore_id: int = -1,
     ):
         super().__init__()
         log.info(
-            f"Initializing PowsmDataModule with {wav_scp_file}, {text_file}, {lang_file}"
+            f"Initializing KaldiDataModule with {wav_scp_file}, {text_file}, {lang_file}"
         )
         self.wav_scp_file = wav_scp_file
         self.text_file = text_file
@@ -119,6 +180,8 @@ class KaldiDataModule(L.LightningDataModule):
         self.sampling_rate = sampling_rate
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.vocab_file = vocab_file
+        self.ignore_id = ignore_id
 
     def setup(self, stage=None):
         self.dataset = KaldiDataset(
@@ -126,6 +189,8 @@ class KaldiDataModule(L.LightningDataModule):
             self.text_file,
             self.lang_file,
             self.sampling_rate,
+            vocab_file=self.vocab_file,
+            ignore_id=self.ignore_id,
         )
 
     def train_dataloader(self):
@@ -161,16 +226,39 @@ class KaldiDataModule(L.LightningDataModule):
         languages = [item["lang_sym"] for item in batch]
 
         # Pad speeches to the max length in the batch
-        max_length = max(speech_lengths)
-        padded_speeches = torch.zeros(len(batch), max_length)
+        max_speech_length = max(speech_lengths)
+        padded_speeches = torch.zeros(len(batch), max_speech_length)
         for i, speech in enumerate(speeches):
             padded_speeches[i, : speech.shape[-1]] = speech
+
+        # Handle text tokenization for CTC-based training
+        text_data = {"text": texts}
+
+        if batch[0].get("text_tokens") is not None:
+            # Pad tokenized text to max length in batch
+            text_tokens_list = [item["text_tokens"] for item in batch]
+            max_text_length = max(len(tokens) for tokens in text_tokens_list)
+
+            padded_texts = torch.full(
+                (len(batch), max_text_length),
+                self.dataset.ignore_id,
+                dtype=torch.long,
+            )
+            text_lengths = torch.zeros(len(batch), dtype=torch.long)
+
+            for i, tokens in enumerate(text_tokens_list):
+                padded_texts[i, : len(tokens)] = torch.tensor(tokens, dtype=torch.long)
+                text_lengths[i] = len(tokens)
+
+            text_data["text"] = padded_texts
+            text_data["text_length"] = text_lengths
 
         return {
             "keys": keys,
             "speech": padded_speeches,
             "speech_length": speech_lengths,
-            "text": texts,
+            "text": text_data["text"],
+            "text_length": text_data.get("text_length"),
             "wavpath": wavpaths,
             "lang_sym": languages,
         }
@@ -182,6 +270,8 @@ def build_kaldi_datamodule(
     sampling_rate=16000,
     batch_size=16,
     num_workers=4,
+    vocab_file: Optional[str] = None,
+    ignore_id: int = -1,
 ):
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
@@ -201,6 +291,8 @@ def build_kaldi_datamodule(
         sampling_rate=sampling_rate,
         batch_size=batch_size,
         num_workers=num_workers,
+        vocab_file=vocab_file,
+        ignore_id=ignore_id,
     )
 
 
