@@ -14,7 +14,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "l2as_speechocean_powsm_ctc"
-tags: ["speechocean", "powsm_ctc", "l2as", "regression"]
+tags: ["speechocean", "tgt_acc", "powsm_ctc", "l2as", "regression"]
 
 seed: 42
 
@@ -35,12 +35,16 @@ model:
 
 callbacks:
   model_checkpoint:
-    monitor: "val/pcc"
+    monitor: "val/kendalltau"
     mode: "max"
     save_top_k: 1
+  early_stopping:
+    monitor: "val/kendalltau"
+    patience: 5
+    mode: "max"
 
 data:
-  target_key: total
+  target_key: accuracy
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
 
 logger:

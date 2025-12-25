@@ -4,7 +4,7 @@ data_dir: ${paths.download_dir}/speechocean762
 metadata_path: ${paths.cache_dir}/speechocean762/metadata.csv
 id_to_label: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 num_classes: 11
-target_key: total # fluency prosodic
+target_key: accuracy # total fluency prosodic
 
 target_sr: 16000
 batch_size: 32

@@ -11,8 +11,8 @@ Fields returned per sample:
 
 Usage:
     python -m src.data.speechocean.l2_assessment \
-        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762 \
-        --metadata_path /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/speechocean762/cache/metadata.csv \
+        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/download/speechocean762 \
+        --metadata_path /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/speechocean762/metadata.csv \
         --batch_size 2
 """
 
@@ -56,7 +56,7 @@ class SpeechOceanDataset(Dataset):
         metadata_path: str,
         split: str,
         data_dir: str,
-        target_key: str = "total",
+        target_key: str = "accuracy",
         target_sr: int = 16000,
     ):
         super().__init__()
@@ -138,7 +138,7 @@ class SpeechOceanDataModule(LightningDataModule):
         metadata_path: str,
         id_to_label: List[int],
         num_classes: int,
-        target_key: str = "total",
+        target_key: str = "accuracy",
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -269,5 +269,68 @@ def _test_datamodule():
     print(f"split: {batch['split']}")
 
 
+def _rewrite_targets():
+    """ Adhoc function to change targets from "total" to "accuracy" for cascade system.
+    Usage:
+    python -m src.data.speechocean.l2_assessment \
+        --data_dir exp/download/speechocean762 \
+        --metadata_path exp/cache/speechocean762/metadata.csv \
+        --input_transcription_json exp/runs/inf_speechocean_zipactc_ns/20251213_181142/transcription.json
+    """
+    import argparse
+    from pathlib import Path
+    import json
+    from tqdm import tqdm
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", type=str, required=True)
+    parser.add_argument(
+        "--metadata_path", type=str, required=True, help="Path to metadata CSV"
+    )
+    parser.add_argument(
+        "--input_transcription_json",
+        type=str,
+        required=True,
+        help="Path to input transcription JSON",
+    )
+
+    args = parser.parse_args()
+    output_transcription_json = (
+        Path(args.input_transcription_json).parent
+        / f"{Path(args.input_transcription_json).stem}_tgtacc.json"
+    )
+
+    with open(args.input_transcription_json, "r") as f:
+        transcription_data = json.load(f)
+
+    uttid2transcriptionkey = {}
+    for k, v in transcription_data.items():
+        uttid2transcriptionkey[v["passthrough"]["utt_id"]] = k
+
+    dm = SpeechOceanDataModule(
+        data_dir=args.data_dir,
+        metadata_path=args.metadata_path,
+        id_to_label=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        num_classes=11,
+        target_key="accuracy",
+        batch_size=1,
+        num_workers=1,
+        pin_memory=False,
+        target_sr=16000,
+    )
+    dm.prepare_data()
+    dm.setup()
+    for item in tqdm(dm.predict_dataloader().dataset):
+        uttid = item["utt_id"]
+        tgtacc = item["target"]
+        transcription_key = uttid2transcriptionkey[uttid]
+        transcription_data[transcription_key]["passthrough"]["target"] = tgtacc
+
+    with open(output_transcription_json, "w") as f:
+        json.dump(transcription_data, f, indent=2, ensure_ascii=False)
+    print(f"Wrote updated metadata to {output_transcription_json}")
+
+
 if __name__ == "__main__":
-    _test_datamodule()
+    # _test_datamodule()
+    _rewrite_targets()
