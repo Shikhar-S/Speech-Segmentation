@@ -51,6 +51,7 @@ buckeye==1.3
 panphon==0.22.2
 
 # ZIPA
+sortedcontainers==2.4.0
 lhotse==1.32.1
 --find-links https://k2-fsa.github.io/k2/cuda.html
 k2==1.24.4.dev20250715+cuda12.6.torch2.6.0
