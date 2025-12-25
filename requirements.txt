@@ -3,7 +3,7 @@
 torch==2.6.0
 torchaudio==2.6.0
 torchvision==0.21.0
-lightning>=2.0.0
+lightning==2.6.0
 torchmetrics>=0.11.4
 
 # --------- hydra --------- #
