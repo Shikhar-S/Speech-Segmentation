@@ -8,6 +8,7 @@ import lightning as L
 import yaml
 from typing import Optional, Dict, List
 from src.utils import RankedLogger
+from pathlib import Path
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -18,12 +19,14 @@ class KaldiDataset(Dataset):
         wav_scp_file,
         text_file,
         lang_file,
+        data_dir: Path,
         sampling_rate=16000,
         vocab_file: Optional[str] = None,
         ignore_id: int = -1,
     ):
         self.sampling_rate = sampling_rate
         self.ignore_id = ignore_id
+        self.data_dir = data_dir
         self.wav_scp = self._load_wav_scp(wav_scp_file)
         self.text = self._load_text(text_file)
         self.key2lang = self._extract_language(lang_file)
@@ -47,15 +50,27 @@ class KaldiDataset(Dataset):
             )
 
     def _load_wav_scp(self, path):
+        def _create_env_specific_path(wav_path):
+            # HACK: Paths should be changed in the source files!
+            wav_path = wav_path.strip()
+            ark_or_wav, element_index = (
+                wav_path.split(":", 1) if ":" in wav_path else (wav_path, None)
+            )
+            ark_or_wav = Path(ark_or_wav)
+            portable_wav_path = Path(*ark_or_wav.parts[-4:])
+            abs_wav_path = self.data_dir / portable_wav_path
+            if element_index is not None:
+                abs_wav_path = f"{abs_wav_path}:{element_index}"
+            return str(abs_wav_path)
+
         wav_scp = {}
         with open(path) as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     key, wav_path = parts[0], parts[1]
-                    if not wav_path.startswith("/work"):
-                        wav_path = f"/work/hdd/bbjs/shared/powsm/s2t1/{wav_path}"
-                    wav_scp[key] = wav_path
+                    wav_path = _create_env_specific_path(wav_path)
+                    wav_scp[key] = str(wav_path)
         return wav_scp
 
     def _load_text(self, path):
@@ -164,6 +179,7 @@ class KaldiDataModule(L.LightningDataModule):
         wav_scp_file,
         text_file,
         lang_file,
+        data_dir: Path,
         sampling_rate=16000,
         batch_size=16,
         num_workers=4,
@@ -182,13 +198,15 @@ class KaldiDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.vocab_file = vocab_file
         self.ignore_id = ignore_id
+        self.data_dir = data_dir
 
     def setup(self, stage=None):
         self.dataset = KaldiDataset(
-            self.wav_scp_file,
-            self.text_file,
-            self.lang_file,
-            self.sampling_rate,
+            wav_scp_file=self.wav_scp_file,
+            text_file=self.text_file,
+            lang_file=self.lang_file,
+            data_dir=self.data_dir,
+            sampling_rate=self.sampling_rate,
             vocab_file=self.vocab_file,
             ignore_id=self.ignore_id,
         )
@@ -266,6 +284,7 @@ class KaldiDataModule(L.LightningDataModule):
 
 def build_kaldi_datamodule(
     dataset_name,
+    data_dir,
     dataset_config_path="configs/data/powsm_evalset_index.yaml",
     sampling_rate=16000,
     batch_size=16,
@@ -276,18 +295,20 @@ def build_kaldi_datamodule(
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
 
+    data_dir = Path(data_dir)
     if dataset_name not in config["datasets"]:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
     ds_config = config["datasets"][dataset_name]
-    wav_scp_file = ds_config["wav_scp"]
-    text_file = ds_config["text_phoneme"]
-    lang_file = ds_config["language"]
+    wav_scp_file = data_dir / ds_config["wav_scp"]
+    text_file = data_dir / ds_config["text_phoneme"]
+    lang_file = data_dir / ds_config["language"]
 
     return KaldiDataModule(
         wav_scp_file=wav_scp_file,
         text_file=text_file,
         lang_file=lang_file,
+        data_dir=data_dir,
         sampling_rate=sampling_rate,
         batch_size=batch_size,
         num_workers=num_workers,
@@ -298,7 +319,12 @@ def build_kaldi_datamodule(
 
 if __name__ == "__main__":
     # Test with: python -m src.data.kaldi_dataset
-    datamodule = build_kaldi_datamodule("doreco", batch_size=2, num_workers=1)
+    datamodule = build_kaldi_datamodule(
+        "doreco",
+        data_dir="/data/group_data/wavlab_icme25/PhoneBench/exp/download",
+        batch_size=2,
+        num_workers=1,
+    )
     datamodule.setup()
     for batch in datamodule.predict_dataloader().dataset:
         print(batch)
