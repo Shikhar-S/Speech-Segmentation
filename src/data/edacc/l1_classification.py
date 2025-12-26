@@ -1,9 +1,9 @@
-import io
+import io, os
 import torch
 import torchaudio
 import lightning as L
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Union
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from datasets import load_dataset, Audio as HFAudio
 from src.utils.pylogger import RankedLogger
@@ -26,6 +26,7 @@ class EdAccDataset(Dataset):
         target_sr: int = 16000,
         max_duration_sec: Optional[float] = None,
         target_key: str = "accent_cluster",
+        cache_dir: Union[Path, str] = None,
     ):
         self.hf_ds = hf_ds
         self.l1_to_idx = l1_to_idx
@@ -33,9 +34,18 @@ class EdAccDataset(Dataset):
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
         self.target_key = target_key
+        assert cache_dir is not None
+        self.cache_dir = Path(cache_dir)
 
     def __len__(self):
         return len(self.hf_ds)
+
+    def _cache_audio(self, waveform, sr, target_path):
+        if os.path.exists(target_path):
+            return
+        if not os.path.exists(os.path.dirname(target_path)):
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        torchaudio.save(target_path, waveform, sr)
 
     def __getitem__(self, idx):
         sample = self.hf_ds[idx]
@@ -50,6 +60,10 @@ class EdAccDataset(Dataset):
             if waveform.shape[1] > max_samples:
                 waveform = waveform[:, :max_samples]
 
+        target_path = self.cache_dir / "saved" / self.split / f"{utt_id}.wav"
+        self._cache_audio(waveform, sr, target_path)
+        audio_path = str(target_path)
+
         return {
             "utt_id": utt_id,
             "speech": waveform.squeeze(0),  # (T,)
@@ -59,6 +73,7 @@ class EdAccDataset(Dataset):
             "target": label,
             "split": self.split,
             "speaker_id": speaker,
+            "audio_path": audio_path,
         }
 
 
@@ -148,6 +163,7 @@ class EdAccL1Classification(L.LightningDataModule):
             "train",
             max_duration_sec=self.max_duration_sec,
             target_key=self.target_key,
+            cache_dir=self.cache_dir,
         )
         self.val_dataset = EdAccDataset(
             val_ds,
@@ -155,6 +171,7 @@ class EdAccL1Classification(L.LightningDataModule):
             "val",
             max_duration_sec=self.max_duration_sec,
             target_key=self.target_key,
+            cache_dir=self.cache_dir,
         )
         self.test_dataset = EdAccDataset(
             test_ds,
@@ -162,6 +179,7 @@ class EdAccL1Classification(L.LightningDataModule):
             "test",
             max_duration_sec=self.max_duration_sec,
             target_key=self.target_key,
+            cache_dir=self.cache_dir,
         )
 
     def _dl(self, dataset, shuffle=False):
