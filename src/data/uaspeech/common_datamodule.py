@@ -27,7 +27,6 @@ from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
-
 def extract_uaspeech_tgz_files(
     output_dir: str, tgz_files: List[str], force: bool = False
 ):
@@ -69,14 +68,28 @@ class UASpeechDataset(Dataset):
         )
         log.info(f"UASpeechDataset split={split}: {len(self.metadata)} examples")
 
+    def _should_keep_file(self, file: str) -> bool:
+        """Filter to keep only M5 mic data + one explicit exception."""
+        _MIC_KEEP = "M5"
+        _EXTRA_UTT_IDS = {"F04_B2_C13_M7.wav"}
+
+        if file in _EXTRA_UTT_IDS:
+            return True
+        suffix = f"_{_MIC_KEEP}.wav"
+        return file.endswith(suffix)
+
+    def _filter_metadata(self, metadata: list) -> list:
+        """Apply mic filter (M5 + extra) to metadata list."""
+        return [m for m in metadata if self._should_keep_file(str(m.get("file", "")))]
+
     def _build_metadata(self, meta_csv: str, wordlist_csv: str, split: str):
         json_path = self.cache_path / f"metadata_{split}.json"
         if json_path.exists():
             # only exists whn called in setup by all workers
             with open(json_path, "r") as f:
                 metadata = json.load(f)
-            log.info(f"Loaded precomputed metadata from {json_path}")
-            return metadata
+            return self._filter_metadata(metadata)
+
         df_meta = pd.read_csv(meta_csv)
         df_meta = df_meta[df_meta["severity"].notna()]
         speaker_to_label = dict(zip(df_meta["speaker"], df_meta["severity"]))
@@ -124,11 +137,10 @@ class UASpeechDataset(Dataset):
                     }
                 )
         log.info(f"Total {len(metadata)} examples for split={split}")
-        # when called in prepare data cache it
         json_path.parent.mkdir(parents=True, exist_ok=True)
         with open(json_path, "w") as f:
             json.dump(metadata, f, indent=2)
-        return metadata
+        return self._filter_metadata(metadata)
 
     def _text_to_phonemes(self, text: str) -> List[str]:
         """
