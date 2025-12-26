@@ -1,11 +1,12 @@
 #!/bin/bash
-#SBATCH -p preempt
+#SBATCH -p general
 #SBATCH -J main
 #SBATCH -N 1
 #SBATCH --gres=gpu:1
 #SBATCH -c 14
 #SBATCH --mem=40G
 #SBATCH -t 20:00:00
+#SBATCH --exclude=babel-m5-32
 #SBATCH -o exp/slurm_logs/%j.out
 #SBATCH -e exp/slurm_logs/%j.out
 
@@ -24,6 +25,8 @@ echo "RUNNING ON NODE: $(hostname)"
 echo "START TIME: $(date)"
 echo "SLURM_JOB_ID: $SLURM_JOB_ID"
 nvidia-smi
+export NCCL_P2P_DISABLE=1
+echo "RunningCMD: python src/main.py $*"
 ###########################
 python src/main.py "$@"
 ###########################
