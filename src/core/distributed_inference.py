@@ -130,39 +130,33 @@ def run_distributed_inference_(
         device=device,
     )
 
-    # TODO(shikhar): switch to jsonl append pattern
-    with mp.get_context("spawn").Pool(num_workers, initializer=_init_worker) as pool:
-        out = []
-        worker_id = 0
-        for p in tqdm(
-            pool.imap_unordered(worker, enumerate(chunks)), total=len(chunks)
-        ):
-            out.extend(p)
-
-            # collect incrementally
-            save_json(
-                {
-                    i: {"pred": pred, "passthrough": passthrough}
-                    for i, pred, passthrough in p
-                },
-                f"{out_file}.part{worker_id}.json",
-            )
-            worker_id += 1
-    log.info("Finished distributed inference.")
-
-    # collect all results
-    merged = {}
-    for w_id in range(num_workers):
-        part = load_json(f"{out_file}.part{w_id}.json")
-        merged.update(part)
-    save_json(merged, out_file)
-    log.info(f"Saved final output to {out_file}.")
-
-    # cleanup partial files
-    log.info("Cleaning up partial files.")
-    for w_id in range(num_workers):
-        part_file = f"{out_file}.part{w_id}.json"
-        if os.path.exists(part_file):
-            os.remove(part_file)
-
-    return out
+    with open(out_file, "w") as f:
+        f.write("{\n")
+        is_first_record = True
+        with mp.get_context("spawn").Pool(
+            num_workers, initializer=_init_worker
+        ) as pool:
+            for chunk_results in tqdm(
+                pool.imap_unordered(worker, enumerate(chunks)),
+                total=len(chunks),
+                desc="Workers Progress",
+            ):
+                for i, pred, passthrough in chunk_results:
+                    # Write a comma before every record
+                    # except the very first one
+                    if not is_first_record:
+                        f.write(",\n")
+                    # Prepare the data for this specific key
+                    record_payload = {"pred": pred, "passthrough": passthrough}
+                    # Serialize only this specific record to a string
+                    json_payload = json.dumps(
+                        record_payload,
+                        default=default_encoder,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                    indented_payload = json_payload.replace("\n", "\n  ")
+                    f.write(f'  "{i}": {indented_payload}')
+                    is_first_record = False
+        f.write("\n}")
+    log.info(f"Finished distributed inference. Final output saved to {out_file}.")
