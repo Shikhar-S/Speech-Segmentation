@@ -38,7 +38,7 @@ test: True
 predict: False # run prediction on new/unseen data
 pred_file: null # path to write predictions to
 
+run_folder: ${now:%Y%m%d}_${now:%H%M%S}
 # useful to resume training from a checkpoint path
 ckpt_path: null
-
 seed: 42 # pytorch, numpy and python.random

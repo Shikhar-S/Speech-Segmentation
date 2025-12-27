@@ -27,6 +27,7 @@ from src.utils.pylogger import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
+
 def extract_uaspeech_tgz_files(
     output_dir: str, tgz_files: List[str], force: bool = False
 ):
