@@ -23,11 +23,12 @@ class KaldiDataset(Dataset):
         sampling_rate=16000,
         vocab_file: Optional[str] = None,
         ignore_id: int = -1,
+        portable_wavscp=True,
     ):
         self.sampling_rate = sampling_rate
         self.ignore_id = ignore_id
         self.data_dir = data_dir
-        self.wav_scp = self._load_wav_scp(wav_scp_file)
+        self.wav_scp = self._load_wav_scp(wav_scp_file, portable_wavscp)
         self.text = self._load_text(text_file)
         self.key2lang = self._extract_language(lang_file)
 
@@ -49,16 +50,16 @@ class KaldiDataset(Dataset):
                 f"Loaded vocabulary with {len(self.vocab)} tokens from {vocab_file}"
             )
 
-    def _load_wav_scp(self, path):
-        def _create_env_specific_path(wav_path):
-            # HACK: Paths should be changed in the source files!
+    def _load_wav_scp(self, path, portable_wavscp=True):
+        def _create_env_specific_path(wav_path, portable_wavscp):
             wav_path = wav_path.strip()
             ark_or_wav, element_index = (
                 wav_path.split(":", 1) if ":" in wav_path else (wav_path, None)
             )
             ark_or_wav = Path(ark_or_wav)
-            portable_wav_path = Path(*ark_or_wav.parts[-4:])
-            abs_wav_path = self.data_dir / portable_wav_path
+            if not portable_wavscp:
+                ark_or_wav = Path(*ark_or_wav.parts[-4:])
+            abs_wav_path = self.data_dir / ark_or_wav
             if element_index is not None:
                 abs_wav_path = f"{abs_wav_path}:{element_index}"
             return str(abs_wav_path)
@@ -69,7 +70,7 @@ class KaldiDataset(Dataset):
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     key, wav_path = parts[0], parts[1]
-                    wav_path = _create_env_specific_path(wav_path)
+                    wav_path = _create_env_specific_path(wav_path, portable_wavscp)
                     wav_scp[key] = str(wav_path)
         return wav_scp
 
@@ -89,10 +90,6 @@ class KaldiDataset(Dataset):
         with open(path) as f:
             for line in f:
                 key, tag = line.strip().split()[:2]
-                if key.endswith("_pr"):
-                    # remove _pr suffix for some datasets.
-                    # TODO(shikhar): Bad design, should be modified at source to make it generic.
-                    key = key[:-3]
                 key2lang[key] = tag.split("><")[0][1:].strip()
         return key2lang
 
@@ -185,6 +182,7 @@ class KaldiDataModule(L.LightningDataModule):
         num_workers=4,
         vocab_file: Optional[str] = None,
         ignore_id: int = -1,
+        portable_wavscp: bool = True,
     ):
         super().__init__()
         log.info(
@@ -199,6 +197,7 @@ class KaldiDataModule(L.LightningDataModule):
         self.vocab_file = vocab_file
         self.ignore_id = ignore_id
         self.data_dir = data_dir
+        self.portable_wavscp = portable_wavscp
 
     def setup(self, stage=None):
         self.dataset = KaldiDataset(
@@ -209,6 +208,7 @@ class KaldiDataModule(L.LightningDataModule):
             sampling_rate=self.sampling_rate,
             vocab_file=self.vocab_file,
             ignore_id=self.ignore_id,
+            portable_wavscp=self.portable_wavscp,
         )
 
     def train_dataloader(self):
@@ -291,6 +291,7 @@ def build_kaldi_datamodule(
     num_workers=4,
     vocab_file: Optional[str] = None,
     ignore_id: int = -1,
+    portable_wavscp: bool = True,
 ):
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
@@ -314,6 +315,7 @@ def build_kaldi_datamodule(
         num_workers=num_workers,
         vocab_file=vocab_file,
         ignore_id=ignore_id,
+        portable_wavscp=portable_wavscp,
     )
 
 
