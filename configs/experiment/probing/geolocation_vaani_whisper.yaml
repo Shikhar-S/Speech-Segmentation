@@ -1,0 +1,41 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/main.py experiment=probing/geolocation_vaani_whisper
+
+defaults:
+  - override /data: vaanigeo
+  - override /model: geolocation
+  - override /model/net: whisper
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "geolocation_vaani_whisper"
+tags: ["vaani", "whisper", "geolocation"]
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 10
+  gradient_clip_val: 1.0
+  val_check_interval: 0.25 # validate 4 times per epoch
+  callbacks:
+    - learning_rate_monitor
+
+model:
+  net:
+    hf_repo: openai/whisper-small
+    output_vocabsz: null
+  optimizer:
+    lr: 0.0002
+
+data:
+  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: "geolocation_vaani_whisper"
+  aim:
+    experiment: "geolocation_vaani_whisper"
