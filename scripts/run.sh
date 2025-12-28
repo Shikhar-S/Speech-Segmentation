@@ -22,9 +22,9 @@ help_message=$(cat << 'EOF'
 Usage: $0 [OPTIONS]
 
 Options:
-  --model LIST        Models: logmel, powsm, powsmvr, ctag, lv60, xlsr53, zipactc, zipactc_ns, or "all"
-  --recipe LIST       Recipes: fab, fat, geo_sw, geo_in, l1cls, l2as, lid_fl, atyp_ec, atyp_ua, atyp_us, inference, cascade_rnn_cls, cascade_transformer
-  --data LIST         Datasets: buckeye, timit, geo_sw, geo_in, cmul2arctic, speechocean, fleurs, or "all"
+  --model LIST        Models: logmel, powsm, powsmvr, powsm_ctc, ctag, lv60, xlsr53, zipactc, zipactc_ns, or "all"
+  --recipe LIST       Recipes: fab, fat, geo_sw, geo_in, l1cls_cmu, l1cls_ed, l2as, lid_fl, atyp_ec, atyp_ua, atyp_us, inference, cascade_rnn_cls, cascade_transformer
+  --data LIST         Datasets: buckeye, timit, geo_sw, geo_in, edacc, cmul2arctic, speechocean, fleurs, or "all"
   --cluster NAME      Cluster: dai, delta (default: dai)
   --fft               Enable full fine-tuning
   --dry_run           Print commands only (explicitly set to --dry_run true)
@@ -71,7 +71,7 @@ declare -A model_configs=(
     ["logmel"]="logmel|"
     ["powsm"]="powsm|"
     ["powsmvr"]="powsmvr|"
-    ["powsm_ctc"]="powsm_ctc|" #TODO(shikhar): add files for powsmctc
+    ["powsm_ctc"]="powsm_ctc|"
     ["ctag"]="w2v2ph|ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
     ["lv60"]="w2v2ph|facebook/wav2vec2-lv-60-espeak-cv-ft"
     ["xlsr53"]="w2v2ph|facebook/wav2vec2-xlsr-53-espeak-cv-ft"
@@ -201,9 +201,9 @@ _construct_adhoc_args_for_cascade() {
     local dataset_name=$1 model_var=$2
     # Pick the latest non-empty transcription.json under the run tree
     prefix="./"
-    if [[ $(hostname) == *babel* ]]; then
-        prefix="/data/group_data/wavlab_icme25/PhoneBench/"
-    fi
+    # if [[ $(hostname) == *babel* ]]; then
+    #     prefix="/data/group_data/wavlab_icme25/PhoneBench/"
+    # fi
     local runs_dir="${prefix}exp/runs/inf_${dataset_name}_${model_var}"
     local transcription_json
     transcription_json="$(

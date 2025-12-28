@@ -2,14 +2,14 @@
 
 # This config executes inference with POWSM-CTC (CTC-only model):
 # Set data field when calling
-# eg. python src/main.py experiment=inference/transcribe_powsm_ctc data=fleurs task_name=inf_powsm_ctc_fleurs
+# eg. python src/main.py experiment=inference/transcribe_powsm_ctc data=fleurs task_name=inf_fleurs_powsm_ctc
 
 defaults:
   - override /logger: csv
   - override /model: null
   - override /model/net: null
 
-task_name: ??? # pass inf_<model>_<data> when calling. This will create output dirs accordingly
+task_name: ???
 tags: ["powsm_ctc", "inference", "ctc"]
 
 seed: 42
@@ -19,7 +19,7 @@ test: false
 distributed_predict: True
 
 inference:
-  num_workers: 10
+  num_workers: 5 # this model is heavier, per-gpu worker should be less
   passthrough_keys: ["target", "split", "utt_id", "metadata_idx", "lang_sym"]
   out_file: ${paths.output_dir}/transcription.json
   
@@ -35,19 +35,13 @@ inference:
     stats_file: null
     device: cuda # auto, cpu, cuda
     dtype: float32
-    
     # Long-form decoding settings
     max_segment_length: 30.0  # seconds
-    context_len_in_secs: 2.0  # seconds
-    
+    context_len_in_secs: 2.0  # seconds  
     # Whether to use prompt encoder
     use_prompt_encoder: true
   
-  # Additional args to pass to the __call__ method of inference_runner
-  # These can be overridden by keys from dataset if needed
   inference_call_args: 
     text_prev: <na>
     task_sym: <pr>
     lang_sym: <unk>
-
-

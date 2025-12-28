@@ -71,7 +71,9 @@ class PowsmCTCNet(torch.nn.Module):
 
         token_list = getattr(self.model, "token_list", None)
         if token_list is None:
-            raise RuntimeError("ESPnet model is missing token_list; cannot build wrapper.")
+            raise RuntimeError(
+                "ESPnet model is missing token_list; cannot build wrapper."
+            )
         self.token_list = list(token_list)
         self.token2id = {t: i for i, t in enumerate(self.token_list)}
 
@@ -93,9 +95,13 @@ class PowsmCTCNet(torch.nn.Module):
         encoder_conf = getattr(self.training_args, "encoder_conf", {}) or {}
         hop_length = _parse_humanfriendly_int(frontend_conf.get("hop_length", 160))
         input_layer = str(encoder_conf.get("input_layer", "conv2d"))
-        subsample = {"conv2d1": 1, "conv2d2": 2, "conv2d": 4, "conv2d6": 6, "conv2d8": 8}.get(
-            input_layer, 4
-        )
+        subsample = {
+            "conv2d1": 1,
+            "conv2d2": 2,
+            "conv2d": 4,
+            "conv2d6": 6,
+            "conv2d8": 8,
+        }.get(input_layer, 4)
         return int(hop_length * subsample)
 
     def get_blank_id(self) -> int:
@@ -121,11 +127,13 @@ class PowsmCTCNet(torch.nn.Module):
         task_id = int(self.token2id[task_sym])
 
         text_prev = torch.full((batch_size, 1), na_id, dtype=torch.long, device=device)
-        text_prev_lengths = torch.full((batch_size,), 1, dtype=torch.long, device=device)
-
-        prefix = torch.tensor([[lang_id, task_id]], dtype=torch.long, device=device).repeat(
-            batch_size, 1
+        text_prev_lengths = torch.full(
+            (batch_size,), 1, dtype=torch.long, device=device
         )
+
+        prefix = torch.tensor(
+            [[lang_id, task_id]], dtype=torch.long, device=device
+        ).repeat(batch_size, 1)
         prefix_lengths = torch.full((batch_size,), 2, dtype=torch.long, device=device)
         return text_prev, text_prev_lengths, prefix, prefix_lengths
 
@@ -155,7 +163,9 @@ class PowsmCTCNet(torch.nn.Module):
             enc = enc[0]
         return enc, enc_lens
 
-    def ctc_logits(self, speech: torch.Tensor, speech_lengths: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def ctc_logits(
+        self, speech: torch.Tensor, speech_lengths: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         enc, enc_lens = self.encode(speech, speech_lengths)
         logits = self.model.ctc.ctc_lo(enc)
         return logits, enc_lens
@@ -192,9 +202,19 @@ def build_powsm_ctc(
     """Build a PhoneBench-ready POWSM-CTC net by wrapping ESPnet2's OWSM-CTC model."""
 
     # Optional: download HF snapshot into work_dir.
-    if hf_repo and (config_file is None) and (model_file is None) and (stats_file is None):
+    if (
+        hf_repo
+        and (config_file is None)
+        and (model_file is None)
+        and (stats_file is None)
+    ):
         root = Path(work_dir)
-        required_rel = [POWSM_CTC_REL_CONFIG, POWSM_CTC_REL_CKPT, POWSM_CTC_REL_STATS, POWSM_CTC_REL_BPE]
+        required_rel = [
+            POWSM_CTC_REL_CONFIG,
+            POWSM_CTC_REL_CKPT,
+            POWSM_CTC_REL_STATS,
+            POWSM_CTC_REL_BPE,
+        ]
         missing = [str(root / r) for r in required_rel if not (root / r).exists()]
         if force or missing:
             # If a local snapshot exists but is incomplete, we must allow network
@@ -226,7 +246,9 @@ def build_powsm_ctc(
     root = Path(work_dir)
     bpe_path = bpemodel or str(root / POWSM_CTC_REL_BPE)
     if not Path(bpe_path).exists():
-        log.warning(f"BPE model not found at {bpe_path}; continuing (model build itself does not require it).")
+        log.warning(
+            f"BPE model not found at {bpe_path}; continuing (model build itself does not require it)."
+        )
 
     patched_cfg = str(Path(work_dir) / ".phonebench" / "powsm_ctc_patched_config.yaml")
     patched_cfg = patch_espnet_config_paths(
@@ -244,13 +266,12 @@ def build_powsm_ctc(
         ) from e
 
     # Keep builder consistent with other PhoneBench nets: load on CPU by default.
-    model, train_args = S2TTask.build_model_from_file(patched_cfg, mdl_path, device="cpu")
+    model, train_args = S2TTask.build_model_from_file(
+        patched_cfg, mdl_path, device="cpu"
+    )
     return PowsmCTCNet(
         model=model,
         training_args=train_args,
         default_lang_sym=default_lang_sym,
         default_task_sym=default_task_sym,
     )
-
-
-
