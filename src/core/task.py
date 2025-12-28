@@ -33,6 +33,7 @@ class Task:
             model=model,
             datamodule=datamodule,
             ckpt_path=self.task_cfg.get("ckpt_path"),
+            weights_only=False,
         )
         ckpt_cb = getattr(trainer, "checkpoint_callback", None)
         ckpt_path = getattr(ckpt_cb, "best_model_path", "") if ckpt_cb else ""
@@ -51,7 +52,12 @@ class Task:
         #     log.error("Testing ckpt not provided!")
         # else:
         log.info(f"Ckpt path: {ckpt_path}")
-        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path or None, weights_only=False)
+        trainer.test(
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=ckpt_path or None,
+            weights_only=False,
+        )
         return dict(trainer.callback_metrics)
 
     def predict(
@@ -65,7 +71,10 @@ class Task:
             ckpt_path = self.task_cfg.ckpt_path
         log.info("Starting prediction!")
         return trainer.predict(
-            model=model, datamodule=datamodule, ckpt_path=ckpt_path or None, weights_only=False
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=ckpt_path or None,
+            weights_only=False,
         )
 
     def run_distributed_inference(self):

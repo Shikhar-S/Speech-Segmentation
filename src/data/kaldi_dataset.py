@@ -341,10 +341,13 @@ if __name__ == "__main__":
         dataset_config_path="configs/data/ipapack_index.yaml",
         batch_size=2,
         num_workers=1,
-        vocab_file="src/model/xeusphoneme/resources/vocab.json",
+        vocab_file="src/model/xeusphoneme/resources/ipa_vocab.json",
     )
     datamodule.setup()
-    print(len(datamodule.predict_dataloader().dataset))
-    for batch in datamodule.predict_dataloader().dataset:
-        print(batch)
+    for i in datamodule.train_dataloader().dataset:
+        print(i["speech_length"])
         break
+    # print(len(datamodule.predict_dataloader().dataset))
+    # for batch in datamodule.predict_dataloader().dataset:
+    #     print(batch)
+    #     break

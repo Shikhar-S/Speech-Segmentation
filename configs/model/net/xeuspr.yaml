@@ -6,4 +6,4 @@ force: false # whether to force download even if files exist
 # use them to load fine-tuned models or experimental configs
 config_file: null
 checkpoint: null
-vocab_file: src/model/xeusphoneme/resources/vocab.json
+vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
