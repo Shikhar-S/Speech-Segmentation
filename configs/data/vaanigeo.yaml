@@ -1,6 +1,6 @@
-_target_: src.data.vaani.geolocation.VaaniGeolocation
-data_dir: /work/hdd/bbjs/shared/corpora/vaani_iisc
-metadata_path: ${paths.cache_dir}/vaani_geolocation/vaani_geolocation_metadata.train10.csv
+_target_: src.data.vaani.geolocation_hf.VaaniGeolocation
+hf_repo: shikhar7ssu/vaani140-geo
+work_dir: ${paths.cache_dir}/vaanihindi
 target_sr: 16000
 batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 num_workers: 10
