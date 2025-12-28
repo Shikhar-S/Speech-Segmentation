@@ -1,0 +1,47 @@
+# @package _global_
+
+# Forced alignment on Buckeye using WavLM encoder + IPA CTC head
+#
+# To execute this experiment run:
+# python src/main.py experiment=probing/fa_buckeye_wavlm
+
+defaults:
+  - override /data: buckeye
+  - override /model: forced_alignment
+  - override /model/net: wavlm
+  - override /data/tokenizer: IPA
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "fa_buckeye_wavlm"
+tags: ["buckeye", "wavlm", "fa"]
+
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 10
+  gradient_clip_val: 1.0
+  val_check_interval: 0.25 # validate 4 times per epoch
+  callbacks:
+    - learning_rate_monitor
+
+model:
+  optimizer:
+    lr: 0.0002
+  net:
+    hf_repo: microsoft/wavlm-base
+    output_vocabsz:
+      _target_: src.core.ipa_utils.IPATokenizer.vocab_size
+    freeze_encoder: true
+
+data:
+  batch_size: 24
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: "fa_buckeye_wavlm"
+  aim:
+    experiment: "fa_buckeye_wavlm"
