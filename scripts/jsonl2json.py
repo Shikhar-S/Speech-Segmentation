@@ -1,4 +1,6 @@
-# python scripts/jsonl2json.py --dirname DIR
+# MODELS: ctag lv60 xlsr53 powsm powsm_ctc zipactc zipactc_ns
+# DATA: edacc uaspeech vaanigeo
+# for m in ctag lv60 xlsr53 powsm powsm_ctc zipactc zipactc_ns; do python scripts/jsonl2json.py --dirname exp/runs/inf_vaanigeo_$m/8jobARR; done
 import json
 from pathlib import Path
 import argparse

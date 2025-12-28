@@ -101,6 +101,7 @@ class WavLMEncoderModel(nn.Module):
         blank_id: int = 0,
         freeze_encoder: bool = True,
         encoder_layer: int = -1,
+        cache_dir: Optional[str] = None,
     ):
         """
         Args:
@@ -109,6 +110,7 @@ class WavLMEncoderModel(nn.Module):
             blank_id: Blank token ID for CTC (default 0).
             freeze_encoder: Whether to freeze encoder weights (default True).
             encoder_layer: Which encoder layer to use (-1 = last, 0-indexed otherwise).
+            cache_dir: Optional cache directory for HuggingFace model.
         """
         super().__init__()
         # NOTE: Many WavLM HF repos (e.g., microsoft/wavlm-base) do NOT ship a tokenizer/vocab.
@@ -118,7 +120,7 @@ class WavLMEncoderModel(nn.Module):
         # Therefore, fall back to an audio-only feature extractor when AutoProcessor fails.
         self.feature_extractor = None
         try:
-            self.processor = AutoProcessor.from_pretrained(hf_repo)
+            self.processor = AutoProcessor.from_pretrained(hf_repo, cache_dir=cache_dir)
             self.feature_extractor = getattr(self.processor, "feature_extractor", None)
             if self.feature_extractor is None:
                 raise RuntimeError(
@@ -130,19 +132,23 @@ class WavLMEncoderModel(nn.Module):
                 f"Falling back to AutoFeatureExtractor. hf_repo={hf_repo}. Error: {e}"
             )
             try:
-                self.processor = AutoFeatureExtractor.from_pretrained(hf_repo)
+                self.processor = AutoFeatureExtractor.from_pretrained(
+                    hf_repo, cache_dir=cache_dir
+                )
             except Exception as e2:
                 raise RuntimeError(
                     f"Failed to load both AutoProcessor and AutoFeatureExtractor from hf_repo={hf_repo}."
                 ) from e2
             self.feature_extractor = self.processor
 
-        self.model = WavLMModel.from_pretrained(hf_repo)
+        self.model = WavLMModel.from_pretrained(hf_repo, cache_dir=cache_dir)
         self.encoder_layer = encoder_layer
 
         # WavLM config
         self.encoder_dim = self.model.config.hidden_size
-        self.sampling_rate = int(getattr(self.feature_extractor, "sampling_rate", 16000))
+        self.sampling_rate = int(
+            getattr(self.feature_extractor, "sampling_rate", 16000)
+        )
         self.blank_id = blank_id
 
         # Compute points_by_frames from conv_stride

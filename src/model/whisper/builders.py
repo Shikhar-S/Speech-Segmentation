@@ -21,8 +21,9 @@ def build_whisper_model(
     hf_repo: str = "openai/whisper-small",
     output_vocabsz: Optional[int] = None,
     blank_id: int = 0,
-    freeze_encoder: bool = True,
+    freeze_encoder: bool = False,
     encoder_layer: int = -1,
+    cache_dir: Optional[str] = None,
 ) -> WhisperEncoderModel:
     """Build Whisper encoder model for PhoneBench.
 
@@ -33,6 +34,7 @@ def build_whisper_model(
         blank_id: Blank token ID for CTC (default 0, matching IPATokenizer).
         freeze_encoder: Whether to freeze encoder weights (default True).
         encoder_layer: Which encoder layer to use (-1 = last).
+        cache_dir: Optional cache directory for HuggingFace model.
 
     Returns:
         WhisperEncoderModel instance.
@@ -43,6 +45,7 @@ def build_whisper_model(
         blank_id=blank_id,
         freeze_encoder=freeze_encoder,
         encoder_layer=encoder_layer,
+        cache_dir=cache_dir,
     )
     log.info(f"Whisper model loaded from {hf_repo}")
     log.info(f"Encoder dim: {model.encoder_output_size()}")

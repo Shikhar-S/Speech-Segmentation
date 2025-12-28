@@ -48,7 +48,7 @@ def preprocess_inputs_whisper(
 
     # Convert to list of trimmed numpy arrays
     batch = [
-        x.detach().cpu().float().numpy().squeeze()[:int(xl)]
+        x.detach().cpu().float().numpy().squeeze()[: int(xl)]
         for x, xl in zip(speech, speech_lengths)
     ]
 
@@ -76,6 +76,7 @@ class WhisperEncoderModel(nn.Module):
         blank_id: int = 0,
         freeze_encoder: bool = True,
         encoder_layer: int = -1,
+        cache_dir: Optional[str] = None,
     ):
         """
         Args:
@@ -84,10 +85,11 @@ class WhisperEncoderModel(nn.Module):
             blank_id: Blank token ID for CTC (default 0).
             freeze_encoder: Whether to freeze encoder weights (default True).
             encoder_layer: Which encoder layer to use (-1 = last, 0-indexed otherwise).
+            cache_dir: Optional cache directory for HuggingFace model.
         """
         super().__init__()
-        self.processor = WhisperProcessor.from_pretrained(hf_repo)
-        self.model = WhisperModel.from_pretrained(hf_repo)
+        self.processor = WhisperProcessor.from_pretrained(hf_repo, cache_dir=cache_dir)
+        self.model = WhisperModel.from_pretrained(hf_repo, cache_dir=cache_dir)
         self.encoder_layer = encoder_layer
 
         # Whisper config
@@ -101,7 +103,9 @@ class WhisperEncoderModel(nn.Module):
         self._points_by_frames = 320
         # HF Whisper encoder expects the mel time dimension to be exactly 2 * max_source_positions.
         # For standard Whisper configs: max_source_positions=1500 -> 3000 mel frames (30s).
-        self._expected_mel_len = int(getattr(self.model.config, "max_source_positions", 1500)) * 2
+        self._expected_mel_len = (
+            int(getattr(self.model.config, "max_source_positions", 1500)) * 2
+        )
 
         self.ctc_head: Optional[nn.Linear] = None
         if output_vocabsz is not None and output_vocabsz > 0:
@@ -131,9 +135,7 @@ class WhisperEncoderModel(nn.Module):
         """Get blank token ID for CTC."""
         return self.blank_id
 
-    def _compute_encoder_lengths(
-        self, speech_lengths: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_encoder_lengths(self, speech_lengths: torch.Tensor) -> torch.Tensor:
         """Compute encoder output lengths from input speech lengths.
 
         Whisper processes up to 30s (480000 samples at 16kHz) and outputs
@@ -181,7 +183,9 @@ class WhisperEncoderModel(nn.Module):
         # Pad/trim here so training/inference works for variable-length audio.
         cur_len = int(input_features.size(-1))
         if cur_len < self._expected_mel_len:
-            input_features = F.pad(input_features, (0, self._expected_mel_len - cur_len))
+            input_features = F.pad(
+                input_features, (0, self._expected_mel_len - cur_len)
+            )
         elif cur_len > self._expected_mel_len:
             input_features = input_features[..., : self._expected_mel_len]
         return input_features

@@ -92,6 +92,7 @@ class VaaniGeolocation(LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         target_sr: int = 16000,
+        num_classes: int = 3,
     ):
         super().__init__()
         self.save_hyperparameters()

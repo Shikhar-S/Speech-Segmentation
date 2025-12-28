@@ -21,8 +21,9 @@ def build_wavlm_model(
     hf_repo: str = "microsoft/wavlm-base",
     output_vocabsz: Optional[int] = None,
     blank_id: int = 0,
-    freeze_encoder: bool = True,
+    freeze_encoder: bool = False,
     encoder_layer: int = -1,
+    cache_dir: Optional[str] = None,
 ) -> WavLMEncoderModel:
     """Build WavLM encoder model for PhoneBench.
 
@@ -31,8 +32,9 @@ def build_wavlm_model(
         output_vocabsz: If set, creates a CTC head with this vocab size.
             Required for forced alignment. Use IPATokenizer.vocab_size() for IPA.
         blank_id: Blank token ID for CTC (default 0, matching IPATokenizer).
-        freeze_encoder: Whether to freeze encoder weights (default True).
+        freeze_encoder: Whether to freeze encoder weights (default False).
         encoder_layer: Which encoder layer to use (-1 = last).
+        cache_dir: Optional cache directory for HuggingFace model.
 
     Returns:
         WavLMEncoderModel instance.
@@ -43,6 +45,7 @@ def build_wavlm_model(
         blank_id=blank_id,
         freeze_encoder=freeze_encoder,
         encoder_layer=encoder_layer,
+        cache_dir=cache_dir,
     )
     log.info(f"WavLM model loaded from {hf_repo}")
     log.info(f"Encoder dim: {model.encoder_output_size()}")
