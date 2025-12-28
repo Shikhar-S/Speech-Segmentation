@@ -7,6 +7,20 @@ Usage:
         --key_field utt_id \
         --language_field lang_sym
     
+    python -m src.metrics.phone_recognition --evaluation_name zipactcns \
+        --prediction_file exp/runs/inf_doreco_zipactc_ns/4jobARR/transcription.json \
+        --output_file exp/runs/inf_doreco_zipactc_ns/4jobARR/inventory_results.csv \
+        --gt_field target \
+        --key_field utt_id \
+        --language_field lang_sym
+    
+    python -m src.metrics.phone_recognition --evaluation_name zipactc \
+        --prediction_file exp/runs/inf_doreco_zipactc/doreco4gpu/transcription.json \
+        --output_file exp/runs/inf_doreco_zipactc/doreco4gpu/inventory_results.csv \
+        --gt_field target \
+        --key_field utt_id \
+        --language_field lang_sym    
+    
     python -m src.metrics.phone_recognition \
         --prediction_file exp/runs/inf_doreco_lv60/20251220_085643/transcription.withlang.json \
         --gt_field target \

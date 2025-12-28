@@ -25,6 +25,7 @@ from src.model.heads.base_head import BaseHead, InputType, TaskType
 from src.utils import RankedLogger
 from src.recipe.common.geolocation_loss import GeolocationAngularLoss
 from src.metrics.kendalltau import KendallTau
+from src.metrics.geolocation import GeolocationMissRate, GeolocationDistanceError
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -133,6 +134,13 @@ class ClassificationModel(LightningModule):
             self.metrics["val"]["kendalltau"] = KendallTau()
             self.metrics["test"]["kendalltau"] = KendallTau()
 
+        if self.classification_head.task_type == TaskType.GEOLOCATION:
+            for stage in ["val", "test"]:
+                self.metrics[stage]["err_km"] = GeolocationDistanceError()
+                self.metrics[stage]["miss_rate_top1"] = GeolocationMissRate(k=1)
+                self.metrics[stage]["miss_rate_top5"] = GeolocationMissRate(k=5)
+                self.metrics[stage]["miss_rate_top10"] = GeolocationMissRate(k=10)
+
         for stage, stage_metrics in self.metrics.items():
             for name, metric in stage_metrics.items():
                 setattr(self, f"{stage}_{name}", metric)
@@ -201,6 +209,13 @@ class ClassificationModel(LightningModule):
             if "kendalltau" in self.metrics[stage]:
                 # kendalltau on predicted class labels
                 self.metrics[stage]["kendalltau"](preds, targets)
+
+        if self.classification_head.task_type == TaskType.GEOLOCATION:
+            if stage in {"val", "test"}:
+                self.metrics[stage]["err_km"](logits, targets)
+                for key, metric in self.metrics[stage].items():
+                    if key.startswith("miss_rate"):
+                        metric(logits, targets)
 
     def _log_stage_metrics(
         self,
@@ -314,7 +329,10 @@ class ClassificationModel(LightningModule):
             )
         elif self.classification_head.task_type == TaskType.GEOLOCATION:
             self._log_stage_metrics(
-                "val", on_step=False, on_epoch=True, prog_bar_keys=("loss")
+                "val",
+                on_step=False,
+                on_epoch=True,
+                prog_bar_keys=("loss", "err_km", "miss_rate_top1"),
             )
         else:
             raise ValueError(
@@ -368,6 +386,10 @@ class ClassificationModel(LightningModule):
         elif self.classification_head.task_type == TaskType.REGRESSION:
             loss_vec = torch.nn.functional.mse_loss(
                 logits.squeeze(-1), targets.float(), reduction="none"
+            )
+        elif self.classification_head.task_type == TaskType.GEOLOCATION:
+            raise NotImplementedError(
+                "Per-example loss not implemented for Geolocation. Add a reduce param"
             )
         else:
             raise NotImplementedError(

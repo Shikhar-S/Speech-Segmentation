@@ -226,7 +226,7 @@ class PowsmCTCInference:
             {
                 "predicted_transcript": text_nospecial,
                 "processed_transcript": processed,
-                "token_int": token_int,
+                # "token_int": token_int,
             }
         ]
 
