@@ -1,6 +1,6 @@
-_target_: src.data.vaani.geolocation_hf.VaaniGeolocation
+_target_: src.data.vaani.geolocation.VaaniGeolocation
 hf_repo: shikhar7ssu/vaani140-geo
-work_dir: ${paths.cache_dir}/vaanihindi
+cache_dir: ${paths.cache_dir}/vaanihindi
 target_sr: 16000
 batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 num_workers: 10
