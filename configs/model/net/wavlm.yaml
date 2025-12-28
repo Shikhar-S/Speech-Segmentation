@@ -1,0 +1,7 @@
+_target_: src.model.wavlm.builders.build_wavlm_model
+hf_repo: ???
+# microsoft/wavlm-base
+# microsoft/wavlm-base-plus
+# microsoft/wavlm-large
+
+output_vocabsz: ???
