@@ -27,6 +27,7 @@ from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
+
 def _write_text(path: Union[str, Path], text: str) -> None:
     """Write text to disk (best-effort atomic write).
 
@@ -105,7 +106,12 @@ class PowsmCTCInference:
 
         # These are set by ESPnet and used for long/short split.
         self.sample_rate = getattr(self.backend, "sample_rate", 16000)
-        self.preprocessor_conf = getattr(getattr(self.backend, "s2t_train_args", None), "preprocessor_conf", {}) or {}
+        self.preprocessor_conf = (
+            getattr(
+                getattr(self.backend, "s2t_train_args", None), "preprocessor_conf", {}
+            )
+            or {}
+        )
 
         log.info(f"Decoding device={device}, dtype={dtype}")
 
@@ -124,6 +130,8 @@ class PowsmCTCInference:
         _ = args, kwargs
 
         lang_sym = lang_sym if lang_sym is not None else self.lang_sym
+        if lang_sym not in self.backend.converter.token2id:
+            lang_sym = "<unk>"  # Hack to allow inference with unseen langs (doreco)
         task_sym = task_sym if task_sym is not None else self.task_sym
 
         # Normalize speech to 1-D array (ESPnet accepts np.ndarray or torch.Tensor)
@@ -161,8 +169,14 @@ class PowsmCTCInference:
             except Exception:
                 text_prev_arg = "<na>"
 
-        buffer_len_in_secs = float(self.preprocessor_conf.get("speech_length", self.max_segment_length))
-        buffer_len = int(round(buffer_len_in_secs * float(self.sample_rate))) if buffer_len_in_secs > 0 else 0
+        buffer_len_in_secs = float(
+            self.preprocessor_conf.get("speech_length", self.max_segment_length)
+        )
+        buffer_len = (
+            int(round(buffer_len_in_secs * float(self.sample_rate)))
+            if buffer_len_in_secs > 0
+            else 0
+        )
         duration_seconds = float(len(speech_1d)) / float(self.sample_rate)
 
         try:
@@ -208,11 +222,13 @@ class PowsmCTCInference:
         processed = (
             text_nospecial.split(">")[-1].replace("/", "") if text_nospecial else ""
         )
-        return [{
-            "predicted_transcript": text_nospecial,
-            "processed_transcript": processed,
-            "token_int": token_int,
-        }]
+        return [
+            {
+                "predicted_transcript": text_nospecial,
+                "processed_transcript": processed,
+                "token_int": token_int,
+            }
+        ]
 
 
 def build_powsm_ctc_inference(
@@ -253,7 +269,12 @@ def build_powsm_ctc_inference(
     """
     # Download snapshot (no cross-process locking). If a multi-process race causes an
     # incomplete snapshot, we fail-fast with a clear error below.
-    if hf_repo and (config_file is None) and (model_file is None) and (stats_file is None):
+    if (
+        hf_repo
+        and (config_file is None)
+        and (model_file is None)
+        and (stats_file is None)
+    ):
         root = Path(work_dir)
         required_rel = [
             POWSM_CTC_REL_CONFIG,
@@ -372,6 +393,3 @@ def build_powsm_ctc_inference(
         long_form_batch_size=long_form_batch_size,
         use_prompt_encoder=use_prompt_encoder,
     )
-
-
-
