@@ -78,6 +78,8 @@ declare -A model_configs=(
     ["zipactc"]="zipactc|anyspeech/zipa-large-crctc-500k"
     ["zipactc_ns"]="zipactc|anyspeech/zipa-large-crctc-ns-800k"
     ["gemini"]="gemini|"
+    ["wavlm"]="wavlm|microsoft/wavlm-base"
+    ["whisper"]="whisper|openai/whisper-small"
 )
 
 # Recipe = task_dataset

@@ -18,7 +18,7 @@ seed: 42
 
 trainer:
   min_epochs: 10
-  max_epochs: 10 # NOTE(shikhar): 10 epochs are enough, this model overfits after that
+  max_epochs: 25
   gradient_clip_val: 1.0
   val_check_interval: 0.25 # validate 4 times per epoch
   callbacks:
@@ -41,9 +41,13 @@ data:
 
 callbacks:
   model_checkpoint:
-    monitor: "val/pcc"
+    monitor: "val/kendalltau"
     mode: "max"
     save_top_k: 1
+  early_stopping:
+    monitor: "val/kendalltau"
+    patience: 5
+    mode: "max"
 
 logger:
   wandb:
