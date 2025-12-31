@@ -64,6 +64,7 @@ declare -A cluster_configs=(
     ["dai"]="scripts/dai.batch"
     ["delta"]="scripts/delta.batch"
     ["babel"]="scripts/babel.batch"
+    ["vllm"]="scripts/vllm_dai.batch"
 )
 
 # Model configurations: base_model|hf_repo
@@ -80,6 +81,8 @@ declare -A model_configs=(
     ["gemini"]="gemini|"
     ["wavlm"]="wavlm|microsoft/wavlm-base"
     ["whisper"]="whisper|openai/whisper-small"
+    ["qweni"]="qweninstruct"
+    ["qwent"]="qwenthinking"
 )
 
 # Recipe = task_dataset
