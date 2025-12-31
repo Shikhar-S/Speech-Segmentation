@@ -154,22 +154,39 @@ class VaaniGeolocation(LightningDataModule):
 
 def naive_baseline():
     from tqdm import tqdm
+    import math
+    import torch
+
+    lat_min = math.inf
+    lat_max = -math.inf
+    long_min = math.inf
+    long_max = -math.inf
 
     dm = VaaniGeolocation(
         hf_repo=args.hf_repo, cache_dir=args.cache_dir, batch_size=2, num_workers=1
     )
     dm.prepare_data()
     dm.setup()
+
     av_lat = 0
     av_long = 0
     count = 0
-    for item in tqdm(dm.train_dataloader().dataset, "Calculating train set average..."):
+
+    # --- 1. Process Train Set ---
+    for item in tqdm(dm.train_dataloader().dataset, "Scanning train set..."):
         av_lat += item["target"][0]
         av_long += item["target"][1]
+
+        lat_min = min(lat_min, item["target"][0])
+        lat_max = max(lat_max, item["target"][0])
+        long_min = min(long_min, item["target"][1])
+        long_max = max(long_max, item["target"][1])
         count += 1
+
     av_lat /= count
     av_long /= count
-    print(f"Average Latitude: {av_lat}, Average Longitude: {av_long}")
+
+    # --- 2. Process Test Set ---
     from src.recipe.common.geolocation_loss import GeolocationAngularLoss
 
     pred_x = math.cos(av_lat) * math.cos(av_long)
@@ -177,11 +194,12 @@ def naive_baseline():
     pred_z = math.sin(av_lat)
     pred_tensor = torch.tensor([[pred_x, pred_y, pred_z]])
     loss_fn = GeolocationAngularLoss()
+
     total_loss = 0.0
     count = 0
     test_set = dm.test_dataloader().dataset
-    # val_set = dm.val_dataloader().dataset
-    for item in tqdm(test_set, total=len(test_set)):
+
+    for item in tqdm(test_set, total=len(test_set), desc="Scanning test set..."):
         target_tensor = torch.tensor([item["target"]])
         loss_val = loss_fn(
             prediction=pred_tensor,
@@ -189,12 +207,44 @@ def naive_baseline():
         )
         total_loss += loss_val.item()
         count += 1
-    print(f"Total test loss: {total_loss}")
-    print(f"Average test loss: {total_loss / count if count > 0 else 0}")
+
+        lat_min = min(lat_min, item["target"][0])
+        lat_max = max(lat_max, item["target"][0])
+        long_min = min(long_min, item["target"][1])
+        long_max = max(long_max, item["target"][1])
+
+    # --- 3. Calculate Extents using Haversine ---
+    def haversine_km(lat1, lon1, lat2, lon2):
+        R_EARTH_KM = 6371.0
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+
+        # Haversine formula
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+        )
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return R_EARTH_KM * c
+
+    # Midpoint latitude for calculating the 'average' width
+    mean_lat = 0.5 * (lat_min + lat_max)
+
+    # North-South: Distance between min and max latitude (along the same longitude)
+    ns_extent_km = haversine_km(lat_min, 0, lat_max, 0)
+
+    # East-West: Distance between min and max longitude (at the mean latitude)
+    ew_extent_km = haversine_km(mean_lat, long_min, mean_lat, long_max)
+
+    print("-" * 30)
+    print(f"North-South Extent: {ns_extent_km:.2f} km")
+    print(f"East-West Extent:   {ew_extent_km:.2f} km")
+    print(f"Total test loss:    {total_loss}")
+    print(f"Average test loss:  {total_loss / count if count > 0 else 0}")
+    print("-" * 30)
 
 
 if __name__ == "__main__":
-    # Example usage
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -202,16 +252,4 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, required=True)
     args = parser.parse_args()
 
-    dm = VaaniGeolocation(
-        hf_repo=args.hf_repo, cache_dir=args.cache_dir, batch_size=2, num_workers=1
-    )
-    dm.prepare_data()
-    dm.setup()
-
-    loader = dm.train_dataloader()
-    batch = next(iter(loader))
-    print(batch)
-    print(f"Loaded batch with {batch['speech'].shape[0]} samples.")
-    del dm
-    # Run naive baseline
     naive_baseline()

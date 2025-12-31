@@ -44,5 +44,5 @@ callbacks:
 logger:
   wandb:
     tags: ${tags}
-    group: "atypical_ultrasuite_powsm_ctc"
+    group: ${task_name}
     name: ${task_name}
