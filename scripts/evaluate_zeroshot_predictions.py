@@ -8,7 +8,7 @@ using **the same metric definitions as PhoneBench probing** (src/recipe/common/c
 Supports:
 - classification (class_id): cmul2arcticl1, edacc, fleurs, ultrasuite_child
 - ordinal/regression (score): speechocean, easycall, uaspeech
-- geolocation (x, y, z): vaanigeo
+- geolocation (lat, lon in decimal degrees): vaanigeo
 
 Usage:
     # Auto-detect predictions in run_dir
@@ -115,7 +115,7 @@ TASK_SPECS: Dict[str, TaskSpec] = {
     "easycall": TaskSpec(TaskType.REGRESSION, num_classes=4, min_value=0, max_value=3, pred_key="score"),
     "uaspeech": TaskSpec(TaskType.REGRESSION, num_classes=5, min_value=0, max_value=4, pred_key="score"),
     # Geolocation
-    "vaanigeo": TaskSpec(TaskType.GEOLOCATION, num_classes=3, pred_key="x"),  # x, y, z
+    "vaanigeo": TaskSpec(TaskType.GEOLOCATION, num_classes=2, pred_key="lat"),  # lat/lon in degrees
 }
 
 
@@ -157,18 +157,17 @@ def load_predictions(pattern: str, exclude_cache_error: bool = True) -> List[Dic
 
     Args:
         pattern: Glob pattern for JSONL files
-        exclude_cache_error: If True, exclude files matching *.cache.jsonl and *.errors.jsonl
+        exclude_cache_error: If True, exclude files matching *cache*.jsonl and *error(s)*.jsonl
     """
     files = sorted(glob(pattern))
     if exclude_cache_error:
-        # Backward compatible: exclude both ".error.jsonl" and ".errors.jsonl"
+        # Exclude cache + error shards (e.g., prediction.cache.jsonl, prediction.errors.0.jsonl)
         files = [
             f
             for f in files
-            if not (
-                f.endswith(".cache.jsonl")
-                or f.endswith(".errors.jsonl")
-            )
+            if ".cache" not in Path(f).name
+            and ".error" not in Path(f).name
+            and ".errors" not in Path(f).name
         ]
     if not files:
         raise FileNotFoundError(f"No files found matching pattern: {pattern}")
@@ -291,28 +290,16 @@ def extract_regression(
     return raw_preds, int_preds, targets, len(targets), invalid
 
 
-def xyz_to_latlon_rad(x: float, y: float, z: float) -> Tuple[float, float]:
-    """Convert unit vector (x, y, z) to (lat_rad, lon_rad).
-
-    Same formula as src/metrics/geolocation.py and src/recipe/common/geolocation_loss.py:
-        lon_rad = atan2(y, x)
-        lat_rad = atan2(z, sqrt(x^2 + y^2))
-    """
-    # Normalize to unit vector
-    norm = math.sqrt(x * x + y * y + z * z)
-    if norm < 1e-8:
-        return 0.0, 0.0
-    x, y, z = x / norm, y / norm, z / norm
-
-    lon_rad = math.atan2(y, x)
-    lat_rad = math.atan2(z, max(math.sqrt(x * x + y * y), 1e-8))
-    return lat_rad, lon_rad
-
-
 def extract_geolocation(
     records: List[Dict[str, Any]],
 ) -> Tuple[List[Tuple[float, float, float]], List[Tuple[float, float]], int, int]:
-    """Extract geolocation predictions (x,y,z) and targets (lat_rad, lon_rad)."""
+    """Extract geolocation predictions (lat/lon in degrees) and targets (lat_rad, lon_rad).
+
+    - The model outputs {"lat": <deg>, "lon": <deg>}.
+    - PhoneBench targets are [lat_rad, lon_rad].
+    - For existing PhoneBench geolocation metrics, we convert predicted (lat_deg, lon_deg)
+      -> (lat_rad, lon_rad) -> (x, y, z) unit vector.
+    """
     preds_xyz, targets_latlon = [], []
     invalid = 0
 
@@ -329,22 +316,26 @@ def extract_geolocation(
             invalid += 1
             continue
 
-        x = pred.get("x")
-        y = pred.get("y")
-        z = pred.get("z")
-
-        if any(v is None or not isinstance(v, (int, float)) for v in [x, y, z]):
+        lat_deg = pred.get("lat")
+        lon_deg = pred.get("lon")
+        if any(v is None or not isinstance(v, (int, float)) for v in [lat_deg, lon_deg]):
             invalid += 1
             continue
 
-        x, y, z = float(x), float(y), float(z)
-
-        # Normalize to unit vector
-        norm = math.sqrt(x * x + y * y + z * z)
-        if norm < 1e-8:
+        lat_deg = float(lat_deg)
+        lon_deg = float(lon_deg)
+        if not (-90.0 <= lat_deg <= 90.0) or not (-180.0 <= lon_deg <= 180.0):
             invalid += 1
             continue
-        x, y, z = x / norm, y / norm, z / norm
+
+        # degrees -> radians
+        lat_rad_pred = math.radians(lat_deg)
+        lon_rad_pred = math.radians(lon_deg)
+
+        # radians -> unit sphere cartesian
+        x = math.cos(lat_rad_pred) * math.cos(lon_rad_pred)
+        y = math.cos(lat_rad_pred) * math.sin(lon_rad_pred)
+        z = math.sin(lat_rad_pred)
 
         # Target should be [lat_rad, lon_rad]
         if not isinstance(target, (list, tuple)) or len(target) != 2:
@@ -603,7 +594,7 @@ def main():
     if args.predictions:
         pattern = args.predictions
     elif args.run_dir:
-        pattern = str(Path(args.run_dir) / "prediction.*.jsonl")
+        pattern = str(Path(args.run_dir) / "prediction*.jsonl")
     else:
         parser.error("Either --run_dir or --predictions must be specified")
 

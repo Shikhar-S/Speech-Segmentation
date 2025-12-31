@@ -34,7 +34,7 @@ class DirectPromptInference:
     Returns a single prediction dict per sample:
     - Classification: {"class_id": int}
     - Regression: {"score": number}
-    - Geolocation: {"x": float, "y": float, "z": float}
+    - Geolocation: {"lat": number, "lon": number}  (decimal degrees)
 
     On error, returns None for pred and logs details to errors.jsonl only.
     """
@@ -150,7 +150,7 @@ class DirectPromptInference:
             Prediction dict on success:
                 - Classification: {"class_id": int}
                 - Regression: {"score": number}
-                - Geolocation: {"x": float, "y": float, "z": float}
+                - Geolocation: {"lat": number, "lon": number}  (decimal degrees)
             None on error (error details logged to errors.jsonl).
         """
         # TODO(Yoonjae): Need to maintain consistency for dealing with cache_key (with transcribe.py).
