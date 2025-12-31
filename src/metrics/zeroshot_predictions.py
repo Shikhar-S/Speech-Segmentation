@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
-"""
-Evaluate zero-shot prediction results against ground truth.
+"""Evaluate zero-shot prediction results against ground truth.
 
-This script evaluates JSONL prediction files from the Gemini direct-prompt runner
+This module evaluates JSONL prediction files from the Gemini direct-prompt runner
 using **the same metric definitions as PhoneBench probing** (src/recipe/common/classification_module.py).
 
 Supports:
@@ -11,17 +9,18 @@ Supports:
 - geolocation (lat, lon in decimal degrees): vaanigeo
 
 Usage:
-    # Auto-detect predictions in run_dir
-    python scripts/evaluate_zeroshot_predictions.py \\
+    python -m src.metrics.zeroshot_predictions \\
         --dataset vaanigeo \\
         --run_dir exp/runs/vaani/20251230_201815
 
-    # Explicit glob pattern
-    python scripts/evaluate_zeroshot_predictions.py \\
+    python -m src.metrics.zeroshot_predictions \\
         --dataset cmul2arcticl1 \\
         --predictions "exp/runs/dp_gemini_l1cls/prediction.*.jsonl"
 
-Reference: DOWNSTREAM_TASK_SPECS.md, src/recipe/common/classification_module.py
+    python -m src.metrics.zeroshot_predictions \\
+        --dataset speechocean \\
+        --run_dir exp/runs/speechocean/20251231_012345 \\
+        --output exp/eval_results/speechocean_report
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from dataclasses import dataclass
 from enum import Enum
 from glob import glob
@@ -38,9 +36,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
+from src.metrics.geolocation import GeolocationDistanceError, GeolocationMissRate
+
 # ---------------------------------------------------------------------------
 # Lazy imports for metrics (scipy may not be installed)
 # ---------------------------------------------------------------------------
+
 
 def _import_torchmetrics():
     from torchmetrics.classification import (
@@ -49,6 +50,7 @@ def _import_torchmetrics():
         MulticlassF1Score,
     )
     from torchmetrics.regression import MeanAbsoluteError, PearsonCorrCoef
+
     return {
         "CohenKappa": CohenKappa,
         "MulticlassAccuracy": MulticlassAccuracy,
@@ -61,11 +63,8 @@ def _import_torchmetrics():
 def _import_kendalltau():
     """Import KendallTau metric from src/metrics (requires scipy)."""
     try:
-        # Add src to path if not already
-        src_path = Path(__file__).resolve().parent.parent / "src"
-        if str(src_path) not in sys.path:
-            sys.path.insert(0, str(src_path))
-        from metrics.kendalltau import KendallTau
+        from src.metrics.kendalltau import KendallTau
+
         return KendallTau
     except ImportError as e:
         print(
@@ -76,29 +75,21 @@ def _import_kendalltau():
         return None
 
 
-def _import_geolocation_metrics():
-    """Import geolocation metrics from src/metrics."""
-    src_path = Path(__file__).resolve().parent.parent / "src"
-    if str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
-    from metrics.geolocation import GeolocationDistanceError, GeolocationMissRate
-    return GeolocationDistanceError, GeolocationMissRate
-
-
 # ---------------------------------------------------------------------------
 # Task specifications (same as DOWNSTREAM_TASK_SPECS.md)
 # ---------------------------------------------------------------------------
 
+
 class TaskType(Enum):
     CLASSIFICATION = "classification"
-    REGRESSION = "regression"  # ordinal/regression
+    REGRESSION = "regression"
     GEOLOCATION = "geolocation"
 
 
 @dataclass
 class TaskSpec:
     task_type: TaskType
-    num_classes: int  # K (for cls: #classes, for reg: max+1, for geo: 3)
+    num_classes: int  # K (for cls: #classes, for reg: max+1, for geo: 2)
     min_value: int = 0
     max_value: int = 0  # only for regression
     pred_key: str = "class_id"  # key in pred dict
@@ -106,22 +97,33 @@ class TaskSpec:
 
 TASK_SPECS: Dict[str, TaskSpec] = {
     # Classification
-    "cmul2arcticl1": TaskSpec(TaskType.CLASSIFICATION, num_classes=7, pred_key="class_id"),
+    "cmul2arcticl1": TaskSpec(
+        TaskType.CLASSIFICATION, num_classes=7, pred_key="class_id"
+    ),
     "edacc": TaskSpec(TaskType.CLASSIFICATION, num_classes=13, pred_key="class_id"),
     "fleurs": TaskSpec(TaskType.CLASSIFICATION, num_classes=24, pred_key="class_id"),
-    "ultrasuite_child": TaskSpec(TaskType.CLASSIFICATION, num_classes=2, pred_key="class_id"),
+    "ultrasuite_child": TaskSpec(
+        TaskType.CLASSIFICATION, num_classes=2, pred_key="class_id"
+    ),
     # Ordinal/Regression
-    "speechocean": TaskSpec(TaskType.REGRESSION, num_classes=11, min_value=0, max_value=10, pred_key="score"),
-    "easycall": TaskSpec(TaskType.REGRESSION, num_classes=4, min_value=0, max_value=3, pred_key="score"),
-    "uaspeech": TaskSpec(TaskType.REGRESSION, num_classes=5, min_value=0, max_value=4, pred_key="score"),
-    # Geolocation
-    "vaanigeo": TaskSpec(TaskType.GEOLOCATION, num_classes=2, pred_key="lat"),  # lat/lon in degrees
+    "speechocean": TaskSpec(
+        TaskType.REGRESSION, num_classes=11, min_value=0, max_value=10, pred_key="score"
+    ),
+    "easycall": TaskSpec(
+        TaskType.REGRESSION, num_classes=4, min_value=0, max_value=3, pred_key="score"
+    ),
+    "uaspeech": TaskSpec(
+        TaskType.REGRESSION, num_classes=5, min_value=0, max_value=4, pred_key="score"
+    ),
+    # Geolocation (lat/lon in degrees)
+    "vaanigeo": TaskSpec(TaskType.GEOLOCATION, num_classes=2, pred_key="lat"),
 }
 
 
 # ---------------------------------------------------------------------------
 # Record normalization (distributed_inference.py format)
 # ---------------------------------------------------------------------------
+
 
 def normalize_record(record: Any) -> Optional[Dict[str, Any]]:
     """Normalize one JSON record from distributed inference outputs.
@@ -142,7 +144,7 @@ def normalize_record(record: Any) -> Optional[Dict[str, Any]]:
 
     # distributed_inference.py writes one-key dict per line: {i: {...}}
     if len(record) == 1:
-        (idx, payload), = record.items()
+        ((idx, payload),) = record.items()
         if isinstance(payload, dict) and ("pred" in payload or "passthrough" in payload):
             out: Dict[str, Any] = {"idx": idx}
             out.update(payload)
@@ -152,7 +154,9 @@ def normalize_record(record: Any) -> Optional[Dict[str, Any]]:
     return record
 
 
-def load_predictions(pattern: str, exclude_cache_error: bool = True) -> List[Dict[str, Any]]:
+def load_predictions(
+    pattern: str, exclude_cache_error: bool = True
+) -> List[Dict[str, Any]]:
     """Load predictions from JSONL file(s) matching the pattern.
 
     Args:
@@ -185,7 +189,9 @@ def load_predictions(pattern: str, exclude_cache_error: bool = True) -> List[Dic
                     if norm is not None:
                         records.append(norm)
                 except json.JSONDecodeError as e:
-                    print(f"Warning: Skipping malformed JSON at {filepath}:{line_num}: {e}")
+                    print(
+                        f"Warning: Skipping malformed JSON at {filepath}:{line_num}: {e}"
+                    )
 
     print(f"Loaded {len(records)} records from {len(files)} file(s)")
     return records
@@ -208,6 +214,7 @@ def filter_test_split(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Extraction functions
 # ---------------------------------------------------------------------------
+
 
 def extract_classification(
     records: List[Dict[str, Any]], spec: TaskSpec
@@ -354,6 +361,7 @@ def extract_geolocation(
 # Metric computation (matching src/recipe/common/classification_module.py)
 # ---------------------------------------------------------------------------
 
+
 def compute_classification_metrics(
     preds: List[int], targets: List[int], num_classes: int
 ) -> Dict[str, float]:
@@ -393,7 +401,9 @@ def compute_regression_metrics(
     acc = tm["MulticlassAccuracy"](num_classes=num_classes)
     f1 = tm["MulticlassF1Score"](num_classes=num_classes, average="macro")
     mae = tm["MeanAbsoluteError"]()
-    cohenkappa = tm["CohenKappa"](task="multiclass", num_classes=num_classes, weights="quadratic")
+    cohenkappa = tm["CohenKappa"](
+        task="multiclass", num_classes=num_classes, weights="quadratic"
+    )
     pcc = tm["PearsonCorrCoef"]()
 
     metrics = {
@@ -419,8 +429,6 @@ def compute_geolocation_metrics(
     targets_latlon: List[Tuple[float, float]],
 ) -> Dict[str, float]:
     """Compute geolocation metrics (same as ClassificationModel)."""
-    GeolocationDistanceError, GeolocationMissRate = _import_geolocation_metrics()
-
     preds_t = torch.tensor(preds_xyz)  # (N, 3)
     targets_t = torch.tensor(targets_latlon)  # (N, 2) - lat_rad, lon_rad
 
@@ -445,6 +453,7 @@ def compute_geolocation_metrics(
 # ---------------------------------------------------------------------------
 # Report generation
 # ---------------------------------------------------------------------------
+
 
 def get_primary_metrics(task_type: TaskType, metrics: Dict[str, Any]) -> Dict[str, Any]:
     """Extract Table 4 primary metrics."""
@@ -482,15 +491,15 @@ def save_report(
     if format in ["md", "both"]:
         md_path = output_path.with_suffix(".md")
         with open(md_path, "w", encoding="utf-8") as f:
-            f.write(f"# Direct Prompt Verification Report\n\n")
+            f.write("# Direct Prompt Verification Report\n\n")
             f.write(f"**Dataset**: {dataset}\n\n")
             f.write(f"**Task Type**: {results['task_type']}\n\n")
 
-            f.write(f"## Summary\n\n")
+            f.write("## Summary\n\n")
             f.write(f"- Valid samples: {results['valid_count']}\n")
             f.write(f"- Invalid/skipped samples: {results['invalid_count']}\n\n")
 
-            f.write(f"## Table 4 Primary Metrics\n\n")
+            f.write("## Table 4 Primary Metrics\n\n")
             f.write("| Metric | Value |\n")
             f.write("|--------|-------|\n")
             for k, v in results["primary_metrics"].items():
@@ -501,7 +510,7 @@ def save_report(
                 else:
                     f.write(f"| {k} | {v} |\n")
 
-            f.write(f"\n## All Metrics\n\n")
+            f.write("\n## All Metrics\n\n")
             f.write("| Metric | Value |\n")
             f.write("|--------|-------|\n")
             for k, v in results["metrics"].items():
@@ -519,7 +528,9 @@ def print_summary(results: Dict[str, Any], dataset: str) -> None:
     print("\n" + "=" * 60)
     print(f"Dataset: {dataset}")
     print(f"Task Type: {results['task_type']}")
-    print(f"Valid samples: {results['valid_count']}, Invalid/skipped: {results['invalid_count']}")
+    print(
+        f"Valid samples: {results['valid_count']}, Invalid/skipped: {results['invalid_count']}"
+    )
     print("=" * 60)
     print("\n--- Table 4 Primary Metrics ---")
     for k, v in results["primary_metrics"].items():
@@ -541,15 +552,12 @@ def print_summary(results: Dict[str, Any], dataset: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main
+# CLI (PhoneRecognition style: add_args + main)
 # ---------------------------------------------------------------------------
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Verify Gemini direct-prompt results",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
+
+def add_args(parser: argparse.ArgumentParser) -> None:
+    """Add zero-shot prediction evaluation arguments to an argparse parser."""
     parser.add_argument(
         "--dataset",
         type=str,
@@ -561,7 +569,7 @@ def main():
         "--run_dir",
         type=str,
         default=None,
-        help="Run directory containing prediction.*.jsonl files",
+        help="Run directory containing prediction*.jsonl files",
     )
     parser.add_argument(
         "--predictions",
@@ -588,6 +596,15 @@ def main():
         help="Do not filter to test split only (use all records)",
     )
 
+
+def main() -> None:
+    """Main entry point for zero-shot prediction evaluation."""
+    parser = argparse.ArgumentParser(
+        description="Evaluate zero-shot predictions against ground truth",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    add_args(parser)
     args = parser.parse_args()
 
     # Determine predictions pattern
@@ -622,7 +639,9 @@ def main():
         if valid == 0:
             print("Error: No valid regression predictions found")
             return
-        metrics = compute_regression_metrics(raw_preds, int_preds, targets, spec.num_classes)
+        metrics = compute_regression_metrics(
+            raw_preds, int_preds, targets, spec.num_classes
+        )
 
     elif spec.task_type == TaskType.GEOLOCATION:
         preds_xyz, targets_latlon, valid, invalid = extract_geolocation(records)
