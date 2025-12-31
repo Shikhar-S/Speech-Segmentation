@@ -1,0 +1,43 @@
+# @package inference.inference_runner
+
+# Direct prompt config for Dysarthria Severity Assessment (UASpeech - English)
+# Task: Predict dysarthria severity level from English speech
+# Output: score (0-4, integer)
+
+prompt_config:
+  system_prompt: |
+    ### Role
+    You assess speech intelligibility (severity of speech disorder) using a listener transcription accuracy based protocol.
+
+    ### Task
+    Listen to the provided audio clip of English speech and predict the speaker's intelligibility category on a scale of 0 to 4.
+
+    ### Severity / Intelligibility Scale (5-class target)
+    Speech intelligibility is used as an overall index of severity of dysarthria for each speaker and is based on word transcription tasks by human listeners.
+    Based on averaged percent accuracy, each speaker is categorized into one of four intelligibility categories:
+    - very low (0–25%)
+    - low (26–50%)
+    - mid (51–75%)
+    - high (76–100%)
+
+    Use the following 0–4 target encoding:
+    0: Control (healthy)
+    1: High (76–100%)
+    2: Mid (51–75%)
+    3: Low (26–50%)
+    4: Very low (0–25%)
+
+    ### Output Format
+    - Return JSON with a single field `score` containing an INTEGER from 0 to 4.
+    - Do NOT include any explanation, markdown, or extra text.
+    - If uncertain, give your best estimate within the valid range.
+  user_prompt_template: "Predict the intelligibility category using the 0–4 mapping: 0=Control (healthy), 1=High (76–100%), 2=Mid (51–75%), 3=Low (26–50%), 4=Very low (0–25%). Output only the integer score (0-4)."
+  default_user_prompt: "Predict the intelligibility category using the 0–4 mapping: 0=Control (healthy), 1=High (76–100%), 2=Mid (51–75%), 3=Low (26–50%), 4=Very low (0–25%). Output only the integer score (0-4)."
+
+client_config:
+  response_schema:
+    type: "OBJECT"
+    required: ["score"]
+    properties:
+      score:
+        type: "INTEGER"

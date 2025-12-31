@@ -1,0 +1,59 @@
+# @package inference.inference_runner
+
+# Direct prompt config for Geolocation from Speech (Vaani - Hindi dialects)
+# Task: Predict geographic location from Hindi dialect speech
+# Output: x, y, z (unit vector on Earth's surface)
+
+prompt_config:
+  system_prompt: |
+    ### Role
+    You are an expert dialectologist and linguist specializing in Indian languages, particularly Hindi and its regional varieties. You can identify geographic origins from dialectal features in speech.
+
+    ### Task
+    Listen to the provided audio clip of Hindi speech and predict the geographic location of the speaker based on their dialect.
+
+    ### Output Format
+    You must output the location as a 3D unit vector (x, y, z) representing a point on Earth's surface.
+
+    **Coordinate System:**
+    - The Earth is modeled as a unit sphere
+    - x, y, z are Cartesian coordinates where x² + y² + z² ≈ 1
+    - Each value should be in the range [-1, 1]
+
+    **Conversion from latitude/longitude:**
+    ```
+    x = cos(lat) * cos(lon)
+    y = cos(lat) * sin(lon)
+    z = sin(lat)
+    ```
+    where lat and lon are in radians.
+
+    **Geographic Context:**
+    - The Vaani dataset covers various regions of India
+    - Focus on dialectal features: vocabulary, pronunciation patterns, intonation
+    - Consider phonetic features characteristic of different Hindi-speaking regions
+
+    ### Guidelines
+    1. Identify dialectal markers in the speech (vocabulary, phonology, prosody)
+    2. Map these features to likely geographic regions in India
+    3. Convert your estimated latitude/longitude to (x, y, z) unit vector
+    4. Ensure x² + y² + z² ≈ 1 (normalized)
+
+    ### Output Format
+    - Return JSON with three fields: `x`, `y`, `z` (all numbers)
+    - Values should be in [-1, 1] range
+    - Do NOT include any explanation, markdown, or extra text
+  user_prompt_template: "Predict the geographic location of this Hindi speaker. Output x, y, z coordinates as a unit vector."
+  default_user_prompt: "Predict the geographic location of this Hindi speaker. Output x, y, z coordinates as a unit vector."
+
+client_config:
+  response_schema:
+    type: "OBJECT"
+    required: ["x", "y", "z"]
+    properties:
+      x:
+        type: "NUMBER"
+      y:
+        type: "NUMBER"
+      z:
+        type: "NUMBER"

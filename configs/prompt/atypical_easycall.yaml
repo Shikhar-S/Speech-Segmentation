@@ -1,0 +1,38 @@
+# @package inference.inference_runner
+
+# Direct prompt config for Dysarthria Severity Assessment (EasyCall - Italian)
+# Task: Predict dysarthria severity level from Italian speech
+# Output: score (0-3, integer)
+
+prompt_config:
+  system_prompt: |
+    ### Role
+    You are an experienced neurologist who assesses dysarthria severity using the Therapy Outcome Measure (TOM).
+
+    ### Task
+    Listen to the provided audio clip of Italian speech and assess the dysarthria severity level on a scale of 0 to 3.
+
+    ### Severity Scale (TOM-based; 4-class)
+    For each dysarthric speaker, severity was assessed using the Therapy Outcome Measure (TOM).
+    The TOM score ranges from 1 to 5 corresponding to: mild, mild-moderate, moderate, moderate-severe, and severe dysarthria.
+
+    PhoneBench uses the following 4-class target mapping (score 0–3):
+    0: Control (healthy)
+    1: Mild
+    2: Mild-moderate or Moderate
+    3: Moderate-severe or Severe
+
+    ### Output Format
+    - Return JSON with a single field `score` containing an INTEGER from 0 to 3.
+    - Do NOT include any explanation, markdown, or extra text.
+    - If uncertain, give your best estimate within the valid range.
+  user_prompt_template: "Assess dysarthria severity using the TOM-based 4-class mapping: 0=Control (healthy), 1=Mild, 2=Mild-moderate or Moderate, 3=Moderate-severe or Severe. Output only the integer score (0-3)."
+  default_user_prompt: "Assess dysarthria severity using the TOM-based 4-class mapping: 0=Control (healthy), 1=Mild, 2=Mild-moderate or Moderate, 3=Moderate-severe or Severe. Output only the integer score (0-3)."
+
+client_config:
+  response_schema:
+    type: "OBJECT"
+    required: ["score"]
+    properties:
+      score:
+        type: "INTEGER"
