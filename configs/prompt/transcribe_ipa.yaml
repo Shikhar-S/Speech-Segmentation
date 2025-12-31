@@ -28,7 +28,6 @@ prompt_config:
 
     Analyze the audio and produce the structured output now.
   user_prompt_template: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
-  default_user_prompt: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
 
 client_config:
   response_schema:

@@ -50,7 +50,6 @@ prompt_config:
     - Return JSON with a single field `class_id` containing an integer from 0 to 23.
     - Do NOT include any explanation, markdown, or extra text.
   user_prompt_template: "Identify the language. Use ONLY the class mapping above and output exactly one class_id (0-23)."
-  default_user_prompt: "Identify the language. Use ONLY the class mapping above and output exactly one class_id (0-23)."
 
 client_config:
   response_schema:

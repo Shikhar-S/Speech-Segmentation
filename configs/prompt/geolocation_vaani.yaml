@@ -18,7 +18,6 @@ prompt_config:
     - lat in [-90, 90], lon in [-180, 180]
     - Do NOT include any explanation or extra text.
   user_prompt_template: "Predict the geographic location. Output JSON only: {\"lat\": <deg>, \"lon\": <deg>}."
-  default_user_prompt: "Predict the geographic location. Output JSON only: {\"lat\": <deg>, \"lon\": <deg>}."
 
 client_config:
   response_schema:

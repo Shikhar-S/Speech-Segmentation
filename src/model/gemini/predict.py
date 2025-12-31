@@ -62,7 +62,6 @@ class DirectPromptInference:
             prompt_config: Configuration for prompt handling. Expected keys:
                 - system_prompt (str): System instruction for the model
                 - user_prompt_template (str): Template string with {placeholders}
-                - default_user_prompt (str, optional): Fallback prompt if template fails
             device: Ignored parameter for API compatibility with distributed_inference.
             cache_path: Optional path to a JSONL cache file for per-sample checkpointing.
                 If set, each successful prediction is appended as {"key": ..., "pred": ...}.
@@ -78,7 +77,6 @@ class DirectPromptInference:
         # Store prompt configuration
         self.system_prompt = prompt_config.get("system_prompt", "")
         self.user_prompt_template = prompt_config.get("user_prompt_template", "{prompt}")
-        self.default_user_prompt = prompt_config.get("default_user_prompt", "")
 
         # Resume / caching options
         self.cache_path = Path(cache_path) if cache_path else None
@@ -163,9 +161,9 @@ class DirectPromptInference:
         # Format user prompt using template and kwargs
         try:
             user_prompt = self.user_prompt_template.format(**kwargs)
-        except KeyError:
-            # Fall back to default prompt if template keys are missing
-            user_prompt = self.default_user_prompt or self.user_prompt_template
+        except Exception:
+            # Best-effort: fall back to the raw template if formatting fails
+            user_prompt = self.user_prompt_template
 
         # Call Gemini API
         try:
