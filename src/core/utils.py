@@ -10,7 +10,6 @@ import logging
 def download_hf_snapshot(
     repo_id: str,
     work_dir: str,
-    revision: str = None,
     force_download: bool = False,
     **kwargs,
 ) -> str:
@@ -21,7 +20,6 @@ def download_hf_snapshot(
     Args:
         repo_id: e.g. "facebook/whisper-large"
         work_dir: path to local directory where to store snapshot
-        revision: optional commit / branch / tag
         force_download: if True, enforce re-download if remote snapshot differs
         **kwargs: other snapshot_download arguments (token, repo_type, allow_patterns, etc.)
 
@@ -33,7 +31,6 @@ def download_hf_snapshot(
         logging.info(f"Force-downloading snapshot for {repo_id} into {work_dir}...")
         path = snapshot_download(
             repo_id=repo_id,
-            revision=revision,
             local_dir=work_dir,
             force_download=True,
             local_files_only=False,
@@ -46,7 +43,6 @@ def download_hf_snapshot(
     try:
         path = snapshot_download(
             repo_id=repo_id,
-            revision=revision,
             local_dir=work_dir,
             local_files_only=True,
             **kwargs,
@@ -58,7 +54,6 @@ def download_hf_snapshot(
         logging.info(f"No local snapshot found for {repo_id}. Downloading now...")
         path = snapshot_download(
             repo_id=repo_id,
-            revision=revision,
             local_dir=work_dir,
             local_files_only=False,
             **kwargs,
