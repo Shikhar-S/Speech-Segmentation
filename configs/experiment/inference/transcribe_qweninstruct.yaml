@@ -21,7 +21,7 @@ inference:
   # vLLM handles concurrency well. You can increase this (e.g., 4 or 8) 
   num_workers: 4
   port: ??  # Each worker will use PORT
-  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx", "lang_sym"]
   out_file: ${paths.output_dir}/transcription.json
   limit_samples: null
   inference_runner:

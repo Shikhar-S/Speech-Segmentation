@@ -21,7 +21,7 @@ inference:
   # vLLM handles concurrency well. You can increase this (e.g., 4 or 8) 
   num_workers: 4
   port: ??  # Each worker will use PORT
-  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx", "lang_sym"]
   out_file: ${paths.output_dir}/transcription.json
   limit_samples: null
   inference_runner:
@@ -56,7 +56,7 @@ inference:
             -   No slashes `/` or brackets `[]`.
             -   Example: "həˈləʊ" (Correct) / "/həˈləʊ/" (Incorrect)
 
-        Analyze the audio and produce the structured output now.
+        Analyze the audio and produce the output now.
       user_prompt_template: "Please transcribe the attached audio. I need a clear mapping of the speech to International Phonetic Alphabet (IPA) symbols."
     
     # Instruct models usually return plain text. 
@@ -68,4 +68,4 @@ inference:
     error_log_path: ${paths.cache_dir}/qwenthinking/${task_name}.errors.jsonl
     resume: True
     timeout: 600.0
-    save_thoughts: False # if we want to save model "thoughts" for analysis
+    save_thoughts: True # if we want to save model "thoughts" for analysis

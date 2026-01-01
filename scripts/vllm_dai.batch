@@ -1,6 +1,8 @@
 #!/bin/bash
 #SBATCH -A bbjs-dtai-gh
-#SBATCH -p ghx4-interactive
+#SBATCH --nodelist=gh046,gh137
+#SBATCH --reservation sup-20848-4
+#SBATCH -p ghx4
 #SBATCH -J main
 #SBATCH -N 1
 #SBATCH --gpus-per-node=1
