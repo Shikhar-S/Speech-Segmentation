@@ -113,6 +113,7 @@ class EdAccL1Classification(L.LightningDataModule):
         pin_memory: bool = False,
         max_duration_sec: Optional[float] = None,
         target_key: str = "accent_cluster",
+        predict_splits: Optional[list] = None,  # Splits for predict_dataloader, default: all
     ):
         super().__init__()
         self.hf_repo = hf_repo
@@ -126,6 +127,7 @@ class EdAccL1Classification(L.LightningDataModule):
         self.pin_memory = pin_memory
         self.num_classes = num_classes
         self.target_key = target_key
+        self.predict_splits = predict_splits or ["train", "val", "test"]
 
         self.l1_to_idx = {}
         self.train_dataset = None
@@ -202,9 +204,16 @@ class EdAccL1Classification(L.LightningDataModule):
         return self._dl(self.test_dataset)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset])
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.train_dataset:
+            datasets.append(self.train_dataset)
+        if "val" in self.predict_splits and self.val_dataset:
+            datasets.append(self.val_dataset)
+        if "test" in self.predict_splits and self.test_dataset:
+            datasets.append(self.test_dataset)
+        if not datasets:
+            datasets = [self.test_dataset]  # fallback to test
+        return self._dl(ConcatDataset(datasets))
 
 
 if __name__ == "__main__":

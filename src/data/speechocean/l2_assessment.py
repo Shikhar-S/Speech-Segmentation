@@ -143,6 +143,7 @@ class SpeechOceanDataModule(LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         target_sr: int = 16000,
+        predict_splits: Optional[List[str]] = None,  # Splits for predict_dataloader, default: all
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -151,6 +152,7 @@ class SpeechOceanDataModule(LightningDataModule):
         self.target_key = target_key
         self.ds_train = self.ds_val = self.ds_test = None
         self.bs_dev = batch_size
+        self.predict_splits = predict_splits or ["train", "val", "test"]
 
     def setup(self, stage: Optional[str] = None):
         if self.trainer:
@@ -210,10 +212,16 @@ class SpeechOceanDataModule(LightningDataModule):
         return self._dl(self.ds_test, shuffle=False)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.ds_train, self.ds_val, self.ds_test]),
-            shuffle=False,
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.ds_train:
+            datasets.append(self.ds_train)
+        if "val" in self.predict_splits and self.ds_val:
+            datasets.append(self.ds_val)
+        if "test" in self.predict_splits and self.ds_test:
+            datasets.append(self.ds_test)
+        if not datasets:
+            datasets = [self.ds_test]  # fallback to test
+        return self._dl(ConcatDataset(datasets), shuffle=False)
 
 
 def _test_datamodule():
