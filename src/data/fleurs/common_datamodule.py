@@ -136,6 +136,7 @@ class FleursLanguageId(LightningDataModule):
         batch_size: int = 64,
         num_workers: int = 4,
         pin_memory: bool = False,
+        predict_splits: Optional[list] = None,  # Splits for predict_dataloader, default: all
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["tokenizer"])
@@ -143,6 +144,7 @@ class FleursLanguageId(LightningDataModule):
         self.ds_train = self.ds_val = self.ds_test = None
         self.num_classes = self.hparams.num_classes
         self.bs_dev = batch_size
+        self.predict_splits = predict_splits or ["train", "validation", "test"]
 
     def prepare_data(self):
         # first call here to download/cache
@@ -197,9 +199,16 @@ class FleursLanguageId(LightningDataModule):
         return self._dl(self.ds_test, False)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.ds_train, self.ds_val, self.ds_test]), False
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.ds_train:
+            datasets.append(self.ds_train)
+        if "validation" in self.predict_splits and self.ds_val:
+            datasets.append(self.ds_val)
+        if "test" in self.predict_splits and self.ds_test:
+            datasets.append(self.ds_test)
+        if not datasets:
+            datasets = [self.ds_test]  # fallback to test
+        return self._dl(ConcatDataset(datasets), False)
 
 
 def test_datamodule():

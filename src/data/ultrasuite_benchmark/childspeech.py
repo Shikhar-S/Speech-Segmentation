@@ -171,6 +171,7 @@ class UltrasuiteDataModule(L.LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         max_duration_sec: Optional[float] = None,
+        predict_splits: Optional[list] = None,  # Splits for predict_dataloader, default: all
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -183,6 +184,7 @@ class UltrasuiteDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.max_duration_sec = max_duration_sec
+        self.predict_splits = predict_splits or ["train", "validation", "test"]
 
     def prepare_data(self):
         for split in ["train", "validation", "test"]:
@@ -230,9 +232,16 @@ class UltrasuiteDataModule(L.LightningDataModule):
         return self._dl(self.test_ds, shuffle=False)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.train_ds, self.val_ds, self.test_ds]), shuffle=False
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.train_ds:
+            datasets.append(self.train_ds)
+        if "validation" in self.predict_splits and self.val_ds:
+            datasets.append(self.val_ds)
+        if "test" in self.predict_splits and self.test_ds:
+            datasets.append(self.test_ds)
+        if not datasets:
+            datasets = [self.test_ds]  # fallback to test
+        return self._dl(ConcatDataset(datasets), shuffle=False)
 
 
 # Main

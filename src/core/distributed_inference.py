@@ -16,6 +16,8 @@ from tqdm import tqdm
 import json
 import traceback
 from lightning_utilities.core.rank_zero import rank_zero_only
+from omegaconf import OmegaConf
+
 
 
 def _init_worker():
@@ -92,6 +94,11 @@ def run_distributed_inference_(
             output without processing
         limit_samples: if set, limit the number of samples to process (useful for testing)
     """
+    
+    dataset_cfg = OmegaConf.to_container(dataset_cfg, resolve=True)
+    inference_config = OmegaConf.to_container(inference_config, resolve=True)
+    if inference_call_args is not None:
+        inference_call_args = OmegaConf.to_container(inference_call_args, resolve=True)
 
     # fail fast
     assert out_file, "Please provide an out_file to save results."

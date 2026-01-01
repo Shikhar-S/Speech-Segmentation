@@ -184,6 +184,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         num_classes: int = 7,
         id_to_label: List[str] = None,
         max_duration_sec: Optional[float] = None,
+        predict_splits: Optional[List[str]] = None,  # Splits for predict_dataloader, default: all
     ):
         """
         Args:
@@ -195,6 +196,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
             target_sr: Target sample rate
             num_classes: Number of L1 classes
             max_duration_sec: Maximum audio duration in seconds
+            predict_splits: List of splits to use for predict_dataloader (default: all)
         """
         super().__init__()
         self.save_hyperparameters()
@@ -202,6 +204,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         self.label_to_ids = {label: i for i, label in enumerate(id_to_label)}
         self.ds_train = self.ds_val = self.ds_test = None
         self.batch_size = batch_size
+        self.predict_splits = predict_splits or ["train", "val", "test"]
 
     def prepare_data(self):
         """Prepare data by resampling audio."""
@@ -290,14 +293,19 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         """
         Return prediction dataloader.
 
-        Concatenates all splits for inference, allowing the inference runner
-        to transcribe all data at once. The metadata_idx field allows tracking
-        which split each sample came from.
+        Concatenates splits specified in predict_splits for inference.
+        The metadata_idx field allows tracking which split each sample came from.
         """
-        return self._dl(
-            ConcatDataset([self.ds_train, self.ds_val, self.ds_test]),
-            shuffle=False,
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.ds_train:
+            datasets.append(self.ds_train)
+        if "val" in self.predict_splits and self.ds_val:
+            datasets.append(self.ds_val)
+        if "test" in self.predict_splits and self.ds_test:
+            datasets.append(self.ds_test)
+        if not datasets:
+            datasets = [self.ds_test]  # fallback to test
+        return self._dl(ConcatDataset(datasets), shuffle=False)
 
 
 def _test_datamodule():
