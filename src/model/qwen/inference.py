@@ -149,10 +149,11 @@ class VllmInference:
         try:
             prompt = self.user_prompt_template.format(**kwargs)
         except KeyError:
-            raise KeyError(
-                f"Warning: Missing keys in provided arguments. Provided keys: {list(kwargs.keys())},"
-                f" whereas user_prompt_template requires keys used in: {self.user_prompt_template}"
-            )
+            # print(
+            #     f"Warning: Missing keys in provided arguments. Provided keys: {list(kwargs.keys())},"
+            #     f" whereas user_prompt_template requires keys used in: {self.user_prompt_template}"
+            # )
+            prompt = self.user_prompt_template  # Use template as-is
 
         try:
             if isinstance(speech, torch.Tensor):
@@ -262,20 +263,29 @@ class VllmInference:
 
 
 if __name__ == "__main__":
-    PORT = 43019
+    import argparse
+
+    A = argparse.ArgumentParser()
+    A.add_argument("--port", type=int, required=True)
+    args = A.parse_args()
+    PORT = args.port
     client_cfg = {
         "base_url": f"http://localhost:{PORT}/v1",
-        # "model_name": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
-        "model_name": "Qwen/Qwen3-Omni-30B-A3B-Thinking",
-        "max_tokens": 6144,
+        "model_name": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+        # "model_name": "Qwen/Qwen3-Omni-30B-A3B-Thinking",
+        # "max_tokens": 6144,
     }
     import yaml
 
-    prompt_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/configs/experiment/inference/transcribe_qwen.yaml"
+    prompt_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/configs/prompt/l2as_speechocean.yaml"
+    prompt_path = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/configs/prompt/l1cls_cmul2arctic.yaml"
     with open(prompt_path, "r") as f:
-        prompt_cfg = yaml.safe_load(f)["inference"]["inference_runner"]["prompt_config"]
+        prompt_cfg = yaml.safe_load(f)["prompt_config"]
     inf = VllmInference(
-        client_config=client_cfg, prompt_config=prompt_cfg, clean_response=True
+        client_config=client_cfg,
+        prompt_config=prompt_cfg,
+        clean_response=True,
+        save_thoughts=True,
     )
     # 10 acc
     speechpath = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/download/speechocean762/WAVE/SPEAKER2892/028920128.WAV"
@@ -285,5 +295,5 @@ if __name__ == "__main__":
 
     speech, sr = sf.read(speechpath)
     # speech = np.random.randn(16000 * 5)  # 5 seconds of dummy audio
-    result = inf(speech=speech, prompt="Transcribe this audio.", utt_id="test_utt")
+    result = inf(speech=speech, utt_id="test_utt")
     print(result)

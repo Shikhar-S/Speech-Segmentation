@@ -49,11 +49,11 @@ nvidia-smi
 FREE_PORT=$(get_free_port_atomic)
 echo "Using Port: $FREE_PORT"
 VLLM_EXECUTABLE=exp/download/vllm_arm.sif
-MODEL=Qwen/Qwen3-Omni-30B-A3B-Thinking
-TOTAL_LENGTH=8192
+# MODEL=Qwen/Qwen3-Omni-30B-A3B-Thinking
+# TOTAL_LENGTH=8192
 # MODEL=nvidia/audio-flamingo-3-hf
-# MODEL=Qwen/Qwen3-Omni-30B-A3B-Instruct
-# TOTAL_LENGTH=4096
+MODEL=Qwen/Qwen3-Omni-30B-A3B-Instruct
+TOTAL_LENGTH=4096
 ###########################
 ###########################
 apptainer exec --cleanenv --nv \
