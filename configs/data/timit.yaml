@@ -1,5 +1,5 @@
 _target_: src.data.timit.common_datamodule.TimitDataModule
-timit_root: /work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk
+timit_root: ${paths.download_dir}/TIMIT/timit_nltk
 local_cache_path: ${paths.cache_dir}/timit
 tokenizer: ??? # defined in experiment config
 batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)

@@ -1,6 +1,7 @@
 # MODELS: ctag lv60 xlsr53 powsm powsm_ctc zipactc zipactc_ns
 # DATA: edacc uaspeech vaanigeo
-# for m in powsm_ctc; do python scripts/jsonl2json.py --dirname exp/runs/inf_ultrasuite_child_$m/8jobARR; done
+# doreco gmuaccent l2arctic_perceived timit tusom2021 voxangeles
+# for d in cmul2arcticl1 easycall edacc fleurs speechocean uaspeech ultrasuite_child vaanigeo; do python scripts/jsonl2json.py --dirname exp/runs/infzs_${d}_qweni/1jobArr; done
 # for m in ctag lv60 xlsr53 powsm powsm_ctc zipactc zipactc_ns; do python scripts/jsonl2json.py --dirname exp/runs/inf_easycall_$m/8jobARR; done
 import json
 from pathlib import Path
@@ -12,7 +13,7 @@ args = parser.parse_args()
 dirpath = Path(args.dirname)
 out = dirpath / "transcription.json"
 merged = {}
-for p in sorted(dirpath.glob("transcription.*.jsonl")):
+for p in sorted(dirpath.glob("transcription*jsonl")):
     for line in p.open():
         if line.strip():
             merged.update(json.loads(line))

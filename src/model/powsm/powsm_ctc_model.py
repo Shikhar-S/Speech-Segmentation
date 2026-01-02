@@ -85,6 +85,10 @@ class PowsmCTCNet(torch.nn.Module):
         fs = frontend_conf.get("fs", 16000)
         self.sampling_rate = _parse_humanfriendly_int(fs)
 
+        # needed for upsampled forced alignment
+        self.ctc = getattr(self.model, "ctc", None)
+        self.ignore_id = getattr(self.model, "ignore_id", -1)
+
     def encoder_output_size(self) -> int:
         return int(self.model.encoder.output_size())
 

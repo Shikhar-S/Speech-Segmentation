@@ -1,4 +1,4 @@
-_target_: src.model.powsm.powsm_vr_model.build_powsm_ctc_vr
+_target_: src.model.powsm.powsm_vr_model.build_powsm_vr
 work_dir: ${paths.cache_dir}/powsm_ctc
 hf_repo: null
 
