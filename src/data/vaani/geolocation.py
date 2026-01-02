@@ -34,6 +34,8 @@ def pad_collate(batch):
         ),
         "split": [b.get("split", "none") for b in batch],
         "utt_id": [b.get("utt_id", "none") for b in batch],
+        "audio_path": [b.get("audio_path", "") for b in batch],
+        "metadata_idx": [b.get("metadata_idx", -1) for b in batch],
     }
 
 
@@ -80,6 +82,8 @@ class VaaniHFDataset(torch.utils.data.Dataset):
             "split": item["split"],
             "utt_id": utt_id,
             "target": [lat, lon],
+            "audio_path": str(target_path),
+            "metadata_idx": i,
         }
 
 
@@ -93,10 +97,12 @@ class VaaniGeolocation(LightningDataModule):
         pin_memory: bool = True,
         target_sr: int = 16000,
         num_classes: int = 3,
+        predict_splits: Optional[list] = None,  # Splits for predict_dataloader, default: all
     ):
         super().__init__()
         self.save_hyperparameters()
         self.ds_train = self.ds_val = self.ds_test = None
+        self.predict_splits = predict_splits or ["train", "val", "test"]
 
     def prepare_data(self):
         download_hf_snapshot(
@@ -146,10 +152,16 @@ class VaaniGeolocation(LightningDataModule):
         return self._dl(self.ds_test, shuffle=False)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.ds_train, self.ds_val, self.ds_test]),
-            shuffle=False,
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.ds_train:
+            datasets.append(self.ds_train)
+        if "val" in self.predict_splits and self.ds_val:
+            datasets.append(self.ds_val)
+        if "test" in self.predict_splits and self.ds_test:
+            datasets.append(self.ds_test)
+        if not datasets:
+            datasets = [self.ds_test]  # fallback to test
+        return self._dl(ConcatDataset(datasets), shuffle=False)
 
 
 def naive_baseline():

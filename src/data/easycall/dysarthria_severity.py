@@ -248,6 +248,7 @@ class EasyCallDataModule(L.LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
+        predict_splits: Optional[List[str]] = None,  # Splits for predict_dataloader, default: all
     ):
         """
         Lightning DataModule for EasyCall.
@@ -267,6 +268,7 @@ class EasyCallDataModule(L.LightningDataModule):
         self.pin_memory = pin_memory
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
+        self.predict_splits = predict_splits or ["train", "validation", "test"]
 
         self._hf_train = None
         self._hf_val = None
@@ -331,10 +333,16 @@ class EasyCallDataModule(L.LightningDataModule):
         return self._dl(self.test_dataset, shuffle=False)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]),
-            shuffle=False,
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.train_dataset:
+            datasets.append(self.train_dataset)
+        if "validation" in self.predict_splits and self.val_dataset:
+            datasets.append(self.val_dataset)
+        if "test" in self.predict_splits and self.test_dataset:
+            datasets.append(self.test_dataset)
+        if not datasets:
+            datasets = [self.test_dataset]  # fallback to test
+        return self._dl(ConcatDataset(datasets), shuffle=False)
 
 
 if __name__ == "__main__":

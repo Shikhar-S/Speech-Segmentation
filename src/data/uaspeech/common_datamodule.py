@@ -57,7 +57,9 @@ class UASpeechDataset(Dataset):
         split: str = "train",
         max_duration_sec: Optional[float] = None,
     ):
-        self.cache_path = Path(cache_path)
+        # Always keep an absolute cache root so that paths stored in metadata are stable
+        # across Hydra chdir and multiprocessing ("spawn") workers.
+        self.cache_path = Path(cache_path).expanduser().resolve(strict=False)
         self.target_sr = target_sr
         self.split = split
         self.max_duration_sec = max_duration_sec
@@ -89,7 +91,16 @@ class UASpeechDataset(Dataset):
             # only exists whn called in setup by all workers
             with open(json_path, "r") as f:
                 metadata = json.load(f)
-            return self._filter_metadata(metadata)
+            # Backward-compat: older metadata may contain relative "path".
+            # Normalize to absolute paths rooted at cache_path.
+            fixed = []
+            for m in metadata:
+                rel_path = str(m.get("rel_path", "")).strip()
+                path = str(m.get("path", "")).strip()
+                if rel_path and (not path or not os.path.isabs(path)):
+                    m["path"] = str((self.cache_path / rel_path).resolve(strict=False))
+                fixed.append(m)
+            return self._filter_metadata(fixed)
 
         df_meta = pd.read_csv(meta_csv)
         df_meta = df_meta[df_meta["severity"].notna()]
@@ -115,7 +126,8 @@ class UASpeechDataset(Dataset):
                 ):
                     continue
 
-                path = os.path.join(root, file)
+                # Store absolute path to be robust to Hydra changing cwd and to worker cwd.
+                path = str((Path(root) / file).resolve(strict=False))
                 rel_path = os.path.relpath(path, self.cache_path)
                 try:
                     if torchaudio.info(path).num_frames < min_samples:
@@ -238,6 +250,7 @@ class UASpeechDataModule(L.LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
+        predict_splits: Optional[List[str]] = None,  # Splits for predict_dataloader, default: all
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -253,6 +266,7 @@ class UASpeechDataModule(L.LightningDataModule):
         self.pin_memory = pin_memory
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
+        self.predict_splits = predict_splits or ["train", "validation", "test"]
 
         self.tgz_files = [
             self.data_dir / "UASpeech_noisereduce_C.tgz",
@@ -311,10 +325,16 @@ class UASpeechDataModule(L.LightningDataModule):
         return self._dl(self.test_dataset, False)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]),
-            False,
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.train_dataset:
+            datasets.append(self.train_dataset)
+        if "validation" in self.predict_splits and self.val_dataset:
+            datasets.append(self.val_dataset)
+        if "test" in self.predict_splits and self.test_dataset:
+            datasets.append(self.test_dataset)
+        if not datasets:
+            datasets = [self.test_dataset]  # fallback to test
+        return self._dl(ConcatDataset(datasets), False)
 
 
 if __name__ == "__main__":
