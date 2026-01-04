@@ -2,8 +2,8 @@
 
 Usage:
     python -m src.data.timit.common_datamodule \
-           --timit_root /work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk \
-           --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/timit_cache
+           --timit_root exp/download/TIMIT/timit_nltk \
+           --data_dir exp/cache/timit
 """
 
 import argparse
@@ -310,8 +310,6 @@ class TimitDataModule(L.LightningDataModule):
 
 
 if __name__ == "__main__":
-    # Example standalone usage, mirroring the Buckeye script
-    from tqdm import tqdm
     from src.model.powsm.token_id_converter import build_powsm_tokenizer
     from src.model.wav2vec2phoneme.builders import (
         build_wav2vec2phoneme_tokenizer,
@@ -338,7 +336,7 @@ if __name__ == "__main__":
     MODEL = "powsm"
     if MODEL == "powsm":
         tokenizer = build_powsm_tokenizer(
-            work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
+            work_dir="exp/cache/powsm",
             hf_repo="espnet/powsm",
         )
     elif MODEL == "w2v2ph":
@@ -352,7 +350,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        mask_probability=0.3,
+        mask_probability=0,
     )
     dm.setup()
 

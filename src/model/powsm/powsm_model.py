@@ -10,6 +10,7 @@ from espnet.nets.pytorch_backend.nets_utils import pad_list, th_accuracy
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (
     LabelSmoothingLoss,
 )
+from espnet2.asr.encoder.transformer_encoder import TransformerEncoder
 from src.model.powsm.ctc import CTC
 from src.model.powsm.utils import force_gatherable
 from src.model.powsm.e_branchformer import EBranchformerEncoder
@@ -542,8 +543,10 @@ def build_powsm_from_files(
     normalize = build_normalize(args, stats_file)
 
     # 4. Encoder
-    assert args.encoder == "e_branchformer", "Only Branchformer is supported!"
-    encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
+    if args.encoder == "e_branchformer":  # , "Only Branchformer is supported!"
+        encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
+    elif args.encoder == "transformer":
+        encoder = TransformerEncoder(input_size=input_size, **args.encoder_conf)
     encoder_output_size = encoder.output_size()
 
     # 5. Decoder
