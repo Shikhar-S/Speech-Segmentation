@@ -66,7 +66,6 @@ def resample_dataset(
     metadata_df,
     path_key,
     src_data_dir,
-    src_sr,
     tgt_data_dir,
     tgt_sr,
     force_resample=False,
@@ -78,13 +77,10 @@ def resample_dataset(
 
     os.makedirs(tgt_data_dir, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    resampler = torchaudio.transforms.Resample(orig_freq=src_sr, new_freq=tgt_sr).to(
-        device
-    )
-    logging.info(
-        f"Resampling audio from {src_sr} Hz to {tgt_sr} Hz into {tgt_data_dir}..."
-    )
+    resamplers = {}
+    logging.info(f"Resampling audio to {tgt_sr} Hz into {tgt_data_dir}...")
 
+    cnt = 0
     for _, row in tqdm(
         metadata_df.iterrows(), total=len(metadata_df), desc="Resampling"
     ):
@@ -96,11 +92,18 @@ def resample_dataset(
         if os.path.exists(dst) and not force_resample:
             continue
 
-        wav, src_sr_actual = torchaudio.load(src)
-        if src_sr_actual != src_sr:
-            logging.warning(f"Expected {src_sr} Hz, got {src_sr_actual} Hz for {src}")
+        wav, src_sr = torchaudio.load(src)
+        if src_sr not in resamplers:
+            # cache resampler
+            resamplers[src_sr] = torchaudio.transforms.Resample(
+                orig_freq=src_sr, new_freq=tgt_sr
+            ).to(device)
         wav = wav.to(device)
         with torch.no_grad():
-            wav_resampled = resampler(wav).cpu()
-
+            if src_sr == tgt_sr:
+                wav_resampled = wav.cpu()
+            else:
+                wav_resampled = resamplers[src_sr](wav).cpu()
+                cnt += 1
         torchaudio.save(dst, wav_resampled, tgt_sr)
+    logging.info(f"Resampled {cnt} files to {tgt_data_dir}.")

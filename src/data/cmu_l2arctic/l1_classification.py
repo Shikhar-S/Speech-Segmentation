@@ -5,8 +5,8 @@ using the combined CMU Arctic and L2-ARCTIC corpora.
 
 Usage:
     python -m src.data.cmu_l2arctic.l1_classification \
-        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic \
-        --metadata_path /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic_cache/metadata.csv \
+        --data_dir exp/download/cmu_l2arctic \
+        --metadata_path exp/cache/cmu_l2arctic/metadata.csv \
         --batch_size 2
 """
 
@@ -184,7 +184,9 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         num_classes: int = 7,
         id_to_label: List[str] = None,
         max_duration_sec: Optional[float] = None,
-        predict_splits: Optional[List[str]] = None,  # Splits for predict_dataloader, default: all
+        predict_splits: Optional[
+            List[str]
+        ] = None,  # Splits for predict_dataloader, default: all
     ):
         """
         Args:
@@ -215,7 +217,6 @@ class CmuL2ArcticL1Classification(LightningDataModule):
             metadata_df=pd.read_csv(self.hparams.metadata_path),
             path_key="audio_path",
             src_data_dir=self.hparams.data_dir,
-            src_sr=44100,
             tgt_data_dir=tgt_dir,
             tgt_sr=self.hparams.target_sr,
             force_resample=False,
@@ -338,9 +339,19 @@ def _test_datamodule():
         num_workers=args.num_workers,
         pin_memory=False,
         target_sr=16000,
+        id_to_label=[
+            "ar",
+            "en",
+            "es",
+            "hi",
+            "ko",
+            "vi",
+            "zh",
+        ],  # Fixed L1 labels (alphabetical order)
     )
 
     # Setup and test
+    dm.prepare_data()
     dm.setup()
 
     print("\n=== Testing train_dataloader ===")
