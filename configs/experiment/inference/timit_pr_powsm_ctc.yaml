@@ -1,19 +1,13 @@
 # @package _global_
 
-# This config executes inference with powsm on timit dataset:
-# python src/main.py experiment=inference/timit_pr_powsm
-
 defaults:
   - override /model: phone_recognition # do not matter, only to satisfy requirement
-  - override /model/net: powsm # do not matter, only to satisfy requirement
+  - override /model/net: powsm_ctc
   - override /data: timit
   - override /logger: csv
 
-# all parameters below will be merged with parameters from default configurations set above
-# this allows you to overwrite only specified parameters
-
-task_name: "inf_timit_pr_powsm"
-tags: ["inf_timit_pr_powsm"]
+task_name: "inf_timit_pr_powsm_ctc"
+tags: ["inf_timit_pr_powsm_ctc"]
 
 seed: 42
 
@@ -27,24 +21,24 @@ data:
 inference:
   num_workers: 15 # number of parallel workers for distributed inference
   passthrough_keys: ["phones", "utt_id", "split", "masked_phones"] # keys from dataset to be passed to output
-  out_file: ${paths.output_dir}/timit_powsm_${data.mask_probability}.json
+  out_file: ${paths.output_dir}/timit_powsmctc_${data.mask_probability}.json
+  # CTC inference runner
   inference_runner:
-    _target_: src.model.powsm.powsm_inference.build_powsm_inference
-    work_dir: ${paths.cache_dir}/powsm
-    hf_repo: espnet/powsm
+    _target_: src.model.powsm.powsm_ctc_inference.build_powsm_ctc_inference
+    work_dir: ${paths.cache_dir}/powsm_ctc
+    hf_repo: null
     force_download: False
     config_file: null
     model_file: null
     bpemodel: null
     stats_file: null
     device: cuda # auto, cpu, cuda
-    beam_size: 5
-    ctc_weight: 0.3
-    penalty: 0.0
-    nbest: 1
-    normalize_length: False
-    maxlenratio: 0.0
-    minlenratio: 0.0
+    dtype: float32
+    # Long-form decoding settings
+    max_segment_length: 30.0  # seconds
+    context_len_in_secs: 2.0  # seconds  
+    # Whether to use prompt encoder
+    use_prompt_encoder: true
   # additional args to pass to the __call__ method of inference_runner, but can be overridden by keys from dataset
   inference_call_args: 
     text_prev: <na>

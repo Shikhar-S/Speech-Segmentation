@@ -47,3 +47,22 @@ class SentencepiecesTokenizer(AbsTokenizer):
     def ids2text(self, ids: Iterable[int]) -> str:
         self._build_sentence_piece_processor()
         return self.sp.DecodeIds(list(ids))
+
+if __name__ == "__main__":
+    # python -m src.model.sentencepieces_tokenizer
+    tokenizer = SentencepiecesTokenizer(model='src/model/zipa/resources/unigram_127.model')
+    print(tokenizer)
+    text = "This is a test."
+    tokens = tokenizer.text2tokens(text)
+    print(tokens)
+    ids = tokenizer.tokens2ids(tokens)
+    print(ids)
+    print(tokenizer.ids2tokens(ids))
+    print(tokenizer.ids2text(ids))
+    print('===')
+    print('All tokens')
+    vocab={}
+    for i in range(tokenizer.sp.GetPieceSize()):
+        piece = tokenizer.sp.IdToPiece(i)
+        vocab[piece] = i
+    print(vocab)

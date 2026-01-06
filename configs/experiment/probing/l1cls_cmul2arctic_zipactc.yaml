@@ -13,7 +13,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "l1cls_cmul2arctic_zipactc"
-tags: ["cmul2arctic", "zipactc", "l1cls"]
+tags: ["cmul2arctic", "zipactc", "l1cls_fix"]
 
 seed: 42
 

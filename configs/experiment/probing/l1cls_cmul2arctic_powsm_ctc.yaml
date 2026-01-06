@@ -14,7 +14,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "l1cls_cmul2arctic_powsm_ctc"
-tags: ["cmul2arctic", "powsm_ctc", "l1cls"]
+tags: ["cmul2arctic", "powsm_ctc", "l1cls_fix"]
 
 seed: 42
 
