@@ -1,0 +1,56 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/main.py experiment=probing/geolocation_vaani_wavlm
+
+defaults:
+  - override /data: vaanigeo
+  - override /model: classification
+  - override /model/head: attnmlp
+  - override /model/net: wavlm
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "geolocation_vaani_wavlm"
+tags: ["vaani", "wavlm", "geo_in"]
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 100
+  gradient_clip_val: 1.0
+  val_check_interval: 0.25 # validate 4 times per epoch
+  callbacks:
+    - learning_rate_monitor
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/err_km"
+    mode: "min"
+    save_top_k: 1
+  early_stopping:
+    monitor: "val/err_km"
+    mode: "min"
+    patience: 10
+
+model:
+  net:
+    hf_repo: microsoft/wavlm-base
+    output_vocabsz: null
+  head:
+    task_type: "geolocation"
+  freeze_encoder: true
+  optimizer:
+    lr: 0.0002
+  scheduler:
+    total_iters: 200
+
+data:
+  batch_size: 48
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}
+    name: ${task_name}

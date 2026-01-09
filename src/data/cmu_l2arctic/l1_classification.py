@@ -5,8 +5,8 @@ using the combined CMU Arctic and L2-ARCTIC corpora.
 
 Usage:
     python -m src.data.cmu_l2arctic.l1_classification \
-        --data_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic \
-        --metadata_path /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cmu_l2arctic_cache/metadata.csv \
+        --data_dir exp/download/cmu_l2arctic \
+        --metadata_path exp/cache/cmu_l2arctic/metadata.csv \
         --batch_size 2
 """
 
@@ -184,6 +184,9 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         num_classes: int = 7,
         id_to_label: List[str] = None,
         max_duration_sec: Optional[float] = None,
+        predict_splits: Optional[
+            List[str]
+        ] = None,  # Splits for predict_dataloader, default: all
     ):
         """
         Args:
@@ -195,6 +198,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
             target_sr: Target sample rate
             num_classes: Number of L1 classes
             max_duration_sec: Maximum audio duration in seconds
+            predict_splits: List of splits to use for predict_dataloader (default: all)
         """
         super().__init__()
         self.save_hyperparameters()
@@ -202,6 +206,7 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         self.label_to_ids = {label: i for i, label in enumerate(id_to_label)}
         self.ds_train = self.ds_val = self.ds_test = None
         self.batch_size = batch_size
+        self.predict_splits = predict_splits or ["train", "val", "test"]
 
     def prepare_data(self):
         """Prepare data by resampling audio."""
@@ -212,7 +217,6 @@ class CmuL2ArcticL1Classification(LightningDataModule):
             metadata_df=pd.read_csv(self.hparams.metadata_path),
             path_key="audio_path",
             src_data_dir=self.hparams.data_dir,
-            src_sr=44100,
             tgt_data_dir=tgt_dir,
             tgt_sr=self.hparams.target_sr,
             force_resample=False,
@@ -290,14 +294,19 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         """
         Return prediction dataloader.
 
-        Concatenates all splits for inference, allowing the inference runner
-        to transcribe all data at once. The metadata_idx field allows tracking
-        which split each sample came from.
+        Concatenates splits specified in predict_splits for inference.
+        The metadata_idx field allows tracking which split each sample came from.
         """
-        return self._dl(
-            ConcatDataset([self.ds_train, self.ds_val, self.ds_test]),
-            shuffle=False,
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.ds_train:
+            datasets.append(self.ds_train)
+        if "val" in self.predict_splits and self.ds_val:
+            datasets.append(self.ds_val)
+        if "test" in self.predict_splits and self.ds_test:
+            datasets.append(self.ds_test)
+        if not datasets:
+            datasets = [self.ds_test]  # fallback to test
+        return self._dl(ConcatDataset(datasets), shuffle=False)
 
 
 def _test_datamodule():
@@ -330,9 +339,19 @@ def _test_datamodule():
         num_workers=args.num_workers,
         pin_memory=False,
         target_sr=16000,
+        id_to_label=[
+            "ar",
+            "en",
+            "es",
+            "hi",
+            "ko",
+            "vi",
+            "zh",
+        ],  # Fixed L1 labels (alphabetical order)
     )
 
     # Setup and test
+    dm.prepare_data()
     dm.setup()
 
     print("\n=== Testing train_dataloader ===")

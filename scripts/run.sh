@@ -22,9 +22,9 @@ help_message=$(cat << 'EOF'
 Usage: $0 [OPTIONS]
 
 Options:
-  --model LIST        Models: logmel, powsm, powsmvr, ctag, lv60, xlsr53, zipactc, zipactc_ns, or "all"
-  --recipe LIST       Recipes: fab, fat, geo_sw, geo_in, l1cls, l2as, lid_fl, atyp_ec, atyp_ua, atyp_us, inference, cascade_rnn_cls, cascade_transformer
-  --data LIST         Datasets: buckeye, timit, geo_sw, geo_in, cmul2arctic, speechocean, fleurs, or "all"
+  --model LIST        Models: logmel, powsm, powsmvr, powsm_ctc, ctag, lv60, xlsr53, zipactc, zipactc_ns, or "all"
+  --recipe LIST       Recipes: fab, fat, geo_sw, geo_in, l1cls_cmu, l1cls_ed, l2as, lid_fl, atyp_ec, atyp_ua, atyp_us, inference, cascade_rnn_cls, cascade_transformer
+  --data LIST         Datasets: buckeye, timit, geo_sw, geo_in, edacc, cmul2arctic, speechocean, fleurs, or "all"
   --cluster NAME      Cluster: dai, delta (default: dai)
   --fft               Enable full fine-tuning
   --dry_run           Print commands only (explicitly set to --dry_run true)
@@ -71,12 +71,15 @@ declare -A model_configs=(
     ["logmel"]="logmel|"
     ["powsm"]="powsm|"
     ["powsmvr"]="powsmvr|"
+    ["powsm_ctc"]="powsm_ctc|"
     ["ctag"]="w2v2ph|ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
     ["lv60"]="w2v2ph|facebook/wav2vec2-lv-60-espeak-cv-ft"
     ["xlsr53"]="w2v2ph|facebook/wav2vec2-xlsr-53-espeak-cv-ft"
     ["zipactc"]="zipactc|anyspeech/zipa-large-crctc-500k"
     ["zipactc_ns"]="zipactc|anyspeech/zipa-large-crctc-ns-800k"
     ["gemini"]="gemini|"
+    ["wavlm"]="wavlm|microsoft/wavlm-base"
+    ["whisper"]="whisper|openai/whisper-small"
 )
 
 # Recipe = task_dataset
@@ -85,7 +88,8 @@ declare -A recipe_configs=(
     ["fat"]="fa_timit"
     ["geo_sw"]="geolocation_swissgerman"
     ["geo_in"]="geolocation_vaani"
-    ["l1cls"]="l1cls_cmul2arctic"
+    ["l1cls_cmu"]="l1cls_cmul2arctic"
+    ["l1cls_ed"]="l1cls_edacc"
     ["l2as"]="l2as_speechocean"
     ["lid_fl"]="lid_fleurs"
     ["atyp_ec"]="atypical_easycall"
@@ -106,6 +110,7 @@ declare -A dataset_configs=(
     ["geo_sw"]="swissgermangeo|"
     ["geo_in"]="vaanigeo|1"
     ["cmul2arctic"]="cmul2arcticl1|7"
+    ["edacc"]="edacc|13"
     ["speechocean"]="speechocean|11"
     ["fleurs"]="fleurs|24"
     ["easycall"]="easycall|4"
@@ -198,9 +203,9 @@ _construct_adhoc_args_for_cascade() {
     local dataset_name=$1 model_var=$2
     # Pick the latest non-empty transcription.json under the run tree
     prefix="./"
-    if [[ $(hostname) == *babel* ]]; then
-        prefix="/data/group_data/wavlab_icme25/PhoneBench/"
-    fi
+    # if [[ $(hostname) == *babel* ]]; then
+    #     prefix="/data/group_data/wavlab_icme25/PhoneBench/"
+    # fi
     local runs_dir="${prefix}exp/runs/inf_${dataset_name}_${model_var}"
     local transcription_json
     transcription_json="$(

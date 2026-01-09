@@ -1,0 +1,53 @@
+# @package _global_
+
+# L1 Classification experiment with POWSM-CTC encoder
+# To execute this experiment run:
+# python src/main.py experiment=probing/l1cls_cmul2arctic_powsm_ctc
+
+defaults:
+  - override /data: cmul2arcticl1
+  - override /model: classification
+  - override /model/head: attnmlp
+  - override /model/net: powsm_ctc
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "l1cls_cmul2arctic_powsm_ctc"
+tags: ["cmul2arctic", "powsm_ctc", "l1cls_fix"]
+
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 25
+  gradient_clip_val: 1.0
+  val_check_interval: 0.25  # validate 4 times per epoch
+
+model:
+  head:
+    task_type: "classification"
+  freeze_encoder: true
+  optimizer:
+    lr: 0.0002
+  scheduler:
+    total_iters: 200
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/f1"
+    mode: "max"
+    save_top_k: 0
+  early_stopping:
+    monitor: "val/f1"
+    patience: 5
+    mode: "max"
+
+data:
+  batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: "l1cls_cmul2arctic_powsm_ctc"
+    name: ${task_name}

@@ -13,7 +13,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "l1cls_cmul2arctic_zipactc"
-tags: ["cmul2arctic", "zipactc", "l1cls"]
+tags: ["cmul2arctic", "zipactc", "l1cls_fix"]
 
 seed: 42
 
@@ -38,8 +38,11 @@ callbacks:
   model_checkpoint:
     monitor: "val/f1"
     mode: "max"
-    save_top_k: 1
-
+    save_top_k: 0
+  early_stopping:
+    monitor: "val/f1"
+    patience: 5
+    mode: "max"
 
 data:
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)

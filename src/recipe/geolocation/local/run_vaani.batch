@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --account=bbjs-delta-cpu
+#SBATCH --job-name=vaani    
+#SBATCH --output=exp/slurm_logs/vaani_%j.out        
+#SBATCH --error=exp/slurm_logs/vaani_%j.out         
+#SBATCH --nodes=1                    
+#SBATCH --ntasks=1 
+#SBATCH --cpus-per-task=32           
+#SBATCH --mem=64G                    
+#SBATCH --time=01:00:00
+#SBATCH --partition=cpu
+
+# --- Setup Environment ---
+source setup_uv.sh .venv
+# --- Configure Polars ---
+# Important: Limit Polars to the cores you requested 
+# so it doesn't hog the whole node
+export POLARS_MAX_THREADS=$SLURM_CPUS_PER_TASK
+# --- Run Script ---
+echo "Starting Vaani processing at $(date)"
+python src/recipe/geolocation/local/vaanihindi_sample.py
+python src/recipe/geolocation/local/vaanihindi_upload.py
+echo "Finished at $(date)"

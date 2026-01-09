@@ -6,63 +6,19 @@ Usage:
 
 import os
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 import torch, io
 import torchaudio
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from lightning import LightningDataModule
-from datasets import load_dataset, concatenate_datasets, Audio as HFAudio
+from datasets import Audio as HFAudio, load_dataset
 
 
-def load_fleurs_data(
-    split: str,
-    language_subset: List[str],
-    powsm_lang_sym_map: Optional[dict] = None,
-    max_samples: Optional[int] = None,
-    cache_dir: Optional[str] = None,
-):
-    """Load FLEURS parquet split for a set of languages, with audio kept as file paths."""
-    datasets = []
-    samples_per_lang = (
-        max(1, max_samples // len(language_subset)) if max_samples else None
-    )
-
-    langnames = []
-    for lang in language_subset:
-        ds = load_dataset(
-            "google/fleurs",
-            data_dir=lang,
-            split=split,
-            revision="refs/convert/parquet",
-            cache_dir=cache_dir,
-        )
-        if samples_per_lang:
-            ds = ds.select(range(min(samples_per_lang, len(ds))))
-        langnames.append(set(ds["language"]).pop())  # hack
-        datasets.append(ds)
-
-    dataset = concatenate_datasets(datasets)
-    if max_samples and len(dataset) > max_samples:
-        dataset = dataset.select(range(max_samples))
-
-    # Keep audio as file paths / metadata, to avoid torchcodec
-    dataset = dataset.cast_column("audio", HFAudio(decode=False))
-
-    # Remap lang_ids to 0-indexed
-    lang_to_id = {lang: idx for idx, lang in enumerate(langnames)}
-
-    def add_lang_ids(example):
-        example["lang_id"] = lang_to_id[example["language"]]
-        example["powsm_lang_sym"] = (
-            powsm_lang_sym_map.get(example["language"], "<unk>")
-            if powsm_lang_sym_map
-            else "<unk>"
-        )
-        return example
-
-    dataset = dataset.map(add_lang_ids)
-    return dataset
+def load_fleurs_data(hf_repo: str, split: str, cache_dir: Optional[str] = None):
+    ds = load_dataset(hf_repo, split=split, cache_dir=cache_dir)
+    ds = ds.cast_column("audio", HFAudio(decode=False))
+    return ds
 
 
 def pad_collate(batch):
@@ -156,8 +112,8 @@ class FleursLanguageIdDataset(Dataset):
             "speech": waveform.to(torch.float32),
             "sr": self.target_sr,
             "language": sample["language"],
-            "lang_sym": sample["powsm_lang_sym"],
-            "target": sample["lang_id"],
+            "lang_sym": "<unk>",  # out of domain for powsm
+            "target": sample["target"],
             "split": self.split,
             "metadata_idx": i,
             "utt_id": f"{self.split}_{i}",
@@ -171,51 +127,39 @@ class FleursLanguageIdDataset(Dataset):
 class FleursLanguageId(LightningDataModule):
     def __init__(
         self,
-        id_to_label: list,
-        num_classes: int = 102,
-        max_samples: Optional[dict] = None,
+        hf_repo: str,
+        num_classes: int = 24,
         target_sr: int = 16000,
-        powsm_lang_sym_map: Optional[dict] = None,
         tokenizer: Optional[object] = None,
         max_audio_length: float = 20.0,
         cache_dir: Optional[str] = None,
         batch_size: int = 64,
         num_workers: int = 4,
         pin_memory: bool = False,
+        predict_splits: Optional[list] = None,  # Splits for predict_dataloader, default: all
     ):
-        """
-        Args:
-            id_to_label: List of language codes to use from FLEURS (e.g., ["en_us", "hi_in"])
-        """
         super().__init__()
         self.save_hyperparameters(ignore=["tokenizer"])
         self.tokenizer = tokenizer
         self.ds_train = self.ds_val = self.ds_test = None
         self.num_classes = self.hparams.num_classes
-        assert self.num_classes == len(self.hparams.id_to_label), (
-            f"num_classes={self.num_classes} does not match the number of languages "
-            f"in id_to_label={len(self.hparams.id_to_label)}"
-        )
         self.bs_dev = batch_size
+        self.predict_splits = predict_splits or ["train", "validation", "test"]
 
     def prepare_data(self):
         # first call here to download/cache
         for split in ["train", "validation", "test"]:
             load_fleurs_data(
+                hf_repo=self.hparams.hf_repo,
                 split=split,
-                language_subset=self.hparams.id_to_label,
-                powsm_lang_sym_map=self.hparams.powsm_lang_sym_map,
-                max_samples=self.hparams.max_samples.get(split, None),
                 cache_dir=self.hparams.cache_dir,
             )
 
     def _ds(self, split):
         return FleursLanguageIdDataset(
             dataset=load_fleurs_data(
+                hf_repo=self.hparams.hf_repo,
                 split=split,
-                language_subset=self.hparams.id_to_label,
-                powsm_lang_sym_map=self.hparams.powsm_lang_sym_map,
-                max_samples=self.hparams.max_samples.get(split, None),
                 cache_dir=self.hparams.cache_dir,
             ),
             split=split,
@@ -255,9 +199,16 @@ class FleursLanguageId(LightningDataModule):
         return self._dl(self.ds_test, False)
 
     def predict_dataloader(self):
-        return self._dl(
-            ConcatDataset([self.ds_train, self.ds_val, self.ds_test]), False
-        )
+        datasets = []
+        if "train" in self.predict_splits and self.ds_train:
+            datasets.append(self.ds_train)
+        if "validation" in self.predict_splits and self.ds_val:
+            datasets.append(self.ds_val)
+        if "test" in self.predict_splits and self.ds_test:
+            datasets.append(self.ds_test)
+        if not datasets:
+            datasets = [self.ds_test]  # fallback to test
+        return self._dl(ConcatDataset(datasets), False)
 
 
 def test_datamodule():
@@ -267,35 +218,9 @@ def test_datamodule():
     tokenizer.build_vocab(["abcdefghijklmnopqrstuvwxyz"])
 
     dm = FleursLanguageId(
-        id_to_label=[
-            "as_in",
-            "ast_es",
-            "fa_ir",
-            "fil_ph",
-            "gu_in",
-            "he_il",
-            "hy_am",
-            "ig_ng",
-            "kam_ke",
-            "kea_cv",
-            "km_kh",
-            "kn_in",
-            "ckb_iq",
-            "lb_lu",
-            "lg_ug",
-            "ln_cd",
-            "luo_ke",
-            "lv_lv",
-            "ne_np",
-            "nso_za",
-            "oc_fr",
-            "ps_af",
-            "umb_ao",
-            "wo_sn",
-        ],
+        hf_repo="shikhar7ssu/fleurs24-lid",
         num_classes=24,
-        max_samples={"train": 50, "validation": 50, "test": 50},
-        batch_size=8,
+        batch_size=2,
         cache_dir="exp/cache/fleurs",
         tokenizer=tokenizer,
     )

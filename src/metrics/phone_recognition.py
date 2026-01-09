@@ -7,6 +7,34 @@ Usage:
         --key_field utt_id \
         --language_field lang_sym
     
+    python -m src.metrics.phone_recognition --evaluation_name powsmctc \
+        --prediction_file exp/runs/inf_doreco_powsm_ctc/8jobARR/transcription.json \
+        --output_file exp/runs/inf_doreco_powsm_ctc/8jobARR/inventory_results.csv \
+        --gt_field target \
+        --key_field utt_id \
+        --language_field lang_sym
+    
+    python -m src.metrics.phone_recognition --evaluation_name qweni \
+        --prediction_file exp/runs/inf_doreco_qweni/1jobArr/transcription.json \
+        --output_file exp/runs/inf_doreco_qweni/1jobArr/inventory_results.csv \
+        --gt_field target \
+        --key_field utt_id \
+        --language_field lang_sym
+    
+    python -m src.metrics.phone_recognition --evaluation_name gemini \
+        --prediction_file exp/runs/inf_tusom2021_gemini/20251224_142557/transcription.withlang.json \
+        --output_file exp/runs/inf_tusom2021_gemini/20251224_142557/inventory_results.csv \
+        --gt_field target \
+        --key_field utt_id \
+        --language_field lang_sym
+    
+    # PR results are in the output_file, inventory on terminal
+    python -m src.metrics.phone_recognition --evaluation_name qweni \
+        --prediction_file  exp/runs/inf_tusom2021_qweni/1jobArr/transcription.json \
+        --output_file exp/runs/inf_tusom2021_qweni/1jobArr/inventory_results.csv \
+        --gt_field target \
+        --key_field utt_id
+        
     python -m src.metrics.phone_recognition \
         --prediction_file exp/runs/inf_doreco_lv60/20251220_085643/transcription.withlang.json \
         --gt_field target \

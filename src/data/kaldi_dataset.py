@@ -184,6 +184,7 @@ class KaldiDataModule(L.LightningDataModule):
         super().__init__()
         log.info(
             f"Initializing KaldiDataModule with {wav_scp_file}, {text_file}, {lang_file}"
+            f"Initializing KaldiDataModule with {wav_scp_file}, {text_file}, {lang_file}"
         )
         self.wav_scp_file = wav_scp_file
         self.text_file = text_file
@@ -278,6 +279,8 @@ class KaldiDataModule(L.LightningDataModule):
             "speech_length": speech_lengths,
             "text": text_data["text"],
             "text_length": text_data.get("text_length"),
+            "text": text_data["text"],
+            "text_length": text_data.get("text_length"),
             "wavpath": wavpaths,
             "lang_sym": languages,
         }
@@ -285,6 +288,7 @@ class KaldiDataModule(L.LightningDataModule):
 
 def build_kaldi_datamodule(
     dataset_name,
+    data_dir,
     dataset_config_path="configs/data/powsm_evalset_index.yaml",
     batch_size=16,
     num_workers=4,
@@ -293,6 +297,7 @@ def build_kaldi_datamodule(
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
 
+    data_dir = Path(data_dir)
     if dataset_name not in config["datasets"]:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
@@ -319,6 +324,7 @@ def build_kaldi_datamodule(
         wav_scp_file=wav_scp_file,
         text_file=text_file,
         lang_file=lang_file,
+        data_dir=data_dir,
         sampling_rate=sampling_rate,
         batch_size=batch_size,
         num_workers=num_workers,

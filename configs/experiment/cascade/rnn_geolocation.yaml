@@ -40,20 +40,17 @@ model:
   encoder_output_dim: 128  # Must match ipa_embedding.embedding_dim
   optimizer:
     lr: 0.001
-  # Override net config to set vocab_size
-  # Note: vocab_size will be determined dynamically from the datamodule
-  # For now, set a reasonable upper bound (can be overridden)
   net:
-    vocab_size: 200
+    vocab_size: 200 # dummy, for compatibility
     embedding_dim: ${model.encoder_output_dim}
 
 callbacks:
   model_checkpoint:
-    monitor: "val/loss"
+    monitor: "val/err_km"
     mode: "min"
     save_top_k: 1
   early_stopping:
-    monitor: "val/loss"
+    monitor: "val/err_km"
     patience: 100
     mode: "min"
 

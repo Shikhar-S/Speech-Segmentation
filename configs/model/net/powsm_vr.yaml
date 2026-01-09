@@ -1,5 +1,6 @@
-_target_: src.model.powsm.powsm_variablerate_model.build_powsm_vr
+_target_: src.model.powsm.powsm_vr_model.build_powsm_vr
 work_dir: ${paths.cache_dir}/powsm
+architecture: encdec
 hf_repo: espnet/powsm
 # provide paths to override from local files instead of HF repo
 config_file: null

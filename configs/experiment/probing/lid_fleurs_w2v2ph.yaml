@@ -19,8 +19,8 @@ tags: ["fleurs", "w2v2ph", "lid", "classification"]
 seed: 42
 
 trainer:
-  min_epochs: 10
-  max_epochs: 200
+  min_epochs: 5
+  max_epochs: 12
   gradient_clip_val: 1.0
   val_check_interval: 0.25  # validate 4 times per epoch
 
@@ -38,6 +38,10 @@ callbacks:
     monitor: "val/f1"
     mode: "max"
     save_top_k: 1
+  early_stopping:
+    monitor: "val/f1"
+    patience: 5
+    mode: "max"
 
 data:
   batch_size: 48 # 48 on delta-ai, 24 on delta (1gpu)

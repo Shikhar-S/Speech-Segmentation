@@ -49,11 +49,11 @@ model:
 
 callbacks:
   model_checkpoint:
-    monitor: "val/pcc"
+    monitor: "val/kendalltau"
     mode: "max"
     save_top_k: 1
   early_stopping:
-    monitor: "val/pcc"
+    monitor: "val/kendalltau"
     patience: 100
     mode: "max"
 

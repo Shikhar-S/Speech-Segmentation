@@ -1,0 +1,30 @@
+# @package inference.inference_runner
+
+# Direct prompt config for Geolocation from Speech (Vaani - Hindi dialects)
+# Task: Predict geographic location from Hindi dialect speech
+# Output: lat, lon (decimal degrees)
+
+prompt_config:
+  system_prompt: |
+    ### Role
+    You are an expert dialectologist. You infer a speaker's geographic origin from dialectal cues in speech.
+
+    ### Task
+    Listen to the provided audio clip and predict the speaker's geographic location from dialectal features.
+
+    ### Output
+    Return JSON only with latitude/longitude in decimal degrees:
+    - {"lat": NUMBER, "lon": NUMBER}
+    - lat in [-90, 90], lon in [-180, 180]
+    - Do NOT include any explanation or extra text.
+  user_prompt_template: "Predict the geographic location. Output JSON only: {\"lat\": <deg>, \"lon\": <deg>}."
+
+client_config:
+  response_schema:
+    type: "OBJECT"
+    required: ["lat", "lon"]
+    properties:
+      lat:
+        type: "NUMBER"
+      lon:
+        type: "NUMBER"

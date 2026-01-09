@@ -47,6 +47,7 @@ def collate_fn(batch: List[Dict[str, Any]], pad_id: int = 0) -> Dict[str, Any]:
         "target": target,
         "utt_id": [b["utt_id"] for b in batch],
         "sample_index": [b["sample_index"] for b in batch],
+        "metadata_idx": [b.get("metadata_idx", None) for b in batch],
     }
 
 
@@ -82,6 +83,7 @@ class TranscriptionDataset(Dataset):
             "target": sample["target"],
             "utt_id": sample["utt_id"],
             "sample_index": sample["sample_index"],
+            "metadata_idx": sample.get("metadata_idx", None),
         }
 
 
@@ -171,6 +173,7 @@ class TranscriptionDataModule(LightningDataModule):
                 "utt_id": passthrough.get(
                     "utt_id", passthrough.get("metadata_idx", ix)
                 ),
+                "metadata_idx": passthrough.get("metadata_idx", None),
             }
             if "predicted_transcript" in pred[0]:
                 sample["predicted_transcript"] = pred[0]["predicted_transcript"]
