@@ -18,14 +18,14 @@ class PhoneRecognitionModel(LightningModule):
         net: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-        inference: Optional[Any] = None,
+        inference_strategy: Optional[Any] = None,
         freeze_encoder: bool = False,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(logger=False, ignore=["net", "inference"])
+        self.save_hyperparameters(logger=False, ignore=["net", "inference_strategy"])
         self.freeze_encoder = freeze_encoder
         self.net = net
-        self.inference = inference
+        self.inference_strategy = inference_strategy
         self.blank_id: Optional[int] = getattr(self.net, "blank_id", None)
         # Loss tracking
         self.train_loss = MeanMetric()
@@ -57,7 +57,7 @@ class PhoneRecognitionModel(LightningModule):
         self.train_loss.reset()
         self.val_loss.reset()
         self.test_loss.reset()
-        self.val_loss_best.reset()
+        self.val_loss_best.reset()  # clears on !resume!
 
     def _run_stage(
         self,
@@ -108,43 +108,15 @@ class PhoneRecognitionModel(LightningModule):
     def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         self._run_stage("test", batch, log_on_step=False)
 
-    def _pr_inference(
-        self,
-        batch: Dict[str, torch.Tensor],
-        batch_idx: int,
-        dataloader_idx: Optional[int] = 0,
-    ) -> Any:
+    def predict_step(self, batch, batch_idx, dataloader_idx=None):
+        if self.inference_strategy is None:
+            raise RuntimeError("Inference engine not provided.")
         speech = batch["speech"]
-        speech_length = batch["speech_length"]
-        segment_ids = batch.get("segment_id")
-
-        predictions: List[Dict[str, Any]] = []
-        for idx in range(speech.size(0)):
-            waveform = speech[idx, : speech_length[idx].item()]
-            inference_result = self.inference(
-                speech=waveform,
-                speech_length=speech_length[idx],
-            )
-            entry: Dict[str, Any] = {
-                "segment_id": (
-                    segment_ids[idx]
-                    if segment_ids is not None
-                    else f"d{dataloader_idx}_b{batch_idx}_utt{idx}"
-                ),
-                "predicted_transcript": inference_result[0].get("predicted_transcript"),
-            }
-            predictions.append(entry)
-        return predictions
-
-    def predict_step(
-        self,
-        batch: Dict[str, torch.Tensor],
-        batch_idx: int,
-        dataloader_idx: Optional[int] = None,
-    ) -> Any:
-        if self.inference is None:
-            raise RuntimeError("Inference object is required for predict_step.")
-        return self._pr_inference(batch, batch_idx, dataloader_idx)
+        speech_lengths = batch["speech_length"]
+        results = self.inference_strategy(
+            model=self.net, speech=speech, speech_lengths=speech_lengths
+        )
+        return results
 
     def configure_optimizers(self) -> Dict[str, Any]:
         # skip params for inference obj

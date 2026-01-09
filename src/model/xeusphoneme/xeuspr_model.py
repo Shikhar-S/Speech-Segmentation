@@ -9,22 +9,15 @@ Usage:
     python -m src.model.xeusphoneme.xeuspr_model \
         --work_dir /scratch/sbharad2/PhoneBench/exp/cache/xeus
 """
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 import argparse
-import yaml
-import json
 
 import torch
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet2.legacy.nets.pytorch_backend.nets_utils import make_pad_mask
+from espnet2.legacy.nets.e2e_asr_common import ErrorCalculator
 
 from src.model.powsm.ctc import CTC
-from src.model.powsm.specaug import SpecAug
-from src.model.powsm.e_branchformer import EBranchformerEncoder
-from src.model.xeusphoneme.cnn_frontend import CNNFrontend as Wav2VecCNN
-from src.model.xeusphoneme.linear_layer import LinearProjection
-from src.core.utils import download_hf_snapshot
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=False)
@@ -53,10 +46,13 @@ class XeusPRModel(torch.nn.Module):
         self.preencoder = preencoder
         self.encoder = encoder
         self.ctc = ctc
-
         self.token_list = list(token_list)
         self.ignore_id = ignore_id
         self.blank_id = token_list.index(sym_blank) if sym_blank in token_list else 0
+        sym_space = kwargs.get("sym_space", "<space>")
+        self.error_calculator = ErrorCalculator(
+            token_list, sym_space, sym_blank, report_cer=True, report_wer=False
+        )
 
     def collect_feats(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor, **kwargs
@@ -65,32 +61,14 @@ class XeusPRModel(torch.nn.Module):
         feats, feats_lengths = self._extract_feats(speech, speech_lengths)
         return {"feats": feats, "feats_lengths": feats_lengths}
 
-    def forward(
-        self,
-        speech: torch.Tensor,
-        speech_lengths: torch.Tensor,
-        text: torch.Tensor,
-        text_lengths: torch.Tensor,
-        **kwargs,
-    ):
-        """Forward pass with CTC loss computation."""
-        assert (
-            speech.shape[0]
-            == speech_lengths.shape[0]
-            == text.shape[0]
-            == text_lengths.shape[0]
-        )
+    def forward(self, speech, speech_lengths, text, text_lengths, **kwargs):
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
-        loss_ctc, acc = self._calc_ctc_loss(
+        loss_ctc, stats = self._calc_ctc_loss(
             encoder_out, encoder_out_lens, text, text_lengths
         )
-        stats = {
-            "acc": acc,
-        }
         loss, stats, weight = force_gatherable(
             (loss_ctc, stats, speech.shape[0]), loss_ctc.device
         )
-        # loss = loss / weight  # normalize by batch size
         return {"loss": loss, "stats": stats, "weight": weight}
 
     def _extract_feats(
@@ -134,14 +112,6 @@ class XeusPRModel(torch.nn.Module):
 
     def ctc_collapse_batch(self, x: torch.Tensor, max_length: int, pad: int = -1):
         B, T = x.shape
-        # if T > max_length:
-        #     x = x[:, :max_length]
-        # elif T < max_length:
-        #     pad_tensor = torch.full(
-        #         (B, max_length - T), pad, device=x.device, dtype=x.dtype
-        #     )
-        #     x = torch.cat([x, pad_tensor], dim=1)
-        # T = max_length
         blank = self.blank_id
         x_prev = torch.cat(
             [torch.full((B, 1), blank, device=x.device, dtype=x.dtype), x[:, :-1]],
@@ -169,32 +139,19 @@ class XeusPRModel(torch.nn.Module):
         lengths = torch.clamp(lengths, max=max_length)
         return out, lengths
 
-    def _calc_ctc_loss(
-        self,
-        encoder_out: torch.Tensor,
-        encoder_out_lens: torch.Tensor,
-        ys_pad: torch.Tensor,
-        ys_pad_lens: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Optional[float]]:
-        """Calculate CTC loss."""
+    def _calc_ctc_loss(self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens):
         ys_pad = torch.where(ys_pad == -1, self.ignore_id, ys_pad)
         ys_pad = ys_pad[:, : ys_pad_lens.max()]
         loss_ctc = self.ctc(encoder_out, encoder_out_lens, ys_pad, ys_pad_lens)
-
-        acc = None
-        with torch.no_grad():
-            ys_hat = self.ctc.ctc_lo(encoder_out).argmax(dim=-1)
-            ys_hat = self.ctc_collapse_batch(
-                ys_hat.detach(), max_length=ys_pad.shape[1], pad=self.ignore_id
-            )[0]
-            acc = (
-                ys_hat.eq(ys_pad)
-                .masked_select(~make_pad_mask(ys_pad_lens).to(ys_hat.device))
-                .float()
-                .mean()
-                .item()
-            )
-        return loss_ctc, acc
+        stats = {}
+        assert self.error_calculator is not None, "ErrorCalculator not initialized"
+        if not self.training:  # err calc, slow?
+            with torch.no_grad():
+                ys_hat = self.ctc.argmax(encoder_out).data  # greedy-top1
+                stats["cer_ctc"] = self.error_calculator(
+                    ys_hat.cpu(), ys_pad.cpu(), is_ctc=True
+                )
+        return loss_ctc, stats
 
     def ctc_logits(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor
@@ -220,137 +177,6 @@ class XeusPRModel(torch.nn.Module):
             else:
                 trainable_params.append(p)
         return trainable_params
-
-
-def build_xeus_pr(
-    config_file: str, checkpoint: Optional[str] = None, vocab_file: Optional[str] = None
-) -> XeusPRModel:
-    """Build Xeus PR model from config and optional checkpoint.
-
-    Args:
-        config_file: Path to config yaml file
-        checkpoint: Path to model checkpoint (pretrained or fully trained)
-        vocab_file: Path to vocabulary file. If None, use vocab in config.
-
-    Returns:
-        XeusPRModel
-    """
-    with open(config_file, "r", encoding="utf-8") as f:
-        args = argparse.Namespace(**yaml.safe_load(f))
-    if vocab_file is not None:
-        with open(vocab_file) as f:
-            tok2id = json.load(f)
-            id2tok = {v: k for k, v in tok2id.items()}
-            token_list = [id2tok[i] for i in range(len(id2tok))]
-    elif isinstance(args.token_list, str):
-        with open(args.token_list, encoding="utf-8") as f:
-            token_list = [line.rstrip() for line in f]
-    else:
-        token_list = list(args.token_list)
-    vocab_size = len(token_list)
-    log.info(f"Vocabulary size: {vocab_size}")
-
-    assert (
-        getattr(args, "frontend") == "wav2vec_cnn"
-    ), "Config must specify wav2vec_cnn frontend"
-    frontend = Wav2VecCNN(**args.frontend_conf)
-    input_size = frontend.output_size()
-
-    specaug = None
-    if hasattr(args, "specaug") and args.specaug == "specaug":
-        specaug = SpecAug(**args.specaug_conf)
-
-    normalize = None
-    assert (
-        getattr(args, "preencoder") == "linear"
-    ), "Config must specify linear preencoder"
-    preencoder = LinearProjection(input_size=input_size, **args.preencoder_conf)
-    input_size = preencoder.output_size()
-    assert (
-        args.encoder == "e_branchformer"
-    ), f"Only e_branchformer supported, got {args.encoder}"
-    encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
-
-    # Build CTC
-    ctc = CTC(
-        odim=vocab_size,
-        encoder_output_size=encoder.output_size(),
-        **getattr(args, "ctc_conf", {}),
-    )
-
-    # Build model
-    model = XeusPRModel(
-        encoder=encoder,
-        ctc=ctc,
-        token_list=token_list,
-        frontend=frontend,
-        specaug=specaug,
-        normalize=normalize,
-        preencoder=preencoder,
-        ignore_id=getattr(args, "ignore_id", -1),
-        sym_blank=getattr(args, "sym_blank", "<blank>"),
-    )
-
-    if checkpoint:
-        state_dict = torch.load(checkpoint, map_location="cpu", weights_only=False)
-        load_info = model.load_state_dict(state_dict, strict=False)
-        log.info(f"Loaded checkpoint: {checkpoint} with load info: {load_info}")
-
-    model.training_args = args
-    return model
-
-
-def build_xeus_pr_from_hf(
-    *,
-    work_dir: str,
-    hf_repo: Optional[str] = None,
-    force: bool = False,
-    config_file: Optional[str] = None,
-    checkpoint: Optional[str] = None,
-    vocab_file: Optional[str] = None,
-) -> XeusPRModel:
-    """Build Xeus PR model from local files or HuggingFace repo.
-
-    Args:
-        work_dir: Directory to store downloaded files from HF repo
-        hf_repo: HuggingFace repo name (e.g., "username/xeus-pr")
-            If None, load from local files only
-        force: Whether to force re-download from HF repo
-        config_file: Path to config file. If None, use default path in work_dir.
-            Takes precedence over hf_repo download.
-        checkpoint: Path to checkpoint file. If None, use default path in work_dir.
-            Takes precedence over hf_repo download.
-        vocab_file: Path to vocabulary file. If None, use path in config.
-
-    Returns:
-        XeusPRModel
-    """
-    # Default relative paths in HF repo
-    REL_CONFIG = "model/config.yaml"
-    REL_CKPT = "model/xeus_checkpoint_new.pth"
-
-    # Download from HF if repo specified
-    if hf_repo:
-        log.info(f"Downloading snapshot from HuggingFace: {hf_repo}")
-        download_hf_snapshot(
-            repo_id=hf_repo,
-            force_download=force,
-            work_dir=work_dir,
-        )
-
-    # Resolve file paths
-    root = Path(work_dir)
-    cfg = config_file or str(root / REL_CONFIG)
-    ckpt = checkpoint or str(root / REL_CKPT)
-
-    # Verify files exist
-    assert Path(cfg).exists(), f"Config file not found: {cfg}"
-    assert Path(ckpt).exists(), f"Checkpoint file not found: {ckpt}"
-
-    log.info(f"Building model from config: {cfg}")
-    log.info(f"Loading checkpoint: {ckpt}")
-
-    return build_xeus_pr(config_file=cfg, checkpoint=ckpt, vocab_file=vocab_file)
 
 
 if __name__ == "__main__":

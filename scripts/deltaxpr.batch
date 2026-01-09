@@ -1,0 +1,29 @@
+#!/bin/bash
+#SBATCH -A bbjs-delta-gpu
+#SBATCH -p gpuA100x4
+#SBATCH -J main
+#SBATCH -N 1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 20
+#SBATCH --mem=32G
+#SBATCH -t 24:00:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+
+# === Directory Setup ===
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p "exp/slurm_logs"
+# === Environment setup ===
+source ~/.bashrc
+conda deactivate
+source setup_uv.sh .venv
+# for w2v2ph these must be pre-built
+export HF_HOME="/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf"
+export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/delta_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
+export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/delta_dependencies/espeak-ng/espeak-ng-data"
+###########################
+###########################
+python src/main.py "$@"
+###########################
+#  experiment=inference/transcribe_xeuspr data=doreco task_name=inf_doreco_xeuspr
+###########################

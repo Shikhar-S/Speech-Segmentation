@@ -8,14 +8,13 @@
 #SBATCH -c 72                      # 288 CPUs / 4 tasks = 72 CPUs per task
 #SBATCH --mem=480G                 # Slurm treats this as memory per node
 #SBATCH -t 48:00:00
-#SBATCH --reservation=sup-20848-4
 #SBATCH -o exp/slurm_logs/%j.out
 #SBATCH -e exp/slurm_logs/%j.out
 
 # === Directory Setup ===
 cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
 mkdir -p "exp/slurm_logs"
-
+# sbatch -N 4 scripts/dai.batch ckpt_path=exp/runs/train_ipapack_xeuspr/20251231_100230/checkpoints/step_246268.ckpt
 # === Environment setup ===
 source ~/.bashrc
 conda deactivate

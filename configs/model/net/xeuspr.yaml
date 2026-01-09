@@ -1,4 +1,4 @@
-_target_: src.model.xeusphoneme.xeuspr_model.build_xeus_pr_from_hf
+_target_: src.model.xeusphoneme.builders.build_xeus_pr_from_hf
 work_dir: ${paths.cache_dir}/xeus
 hf_repo: espnet/xeus
 force: false # whether to force download even if files exist
