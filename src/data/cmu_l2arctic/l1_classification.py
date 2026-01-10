@@ -3,24 +3,66 @@
 This module provides a LightningDataModule for L1 (native language) classification
 using the combined CMU Arctic and L2-ARCTIC corpora.
 
+Loads data from HuggingFace Hub parquet dataset with embedded audio bytes.
+Audio is decoded and resampled to cache_dir/resampled_{target_sr}Hz/ on first run.
+
 Usage:
     python -m src.data.cmu_l2arctic.l1_classification \
-        --data_dir exp/download/cmu_l2arctic \
-        --metadata_path exp/cache/cmu_l2arctic/metadata.csv \
+        --hf_repo y00njaekim/cmul2arctic-l1cls \
+        --cache_dir exp/cache/cmu_l2arctic \
         --batch_size 2
 """
 
+import io
 import logging
 import os
-from typing import Dict, Optional, List
-import pandas as pd
+from pathlib import Path
+from typing import Dict, List, Optional, Union
+
 import torch
 import torchaudio
-from torch.utils.data import Dataset, DataLoader, ConcatDataset
+from datasets import Audio as HFAudio
+from datasets import load_dataset
 from lightning import LightningDataModule
-from src.core.utils import resample_dataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 logger = logging.getLogger(__name__)
+
+
+def load_cmul2arctic_hf_data(
+    hf_repo: str,
+    split: str,
+    cache_dir: Optional[str] = None,
+):
+    """Load CMU+L2ARCTIC dataset from HuggingFace Hub.
+
+    The HF dataset has parquet shards organized as:
+        - cmu/{train,val,test}/*.parquet
+        - l2arctic/{train,val,test}/*.parquet
+
+    This function loads both corpora for a given split and concatenates them.
+
+    Args:
+        hf_repo: HuggingFace dataset repository (e.g., 'y00njaekim/cmul2arctic-l1cls')
+        split: Which split to load ('train', 'val', or 'test')
+        cache_dir: Local cache directory for HF datasets
+
+    Returns:
+        HF Dataset with combined cmu + l2arctic data for the given split
+    """
+    data_files = {
+        "train": ["cmu/train/*.parquet", "l2arctic/train/*.parquet"],
+        "val": ["cmu/val/*.parquet", "l2arctic/val/*.parquet"],
+        "test": ["cmu/test/*.parquet", "l2arctic/test/*.parquet"],
+    }
+    ds_dict = load_dataset(
+        hf_repo,
+        data_files=data_files,
+        cache_dir=cache_dir,
+    )
+    ds = ds_dict[split]
+    ds = ds.cast_column("audio", HFAudio(decode=False))
+    return ds
 
 
 def pad_collate(batch):
@@ -67,50 +109,46 @@ class CmuL2ArcticL1Dataset(Dataset):
     """
     PyTorch Dataset for CMU + L2Arctic L1 classification.
 
-    Loads audio and metadata from a CSV file with the following columns:
-        - audio_path: relative path from data_dir
-        - label: L1 class (e.g., 'en', 'ko', 'zh', 'ar', 'hi', 'es', 'vi')
-        - split: 'train', 'val', or 'test'
+    HuggingFace Dataset and loads audio from cache_dir/resampled_{sr}Hz/.
+    The resampled wav files are expected to be prepared by prepare_data().
+
+    HF Dataset columns used:
+        - audio.path: relative path (e.g., 'cmu/cmu_us_bdl_arctic/wav/arctic_a0001.wav')
+        - audio.bytes: embedded audio bytes (wav bytes)
+        - l1_label: L1 class (e.g., 'en', 'ko', 'zh', 'ar', 'hi', 'es', 'vi')
         - speaker_id: speaker identifier
         - utt_id: utterance identifier
     """
 
     def __init__(
         self,
-        metadata_path: str,
-        split: str,  # 'train', 'val', or 'test'
-        data_dir: str,
+        hf_dataset,
+        split: str,
+        cache_dir: Union[str, Path],
         label_to_ids: Dict[str, int],
         target_sr: int = 16000,
         max_duration_sec: Optional[float] = None,
     ):
         """
         Args:
-            metadata_path: Path to metadata CSV file
-            split: Which split to load ('train', 'val', or 'test')
-            data_dir: Root directory for audio files (audio_path is relative to this)
+            hf_dataset: HuggingFace Dataset for this split
+            split: Which split ('train', 'val', or 'test')
+            cache_dir: Root cache directory (resampled wavs at cache_dir/resampled_{sr}Hz/)
+            label_to_ids: Mapping from label string to integer
             target_sr: Target sample rate for audio (default: 16000)
             max_duration_sec: Maximum audio duration in seconds (for truncation)
         """
+        self.hf_ds = hf_dataset
         self.split = split
-        self.data_dir = data_dir
+        self.cache_dir = Path(cache_dir)
+        self.label_to_ids = label_to_ids
         self.target_sr = target_sr
         self.max_duration_sec = max_duration_sec
-        self.split = split
-        self.label_to_ids = label_to_ids
 
-        # Load metadata and filter by split
-        metadata = (
-            pd.read_csv(metadata_path)
-            .reset_index()
-            .rename(columns={"index": "metadata_idx"})
-        )
-        self.metadata = metadata[metadata["split"] == split].reset_index(drop=True)
-
-        logger.info("Loaded %d samples for split '%s'", len(self.metadata), split)
+        logger.info("Created dataset for split '%s' with %d samples", split, len(self))
 
     def __len__(self):
-        return len(self.metadata)
+        return len(self.hf_ds)
 
     def __getitem__(self, idx):
         """
@@ -121,20 +159,21 @@ class CmuL2ArcticL1Dataset(Dataset):
                 - audio_path: str, path to the audio file (for API-based models)
                 - label: str, L1 class label
                 - split: str, data split
-                - metadata_idx: int, index in metadata CSV
+                - metadata_idx: int, index in dataset
                 - speaker_id: str, speaker identifier
                 - utt_id: str, utterance identifier
         """
-        row = self.metadata.iloc[idx]
-        # Load audio from resampled data!!
-        audio_path = os.path.join(
-            self.data_dir, f"resampled_{self.target_sr}Hz", row["audio_path"]
-        )
-        waveform, sr = torchaudio.load(audio_path)
-        # Resample if necessary
-        assert (
-            sr == self.target_sr
-        ), f"Expected sample rate {self.target_sr}, but got {sr}"
+        sample = self.hf_ds[idx]
+
+        # Get audio path from HF row (e.g., 'cmu/cmu_us_bdl_arctic/wav/arctic_a0001.wav')
+        audio_rel_path = sample["audio"]["path"]
+        resampled_dir = self.cache_dir / f"resampled_{self.target_sr}Hz"
+        audio_path = resampled_dir / audio_rel_path
+
+        # Load resampled audio
+        waveform, sr = torchaudio.load(str(audio_path))
+        assert sr == self.target_sr, f"Expected sr={self.target_sr}, got {sr}"
+
         # Convert to mono if necessary
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
@@ -151,14 +190,14 @@ class CmuL2ArcticL1Dataset(Dataset):
         return {
             "speech": waveform,
             "speech_length": waveform.shape[0],
-            "audio_path": audio_path,
+            "audio_path": str(audio_path),
             "lang_sym": "<eng>",  # for powsm
-            "label": row["l1_label"],
-            "target": self.label_to_ids[row["l1_label"]],
-            "split": row["split"],
-            "metadata_idx": row["metadata_idx"],
-            "speaker_id": row["speaker_id"],
-            "utt_id": row["utt_id"],
+            "label": sample["l1_label"],
+            "target": self.label_to_ids[sample["l1_label"]],
+            "split": self.split,
+            "metadata_idx": idx,
+            "speaker_id": sample["speaker_id"],
+            "utt_id": sample["utt_id"],
         }
 
 
@@ -167,16 +206,17 @@ class CmuL2ArcticL1Classification(LightningDataModule):
     LightningDataModule for CMU + L2Arctic L1 classification.
 
     This DataModule:
-        1. Loads metadata from a CSV file
-        2. Creates train/val/test datasets based on the 'split' column
-        3. Provides dataloaders with proper batching (zero-padding)
-        4. Supports distributed training (batch_size is divided by world_size)
+        1. Loads data from HuggingFace Hub (parquet with embedded audio bytes)
+        2. Decodes audio bytes and resamples to target_sr, caching to cache_dir
+        3. Creates train/val/test datasets wrapping the HF datasets
+        4. Provides dataloaders with proper batching (zero-padding)
+        5. Supports distributed training (batch_size is divided by world_size)
     """
 
     def __init__(
         self,
-        data_dir: str,
-        metadata_path: str,
+        hf_repo: str,
+        cache_dir: str,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = False,
@@ -184,43 +224,87 @@ class CmuL2ArcticL1Classification(LightningDataModule):
         num_classes: int = 7,
         id_to_label: List[str] = None,
         max_duration_sec: Optional[float] = None,
-        predict_splits: Optional[
-            List[str]
-        ] = None,  # Splits for predict_dataloader, default: all
+        predict_splits: Optional[List[str]] = None,
     ):
         """
         Args:
-            data_dir: Root directory for audio files
-            metadata_path: Path to metadata CSV
+            hf_repo: HuggingFace dataset repository (e.g., 'y00njaekim/cmul2arctic-l1cls')
+            cache_dir: Cache directory for resampled audio
             batch_size: Batch size (will be divided by world_size in distributed mode)
             num_workers: Number of dataloader workers
             pin_memory: Whether to pin memory for GPU transfer
             target_sr: Target sample rate
             num_classes: Number of L1 classes
+            id_to_label: List of label strings in order (default: alphabetical)
             max_duration_sec: Maximum audio duration in seconds
             predict_splits: List of splits to use for predict_dataloader (default: all)
         """
         super().__init__()
         self.save_hyperparameters()
+
         self.id_to_label = id_to_label
         self.label_to_ids = {label: i for i, label in enumerate(id_to_label)}
+
         self.ds_train = self.ds_val = self.ds_test = None
+        self.hf_train = self.hf_val = self.hf_test = None
         self.batch_size = batch_size
         self.predict_splits = predict_splits or ["train", "val", "test"]
 
     def prepare_data(self):
-        """Prepare data by resampling audio."""
-        tgt_dir = os.path.join(
-            self.hparams.data_dir, f"resampled_{self.hparams.target_sr}Hz"
-        )
-        resample_dataset(
-            metadata_df=pd.read_csv(self.hparams.metadata_path),
-            path_key="audio_path",
-            src_data_dir=self.hparams.data_dir,
-            tgt_data_dir=tgt_dir,
-            tgt_sr=self.hparams.target_sr,
-            force_resample=False,
-        )
+        """Prepare data by downloading from HF and resampling audio to cache_dir."""
+        cache_dir = Path(self.hparams.cache_dir)
+        target_sr = self.hparams.target_sr
+        resampled_dir = cache_dir / f"resampled_{target_sr}Hz"
+
+        # Check if already prepared
+        if resampled_dir.exists():
+            existing_files = list(resampled_dir.rglob("*.wav"))
+            if len(existing_files) > 0:
+                logger.info(
+                    f"Found {len(existing_files)} resampled files in {resampled_dir}, "
+                    "skipping prepare_data."
+                )
+                return
+
+        logger.info(f"Preparing data from HuggingFace: {self.hparams.hf_repo}")
+
+        # Load all splits and resample
+        for split in ["train", "val", "test"]:
+            logger.info(f"Processing split: {split}")
+            ds = load_cmul2arctic_hf_data(
+                hf_repo=self.hparams.hf_repo,
+                split=split,
+                cache_dir=str(cache_dir),
+            )
+
+            # Resample and save each audio file
+            for i, sample in enumerate(ds):
+                audio_rel_path = sample["audio"]["path"]
+                audio_bytes = sample["audio"]["bytes"]
+
+                # Target path
+                target_path = resampled_dir / audio_rel_path
+                if target_path.exists():
+                    continue
+
+                # Decode audio from bytes
+                waveform, sr = torchaudio.load(io.BytesIO(audio_bytes))
+
+                # Resample if needed
+                if sr != target_sr:
+                    resampler = torchaudio.transforms.Resample(sr, target_sr)
+                    waveform = resampler(waveform)
+
+                # Save resampled audio
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                torchaudio.save(str(target_path), waveform, target_sr)
+
+                if (i + 1) % 1000 == 0:
+                    logger.info(f"  Processed {i + 1}/{len(ds)} samples")
+
+            logger.info(f"  Completed {split}: {len(ds)} samples")
+
+        logger.info("prepare_data completed.")
 
     def setup(self, stage: Optional[str] = None):
         """Setup datasets for train/val/test splits."""
@@ -235,28 +319,48 @@ class CmuL2ArcticL1Classification(LightningDataModule):
 
         # Create datasets if not already created
         if self.ds_train is None:
-            self.ds_train = CmuL2ArcticL1Dataset(
-                metadata_path=self.hparams.metadata_path,
+            cache_dir = Path(self.hparams.cache_dir)
+
+            # Load HF datasets
+            self.hf_train = load_cmul2arctic_hf_data(
+                hf_repo=self.hparams.hf_repo,
                 split="train",
-                data_dir=self.hparams.data_dir,
-                target_sr=self.hparams.target_sr,
+                cache_dir=str(cache_dir),
+            )
+            self.hf_val = load_cmul2arctic_hf_data(
+                hf_repo=self.hparams.hf_repo,
+                split="val",
+                cache_dir=str(cache_dir),
+            )
+            self.hf_test = load_cmul2arctic_hf_data(
+                hf_repo=self.hparams.hf_repo,
+                split="test",
+                cache_dir=str(cache_dir),
+            )
+
+            # Wrap in PyTorch Datasets
+            self.ds_train = CmuL2ArcticL1Dataset(
+                hf_dataset=self.hf_train,
+                split="train",
+                cache_dir=cache_dir,
                 label_to_ids=self.label_to_ids,
+                target_sr=self.hparams.target_sr,
                 max_duration_sec=self.hparams.max_duration_sec,
             )
             self.ds_val = CmuL2ArcticL1Dataset(
-                metadata_path=self.hparams.metadata_path,
+                hf_dataset=self.hf_val,
                 split="val",
-                data_dir=self.hparams.data_dir,
-                target_sr=self.hparams.target_sr,
+                cache_dir=cache_dir,
                 label_to_ids=self.label_to_ids,
+                target_sr=self.hparams.target_sr,
                 max_duration_sec=self.hparams.max_duration_sec,
             )
             self.ds_test = CmuL2ArcticL1Dataset(
-                metadata_path=self.hparams.metadata_path,
+                hf_dataset=self.hf_test,
                 split="test",
-                data_dir=self.hparams.data_dir,
-                target_sr=self.hparams.target_sr,
+                cache_dir=cache_dir,
                 label_to_ids=self.label_to_ids,
+                target_sr=self.hparams.target_sr,
                 max_duration_sec=self.hparams.max_duration_sec,
             )
             logger.info(
@@ -315,16 +419,16 @@ def _test_datamodule():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data_dir",
+        "--hf_repo",
         type=str,
-        required=True,
-        help="Root directory for audio files",
+        default="y00njaekim/cmul2arctic-l1cls",
+        help="HuggingFace dataset repository",
     )
     parser.add_argument(
-        "--metadata_path",
+        "--cache_dir",
         type=str,
         required=True,
-        help="Path to metadata CSV",
+        help="Cache directory for resampled audio",
     )
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_workers", type=int, default=2)
@@ -333,8 +437,8 @@ def _test_datamodule():
 
     # Create DataModule
     dm = CmuL2ArcticL1Classification(
-        data_dir=args.data_dir,
-        metadata_path=args.metadata_path,
+        hf_repo=args.hf_repo,
+        cache_dir=args.cache_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=False,
