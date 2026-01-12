@@ -40,7 +40,8 @@ def load_cmul2arctic_hf_data(
         - cmu/{train,val,test}/*.parquet
         - l2arctic/{train,val,test}/*.parquet
 
-    This function loads both corpora for a given split and concatenates them.
+    This function loads the requested split using the dataset's pre-defined split
+    metadata (stored in the dataset card / config on the Hub).
 
     Args:
         hf_repo: HuggingFace dataset repository (e.g., 'y00njaekim/cmul2arctic-l1cls')
@@ -50,17 +51,7 @@ def load_cmul2arctic_hf_data(
     Returns:
         HF Dataset with combined cmu + l2arctic data for the given split
     """
-    data_files = {
-        "train": ["cmu/train/*.parquet", "l2arctic/train/*.parquet"],
-        "val": ["cmu/val/*.parquet", "l2arctic/val/*.parquet"],
-        "test": ["cmu/test/*.parquet", "l2arctic/test/*.parquet"],
-    }
-    ds_dict = load_dataset(
-        hf_repo,
-        data_files=data_files,
-        cache_dir=cache_dir,
-    )
-    ds = ds_dict[split]
+    ds = load_dataset(hf_repo, split=split, cache_dir=cache_dir)
     ds = ds.cast_column("audio", HFAudio(decode=False))
     return ds
 
