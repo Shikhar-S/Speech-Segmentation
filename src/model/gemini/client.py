@@ -41,7 +41,7 @@ class GeminiClient:
         model_name: str = "gemini-2.5-flash",
         api_key: Optional[str] = None,
         temperature: float = 1.0,
-        top_p: float = 1.0,
+        top_p: float = 0.95,
         seed: int = 0,
         thinking_budget: int = 0,
         response_schema: Optional[dict] = None,
@@ -55,7 +55,7 @@ class GeminiClient:
             api_key: API key for authentication. If None, falls back to
                      GEMINI_API_KEY environment variable.
             temperature: Sampling temperature for generation (default: 1.0).
-            top_p: Top-p (nucleus) sampling parameter (default: 1.0).
+            top_p: Top-p (nucleus) sampling parameter (default: 0.95).
             seed: Random seed for reproducibility (default: 0).
             thinking_budget: Thinking budget for reasoning models (default: 0).
                 Set to 0 for non-thinking mode, higher values for more reasoning.
