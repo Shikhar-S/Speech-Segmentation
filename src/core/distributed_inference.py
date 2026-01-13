@@ -19,7 +19,6 @@ from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf
 
 
-
 def _init_worker():
     proc = mp.current_process()
     rank_zero_only.rank = (proc._identity[0] - 1) if proc._identity else 0
@@ -99,7 +98,7 @@ def run_distributed_inference_(
             output without processing
         limit_samples: if set, limit the number of samples to process (useful for testing)
     """
-    
+
     dataset_cfg = OmegaConf.to_container(dataset_cfg, resolve=True)
     inference_config = OmegaConf.to_container(inference_config, resolve=True)
     if inference_call_args is not None:

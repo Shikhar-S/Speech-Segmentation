@@ -14,8 +14,9 @@ for DP in "${DATASETS[@]}"; do
     D=$(echo ${DP} | cut -d'|' -f1)
     P=$(echo ${DP} | cut -d'|' -f2)
     echo "Submitting job for dataset: ${D} with prompt: ${P}"
-    # -p ghx4 --reservation sup-20848-4 --nodelist=gh046,gh137
-    sbatch -p ghx4-interactive --array=0-9 \
+    # -p ghx4 --reservation sup-20848-4 --nodelist=gh046,gh048
+    # -interactive
+    sbatch -p ghx4 --array=0-9 \
     -t 30:00 scripts/vllm_dai.batch \
     experiment=inference/transcribe_qweninstruct.yaml \
     data=${D} prompt=${P} \
