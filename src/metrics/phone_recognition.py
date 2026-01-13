@@ -2,10 +2,11 @@
 
 Usage:
     python -m src.metrics.phone_recognition \
-        --prediction_file exp/runs/inf_doreco_xlsr53/20251220_085642/transcription.withlang.json \
+        --prediction_file exp/runs/inf_doreco_xeuspr/8job/transcription.json \
+        --output_file exp/runs/inf_doreco_xeuspr/8job/inventory_results.csv \
         --gt_field target \
-        --key_field utt_id \
-        --language_field lang_sym
+        --evaluation_name xeuspr \
+        --key_field utt_id
     
     python -m src.metrics.phone_recognition --evaluation_name powsmctc \
         --prediction_file exp/runs/inf_doreco_powsm_ctc/8jobARR/transcription.json \
@@ -78,7 +79,7 @@ class PhoneRecognitionSummary:
     DEL: float
     N: int  # number of utterances
     phones: int  # total number of reference phones
-    inventory: setkeydict[float]
+    inventory: setkeydict[float] | None = None  # phone inventory metrics
 
 
 class PhoneRecognitionEvaluator:
@@ -248,7 +249,7 @@ class PhoneRecognitionEvaluator:
         return get_inventory_metrics(ref_inventory, pred_inventory, search_max=True)
 
     def evaluate(
-        self, test_data: Dict[str, Dict[str, Any]]
+        self, test_data: Dict[str, Dict[str, Any]], compute_inventory: bool = True
     ) -> Tuple[PhoneRecognitionSummary, Dict[str, Dict[str, float]]]:
         """
         Evaluate a full dataset.
@@ -314,7 +315,11 @@ class PhoneRecognitionEvaluator:
             DEL=(del_err_sum / phones_sum * 100) if phones_sum > 0 else 0.0,
             N=n_utts,
             phones=phones_sum,
-            inventory=self._get_phone_inventory_metrics(test_data),
+            inventory=(
+                self._get_phone_inventory_metrics(test_data)
+                if compute_inventory
+                else None
+            ),
         )
 
         return summary, instance_metrics
@@ -335,8 +340,8 @@ class PhoneRecognitionEvaluator:
         t.add_row("INS (%)", f"{summary.INS:.2f}")
         t.add_row("DEL (%)", f"{summary.DEL:.2f}")
         Console().print(t)
-
-        PhoneRecognitionEvaluator.pretty_print_inventory_metrics(summary.inventory)
+        if summary.inventory is not None:
+            PhoneRecognitionEvaluator.pretty_print_inventory_metrics(summary.inventory)
 
     @staticmethod
     def pretty_print_inventory_metrics(inventory_metrics: setkeydict[float]) -> None:
@@ -384,28 +389,30 @@ class PhoneRecognitionEvaluator:
         import csv
         import os
 
-        base_key_elements = ["exclusive", "max", "featured"]
-        base_keys = chain.from_iterable(
-            combinations(base_key_elements, n)
-            for n in range(len(base_key_elements) + 1)
-        )
         inv_headers = []
         inv_values = []
-        for base_key in base_keys:
-            if "featured" not in base_key and "exclusive" in base_key:
-                continue
-            label = "none" if not base_key else "_".join(base_key)
-            prefix = f"inv_{label}"
-            inv_headers.extend(
-                [f"{prefix}_f1", f"{prefix}_precision", f"{prefix}_recall"]
+
+        if summary.inventory:
+            base_key_elements = ["exclusive", "max", "featured"]
+            base_keys = chain.from_iterable(
+                combinations(base_key_elements, n)
+                for n in range(len(base_key_elements) + 1)
             )
-            inv_values.extend(
-                [
-                    f"{summary.inventory[base_key + ('f1_score',)]:.3f}",
-                    f"{summary.inventory[base_key + ('precision',)]:.3f}",
-                    f"{summary.inventory[base_key + ('recall',)]:.3f}",
-                ]
-            )
+            for base_key in base_keys:
+                if "featured" not in base_key and "exclusive" in base_key:
+                    continue
+                label = "none" if not base_key else "_".join(base_key)
+                prefix = f"inv_{label}"
+                inv_headers.extend(
+                    [f"{prefix}_f1", f"{prefix}_precision", f"{prefix}_recall"]
+                )
+                inv_values.extend(
+                    [
+                        f"{summary.inventory[base_key + ('f1_score',)]:.3f}",
+                        f"{summary.inventory[base_key + ('precision',)]:.3f}",
+                        f"{summary.inventory[base_key + ('recall',)]:.3f}",
+                    ]
+                )
 
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         write_header = (
@@ -540,7 +547,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     add_args(parser)
     args = parser.parse_args()
+    if args.output_file:
+        assert args.evaluation_name is not None, "Please provide --evaluation_name"
 
+    compute_inventory = args.language_field is not None
     loaded_predictions = _load_predictions(args.prediction_file, args.language_field)
     print(
         f"Loaded predictions for {len(loaded_predictions)} languages containing {sum(len(v) for v in loaded_predictions.values())} utterances."
@@ -549,21 +559,21 @@ if __name__ == "__main__":
     langs_used = list(loaded_predictions.keys())
     for lang, preds in tqdm(loaded_predictions.items(), desc="Evaluating languages"):
         evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)
-        summary, _ = evaluator.evaluate(preds)
+        summary, _ = evaluator.evaluate(preds, compute_inventory=compute_inventory)
         inventories.append(summary.inventory)
         if args.output_file:
-            assert args.evaluation_name is not None, "Please provide --evaluation_name"
             write_file = args.output_file
             evaluator.write_to_csv(summary, args.evaluation_name, write_file, lang)
             print(f"Appended results to {write_file}")
 
-    all_keys = set().union(*[inv.keys() for inv in inventories])
-    macro_inv_dict = {}
-    for k in all_keys:
-        vals = [inv[k] for inv in inventories]
-        macro_inv_dict[k] = sum(vals) / len(vals)
-    macro_inventory = setkeydict(list(macro_inv_dict.items()))
-    Console().print(
-        f"\nMacro-averaged Phone Inventory Metrics over {len(langs_used)} languages:"
-    )
-    PhoneRecognitionEvaluator.pretty_print_inventory_metrics(macro_inventory)
+    if compute_inventory:
+        all_keys = set().union(*[inv.keys() for inv in inventories])
+        macro_inv_dict = {}
+        for k in all_keys:
+            vals = [inv[k] for inv in inventories]
+            macro_inv_dict[k] = sum(vals) / len(vals)
+        macro_inventory = setkeydict(list(macro_inv_dict.items()))
+        Console().print(
+            f"\nMacro-averaged Phone Inventory Metrics over {len(langs_used)} languages:"
+        )
+        PhoneRecognitionEvaluator.pretty_print_inventory_metrics(macro_inventory)

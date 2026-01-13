@@ -1,7 +1,8 @@
 _target_: src.data.kaldi_dataset.build_kaldi_datamodule
 dataset_name: doreco
 # data_dir: ${paths.download_dir} # test_doreco should be at this level
-data_dir: /data/group_data/wavlab_icme25/PhoneBench/exp/download # for babel
-# data_dir: /work/hdd/bbjs/shared/powsm/s2t1/dump/raw # uncomment for delta
+# data_dir: /data/group_data/wavlab_icme25/PhoneBench/exp/download # for babel
+data_dir: /work/hdd/bbjs/shared/powsm/s2t1/dump/raw # uncomment for delta
+portable_wavscp: False
 batch_size: 32
-num_workers: 10
+num_workers: 1
