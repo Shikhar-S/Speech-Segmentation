@@ -23,7 +23,7 @@ prompt_config:
     - Return JSON with a single field `score` containing an INTEGER from 0 to 10.
     - Do NOT include any explanation, markdown, or extra text.
     - If uncertain, give your best estimate within the valid range.
-  user_prompt_template: "Rate the sentence-level pronunciation accuracy on an integer scale of 0-10. Output only the integer score."
+  user_prompt: "Rate the sentence-level pronunciation accuracy on an integer scale of 0-10. Output only the integer score."
 
 client_config:
   response_schema:

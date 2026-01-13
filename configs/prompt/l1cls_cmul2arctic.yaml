@@ -30,7 +30,7 @@ prompt_config:
     ### Output Format
     - Return JSON with a single field `class_id` containing an integer from 0 to 6.
     - Do NOT include any explanation, markdown, or extra text.
-  user_prompt_template: "Listen to this English speech and predict the speaker's native language. Output only the class_id."
+  user_prompt: "Listen to this English speech and predict the speaker's native language. Output only the class_id."
 
 client_config:
   response_schema:

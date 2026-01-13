@@ -2,7 +2,7 @@
 Gemini Inference wrapper for PhoneBench integration.
 
 This module provides an inference wrapper that adapts GeminiClient to the
-project's distributed_inference.py workflow, handling prompt templating
+project's distributed_inference.py workflow, handling prompt configuration
 and response post-processing.
 """
 
@@ -22,7 +22,7 @@ class GeminiInference:
 
     This class adapts the GeminiClient to work with the distributed_inference.py
     workflow by implementing the expected __call__ interface and handling
-    prompt templating and response cleaning.
+    prompt configuration and response cleaning.
     """
 
     def __init__(
@@ -48,8 +48,8 @@ class GeminiInference:
                 - response_schema (dict, optional): Schema for structured JSON output
                 - retry_config (dict, optional): Retry configuration
             prompt_config: Configuration for prompt handling. Expected keys:
-                - system_prompt (str): System instruction for the model
-                - user_prompt_template (str): Template string with {placeholders}
+                - system_prompt (str, optional): System instruction for the model
+                - user_prompt (str, optional): Plain user prompt string
             clean_response: If True, normalize the response text (remove spaces,
                             punctuation, etc.). Useful for IPA transcription tasks.
             output_key: Key to extract from JSON response when using structured output.
@@ -68,7 +68,7 @@ class GeminiInference:
 
         # Store prompt configuration
         self.system_prompt = prompt_config.get("system_prompt", "")
-        self.user_prompt_template = prompt_config.get("user_prompt_template", "{prompt}")
+        self.user_prompt = prompt_config.get("user_prompt", "")
 
         # Store post-processing options
         self.clean_response = clean_response
@@ -133,24 +133,15 @@ class GeminiInference:
         Run inference on an audio file.
 
         This method implements the interface expected by distributed_inference.py.
-        It formats the prompt using the template and kwargs, then calls the
-        Gemini client for generation.
 
         Args:
             audio_path: Path to the audio file to process.
-            **kwargs: Additional fields from the dataset item. These can be used
-                      in the prompt template (e.g., language, speaker_id).
+            **kwargs: Additional fields from the dataset item. Used for caching
+                      and passthrough purposes only (not for prompt generation).
 
         Returns:
             Dict containing raw and processed transcripts.
         """
-        # 1. Format user prompt using template and kwargs
-        try:
-            user_prompt = self.user_prompt_template.format(**kwargs)
-        except Exception:
-            # Best-effort: fall back to the raw template if formatting fails
-            user_prompt = self.user_prompt_template
-
         cache_key: Optional[str] = None
         if self.cache_path:
             if self.cache_key_field in kwargs:
@@ -162,7 +153,7 @@ class GeminiInference:
 
         try:
             raw_model_response = self.client.generate(
-                prompt=user_prompt,
+                prompt=self.user_prompt,
                 system_prompt=self.system_prompt if self.system_prompt else None,
                 files=audio_path,
             )

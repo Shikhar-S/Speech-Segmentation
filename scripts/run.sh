@@ -64,6 +64,7 @@ declare -A cluster_configs=(
     ["dai"]="scripts/dai.batch"
     ["delta"]="scripts/delta.batch"
     ["babel"]="scripts/babel.batch"
+    ["vllm"]="scripts/vllm_dai.batch"
 )
 
 # Model configurations: base_model|hf_repo
@@ -72,6 +73,7 @@ declare -A model_configs=(
     ["powsm"]="powsm|"
     ["powsmvr"]="powsmvr|"
     ["powsm_ctc"]="powsm_ctc|"
+    ["owsm_v3"]="powsm|espnet/owsm_v3"
     ["ctag"]="w2v2ph|ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
     ["lv60"]="w2v2ph|facebook/wav2vec2-lv-60-espeak-cv-ft"
     ["xlsr53"]="w2v2ph|facebook/wav2vec2-xlsr-53-espeak-cv-ft"
@@ -80,6 +82,8 @@ declare -A model_configs=(
     ["gemini"]="gemini|"
     ["wavlm"]="wavlm|microsoft/wavlm-base"
     ["whisper"]="whisper|openai/whisper-small"
+    ["qweni"]="qweninstruct"
+    ["qwent"]="qwenthinking"
 )
 
 # Recipe = task_dataset

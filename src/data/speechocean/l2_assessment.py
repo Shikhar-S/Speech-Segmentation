@@ -143,7 +143,7 @@ class SpeechOceanDataModule(LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         target_sr: int = 16000,
-        predict_splits: Optional[List[str]] = None,  # Splits for predict_dataloader, default: all
+        predict_splits: Optional[List[str]] = None,
     ):
         super().__init__()
         self.save_hyperparameters()
