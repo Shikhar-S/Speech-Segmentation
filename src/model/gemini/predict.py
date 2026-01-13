@@ -60,8 +60,8 @@ class DirectPromptInference:
                 - response_schema (dict, optional): Schema for structured JSON output
                 - retry_config (dict, optional): Retry configuration
             prompt_config: Configuration for prompt handling. Expected keys:
-                - system_prompt (str): System instruction for the model
-                - user_prompt_template (str): Template string with {placeholders}
+                - system_prompt (str, optional): System instruction for the model
+                - user_prompt (str, optional): Plain user prompt string
             device: Ignored parameter for API compatibility with distributed_inference.
             cache_path: Optional path to a JSONL cache file for per-sample checkpointing.
                 If set, each successful prediction is appended as {"key": ..., "pred": ...}.
@@ -76,7 +76,7 @@ class DirectPromptInference:
 
         # Store prompt configuration
         self.system_prompt = prompt_config.get("system_prompt", "")
-        self.user_prompt_template = prompt_config.get("user_prompt_template", "{prompt}")
+        self.user_prompt = prompt_config.get("user_prompt", "")
 
         # Resume / caching options
         self.cache_path = Path(cache_path) if cache_path else None
@@ -136,13 +136,11 @@ class DirectPromptInference:
         Run inference on an audio file for direct task prediction.
 
         This method implements the interface expected by distributed_inference.py.
-        It formats the prompt using the template and kwargs, calls the Gemini client,
-        and returns the structured prediction.
 
         Args:
             audio_path: Path to the audio file to process.
-            **kwargs: Additional fields from the dataset item. These can be used
-                      in the prompt template (e.g., language, speaker_id).
+            **kwargs: Additional fields from the dataset item. Used for caching
+                      and passthrough purposes only.
 
         Returns:
             Prediction dict on success:
@@ -158,17 +156,10 @@ class DirectPromptInference:
         if self.cache_path and self.resume and cache_key in self._cache:
             return self._cache[cache_key]
 
-        # Format user prompt using template and kwargs
-        try:
-            user_prompt = self.user_prompt_template.format(**kwargs)
-        except Exception:
-            # Best-effort: fall back to the raw template if formatting fails
-            user_prompt = self.user_prompt_template
-
         # Call Gemini API
         try:
             raw_response = self.client.generate(
-                prompt=user_prompt,
+                prompt=self.user_prompt,
                 system_prompt=self.system_prompt if self.system_prompt else None,
                 files=audio_path,
             )
