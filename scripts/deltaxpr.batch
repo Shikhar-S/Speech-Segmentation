@@ -4,11 +4,11 @@
 #SBATCH -J main
 #SBATCH -N 1
 #SBATCH --gpus-per-node=1
-#SBATCH -c 20
-#SBATCH --mem=32G
+#SBATCH -c 16
+#SBATCH --mem=62G
 #SBATCH -t 24:00:00
-#SBATCH -o exp/slurm_logs/%j.out
-#SBATCH -e exp/slurm_logs/%j.out
+#SBATCH -o exp/slurm_logs/%A_%a.out
+#SBATCH -e exp/slurm_logs/%A_%a.out
 
 # === Directory Setup ===
 cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
@@ -25,5 +25,5 @@ export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/delta_dependencies/esp
 ###########################
 python src/main.py "$@"
 ###########################
-#  experiment=inference/transcribe_xeuspr data=doreco task_name=inf_doreco_xeuspr
+# inference.num_workers=10 experiment=inference/transcribe_xeuspr data=doreco data.num_workers=0 task_name=debug_inf run_folder=debug_inf
 ###########################

@@ -8,19 +8,19 @@ from typing import Any, List, Tuple
 import torch
 from typeguard import typechecked
 
-from espnet2.legacy.nets.pytorch_backend.nets_utils import make_pad_mask
-from espnet2.legacy.nets.pytorch_backend.transformer.attention import (
+from espnet_import.nets.pytorch_backend.nets_utils import make_pad_mask
+from espnet_import.nets.pytorch_backend.transformer.attention import (
     MultiHeadedAttention,
 )
-from espnet2.legacy.nets.pytorch_backend.transformer.decoder_layer import DecoderLayer
-from espnet2.legacy.nets.pytorch_backend.transformer.embedding import PositionalEncoding
-from espnet2.legacy.nets.pytorch_backend.transformer.layer_norm import LayerNorm
-from espnet2.legacy.nets.pytorch_backend.transformer.mask import subsequent_mask
-from espnet2.legacy.nets.pytorch_backend.transformer.positionwise_feed_forward import (
+from espnet_import.nets.pytorch_backend.transformer.decoder_layer import DecoderLayer
+from espnet_import.nets.pytorch_backend.transformer.embedding import PositionalEncoding
+from espnet_import.nets.pytorch_backend.transformer.layer_norm import LayerNorm
+from espnet_import.nets.pytorch_backend.transformer.mask import subsequent_mask
+from espnet_import.nets.pytorch_backend.transformer.positionwise_feed_forward import (
     PositionwiseFeedForward,
 )
-from espnet2.legacy.nets.pytorch_backend.transformer.repeat import repeat
-from espnet2.legacy.nets.scorer_interface import (
+from espnet_import.nets.pytorch_backend.transformer.repeat import repeat
+from espnet_import.nets.scorer_interface import (
     BatchScorerInterface,
     MaskParallelScorerInterface,
 )

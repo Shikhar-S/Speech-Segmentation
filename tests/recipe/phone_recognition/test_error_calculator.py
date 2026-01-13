@@ -4,7 +4,7 @@ import pytest
 from typing import List
 
 # REFERENCE
-from espnet2.legacy.nets.e2e_asr_common import ErrorCalculator as ESPnetErrorCalculator
+from espnet_import.nets.e2e_asr_common import ErrorCalculator as ESPnetErrorCalculator
 from src.recipe.phone_recognition.error_calculator import (
     ErrorCalculator as CustomErrorCalculator,
 )

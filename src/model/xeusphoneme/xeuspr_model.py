@@ -14,8 +14,8 @@ import argparse
 
 import torch
 from espnet2.torch_utils.device_funcs import force_gatherable
-from espnet2.legacy.nets.pytorch_backend.nets_utils import make_pad_mask
-from espnet2.legacy.nets.e2e_asr_common import ErrorCalculator
+from espnet_import.nets.pytorch_backend.nets_utils import make_pad_mask
+from espnet_import.nets.e2e_asr_common import ErrorCalculator
 
 from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger

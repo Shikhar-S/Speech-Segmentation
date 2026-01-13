@@ -19,7 +19,6 @@ from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf
 
 
-
 def _init_worker():
     proc = mp.current_process()
     rank_zero_only.rank = (proc._identity[0] - 1) if proc._identity else 0
@@ -34,11 +33,16 @@ def work_chunk_(
 ):
     """Worker function to run inference on a chunk of data."""
     try:
-        worker_id, idxs, device = args
+        slurm_task_id, worker_id, idxs, device = args
         print(
-            f"Worker {worker_id} processing {len(idxs)} items on device {device}.",
+            f"SLURM_TASK_ID={slurm_task_id}, Worker {worker_id} "
+            f"processing {len(idxs)} items on device {device}.",
             flush=True,
         )
+        if inference_config.get("cache_path", None):
+            # NOTE: be sure to read all cache files if resuming!
+            base, ext = os.path.splitext(inference_config["cache_path"])
+            inference_config["cache_path"] = f"{base}.{slurm_task_id}.{worker_id}{ext}"
         inference_obj = hydra.utils.instantiate(inference_config, device=device)
         out = []
         dataset = get_dataset_from_cfg(dataset_cfg)
@@ -94,7 +98,7 @@ def run_distributed_inference_(
             output without processing
         limit_samples: if set, limit the number of samples to process (useful for testing)
     """
-    
+
     dataset_cfg = OmegaConf.to_container(dataset_cfg, resolve=True)
     inference_config = OmegaConf.to_container(inference_config, resolve=True)
     if inference_call_args is not None:
@@ -162,7 +166,8 @@ def run_distributed_inference_(
     )
     print("Total chunks to process:", len(chunks), flush=True)
     worker_args = [
-        (i, chunk, devices[i % len(devices)]) for i, chunk in enumerate(chunks)
+        (SLURM_TASK_ID, i, chunk, devices[i % len(devices)])
+        for i, chunk in enumerate(chunks)
     ]
 
     with mp.get_context("spawn").Pool(num_workers, initializer=_init_worker) as pool:

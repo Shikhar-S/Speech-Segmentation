@@ -33,7 +33,6 @@ class Task:
             model=model,
             datamodule=datamodule,
             ckpt_path=self.task_cfg.get("ckpt_path"),
-            weights_only=False,
         )
         ckpt_cb = getattr(trainer, "checkpoint_callback", None)
         ckpt_path = getattr(ckpt_cb, "best_model_path", "") if ckpt_cb else ""

@@ -24,7 +24,11 @@ class GreedyCTCInference:
 
     @torch.no_grad()
     def __call__(
-        self, model: torch.nn.Module, speech: torch.Tensor, speech_lengths: torch.Tensor
+        self,
+        model: torch.nn.Module,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        **kwargs
     ) -> List[Dict[str, Any]]:
         # 1. Standardized Forward pass
         # Works as long as model has .encode() and .ctc

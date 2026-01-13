@@ -4,7 +4,7 @@ import numpy as np
 import time
 from rapidfuzz.distance import Levenshtein
 from typing import List
-from espnet2.legacy.nets.e2e_asr_common import ErrorCalculator as ESPnetErrorCalculator
+from espnet_import.nets.e2e_asr_common import ErrorCalculator as ESPnetErrorCalculator
 
 
 class ErrorCalculator:
