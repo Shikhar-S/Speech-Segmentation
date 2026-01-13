@@ -73,6 +73,7 @@ declare -A model_configs=(
     ["powsm"]="powsm|"
     ["powsmvr"]="powsmvr|"
     ["powsm_ctc"]="powsm_ctc|"
+    ["owsm_v3"]="powsm|espnet/owsm_v3"
     ["ctag"]="w2v2ph|ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
     ["lv60"]="w2v2ph|facebook/wav2vec2-lv-60-espeak-cv-ft"
     ["xlsr53"]="w2v2ph|facebook/wav2vec2-xlsr-53-espeak-cv-ft"
