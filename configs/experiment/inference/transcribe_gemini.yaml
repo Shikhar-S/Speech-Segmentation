@@ -23,7 +23,7 @@ distributed_predict: True
 
 inference:
   num_workers: 1 # NOTE: Keep num_workers=1 to ensure cache_path/error_log_path writes happen in a single process
-  passthrough_keys: ["target", "split", "utt_id", "metadata_idx"]
+  passthrough_keys: ["target", "split", "utt_id", "metadata_idx", "lang_sym"]
   out_file: ${paths.output_dir}/transcription.jsonl
   limit_samples: null  # Set to null for full run
 

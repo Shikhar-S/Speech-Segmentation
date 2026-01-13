@@ -58,7 +58,8 @@ class KaldiDataset(Dataset):
             )
             ark_or_wav = Path(ark_or_wav)
             if not portable_wavscp:
-                ark_or_wav = Path(*ark_or_wav.parts[-4:])
+                # TODO(shikhar): cleanup
+                ark_or_wav = Path(*ark_or_wav.parts[2:])
             abs_wav_path = self.data_dir / ark_or_wav
             if element_index is not None:
                 abs_wav_path = f"{abs_wav_path}:{element_index}"
@@ -70,7 +71,9 @@ class KaldiDataset(Dataset):
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     key, wav_path = parts[0], parts[1]
-                    wav_path = _create_env_specific_path(wav_path, portable_wavscp)
+                    if not wav_path.startswith("/work/hdd"):
+                        # TODO(shikhar): cleanup
+                        wav_path = _create_env_specific_path(wav_path, portable_wavscp)
                     wav_scp[key] = str(wav_path)
         return wav_scp
 

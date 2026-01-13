@@ -1,3 +1,5 @@
-_target_: src.data.powsm_dataset.build_powsm_datamodule
+_target_: src.data.kaldi_dataset.build_kaldi_datamodule
 dataset_name: l2arctic_perceived
 dataset_config_path: configs/data/powsm_evalset_index.yaml
+data_dir: /work/hdd/bbjs/shared/powsm/s2t1/dump/raw # uncomment for delta
+portable_wavscp: False
