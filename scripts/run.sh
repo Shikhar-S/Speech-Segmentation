@@ -84,6 +84,7 @@ declare -A model_configs=(
     ["whisper"]="whisper|openai/whisper-small"
     ["qweni"]="qweninstruct"
     ["qwent"]="qwenthinking"
+    ["xeuspr"]="xeuspr"
 )
 
 # Recipe = task_dataset

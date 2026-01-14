@@ -19,14 +19,14 @@ test: false
 distributed_predict: True
 
 inference:
-  num_workers: 3 # number of parallel workers for distributed inference, 3 for 90GB gpu
+  num_workers: 2 # number of parallel workers for distributed inference, 3 for 90GB gpu
   passthrough_keys: ["target", "split", "utt_id", "metadata_idx", "lang_sym"]
   out_file: ${paths.output_dir}/transcription.json
   # an object (or fn that creates such an object) with __call__ method to transcribe single speech utt
   inference_runner:
     _target_: src.model.xeusphoneme.builders.build_xeus_pr_inference
     work_dir: ${paths.cache_dir}/xeus
-    checkpoint: exp/runs/train_ipapack_xeuspr/20251231_100230/checkpoints/step_246268.ckpt
+    checkpoint: exp/runs/train_ipapack_xeuspr/20251225_221757/checkpoints/step_030000.ckpt
     vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
     hf_repo: espnet/xeus
     force_download: False

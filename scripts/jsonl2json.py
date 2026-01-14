@@ -2,8 +2,8 @@
 # DATA: edacc uaspeech vaanigeo
 # doreco gmuaccent l2arctic_perceived timit tusom2021 voxangeles
 # for mp in $(seq 0 0.1 0.9); do python scripts/jsonl2json.py --dirname exp/runs/inf_timit_pr_powsm_ctc/masked_pr_${mp}; done
-# python scripts/jsonl2json.py --dirname exp/runs/inf_cmul2arcticl1_qweni/1jobArr
-# for d in cmul2arcticl1 easycall edacc fleurs speechocean uaspeech ultrasuite_child vaanigeo; do python scripts/jsonl2json.py --dirname exp/runs/infzs_${d}_qweni/1jobArr; done
+# python scripts/jsonl2json.py --dirname exp/runs/inf_speechocean_xeuspr/8jobARR
+# for d in cmul2arcticl1 easycall edacc fleurs speechocean uaspeech ultrasuite_child vaanigeo; do python scripts/jsonl2json.py --dirname exp/runs/inf_${d}_xeuspr/8jobARR; done
 # for m in ctag lv60 xlsr53 powsm powsm_ctc zipactc zipactc_ns; do python scripts/jsonl2json.py --dirname exp/runs/inf_cmul2arcticl1_$m/8jobARR; done
 import json
 from pathlib import Path
