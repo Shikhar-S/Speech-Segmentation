@@ -9,15 +9,15 @@ Supports:
 - geolocation (lat, lon in decimal degrees): vaanigeo
 
 Usage:
-    python -m src.metrics.zeroshot_predictions \\
+    python -m src.metrics.zeroshot_evals \\
         --dataset vaanigeo \\
         --run_dir exp/runs/vaani/20251230_201815
 
-    python -m src.metrics.zeroshot_predictions \\
+    python -m src.metrics.zeroshot_evals \\
         --dataset cmul2arcticl1 \\
         --predictions "exp/runs/dp_gemini_l1cls/prediction.*.jsonl"
 
-    python -m src.metrics.zeroshot_predictions \\
+    python -m src.metrics.zeroshot_evals \\
         --dataset speechocean \\
         --run_dir exp/runs/speechocean/20251231_012345 \\
         --output exp/eval_results/speechocean_report
@@ -92,31 +92,49 @@ class TaskSpec:
     num_classes: int  # K (for cls: #classes, for reg: max+1, for geo: 2)
     min_value: int = 0
     max_value: int = 0  # only for regression
-    pred_key: str = "class_id"  # key in pred dict
+    pred_key: str = "processed_transcript"  # key in pred dict
 
 
 TASK_SPECS: Dict[str, TaskSpec] = {
     # Classification
     "cmul2arcticl1": TaskSpec(
-        TaskType.CLASSIFICATION, num_classes=7, pred_key="class_id"
+        TaskType.CLASSIFICATION, num_classes=7, pred_key="processed_transcript"
     ),
-    "edacc": TaskSpec(TaskType.CLASSIFICATION, num_classes=13, pred_key="class_id"),
-    "fleurs": TaskSpec(TaskType.CLASSIFICATION, num_classes=24, pred_key="class_id"),
+    "edacc": TaskSpec(
+        TaskType.CLASSIFICATION, num_classes=13, pred_key="processed_transcript"
+    ),
+    "fleurs": TaskSpec(
+        TaskType.CLASSIFICATION, num_classes=24, pred_key="processed_transcript"
+    ),
     "ultrasuite_child": TaskSpec(
-        TaskType.CLASSIFICATION, num_classes=2, pred_key="class_id"
+        TaskType.CLASSIFICATION, num_classes=2, pred_key="processed_transcript"
     ),
     # Ordinal/Regression
     "speechocean": TaskSpec(
-        TaskType.REGRESSION, num_classes=11, min_value=0, max_value=10, pred_key="score"
+        TaskType.REGRESSION,
+        num_classes=11,
+        min_value=0,
+        max_value=10,
+        pred_key="processed_transcript",
     ),
     "easycall": TaskSpec(
-        TaskType.REGRESSION, num_classes=4, min_value=0, max_value=3, pred_key="score"
+        TaskType.REGRESSION,
+        num_classes=4,
+        min_value=0,
+        max_value=3,
+        pred_key="processed_transcript",
     ),
     "uaspeech": TaskSpec(
-        TaskType.REGRESSION, num_classes=5, min_value=0, max_value=4, pred_key="score"
+        TaskType.REGRESSION,
+        num_classes=5,
+        min_value=0,
+        max_value=4,
+        pred_key="processed_transcript",
     ),
     # Geolocation (lat/lon in degrees)
-    "vaanigeo": TaskSpec(TaskType.GEOLOCATION, num_classes=2, pred_key="lat"),
+    "vaanigeo": TaskSpec(
+        TaskType.GEOLOCATION, num_classes=2, pred_key="predicted_transcript"
+    ),
 }
 
 
@@ -145,7 +163,9 @@ def normalize_record(record: Any) -> Optional[Dict[str, Any]]:
     # distributed_inference.py writes one-key dict per line: {i: {...}}
     if len(record) == 1:
         ((idx, payload),) = record.items()
-        if isinstance(payload, dict) and ("pred" in payload or "passthrough" in payload):
+        if isinstance(payload, dict) and (
+            "pred" in payload or "passthrough" in payload
+        ):
             out: Dict[str, Any] = {"idx": idx}
             out.update(payload)
             return out
@@ -224,6 +244,8 @@ def extract_classification(
     invalid = 0
     for rec in records:
         pred = rec.get("pred")
+        if pred and isinstance(pred, list):
+            pred = pred[0]
         passthrough = rec.get("passthrough", {})
         target = passthrough.get("target")
 
@@ -236,11 +258,15 @@ def extract_classification(
             continue
 
         class_id = pred.get(spec.pred_key)
-        if class_id is None or not isinstance(class_id, (int, float)):
+        if class_id is None or not isinstance(class_id, (int, float, str)):
             invalid += 1
             continue
 
-        class_id = int(class_id)
+        try:
+            class_id = int(class_id)
+        except ValueError:
+            invalid += 1
+            continue
         if class_id < 0 or class_id >= spec.num_classes:
             invalid += 1
             continue
@@ -266,6 +292,8 @@ def extract_regression(
 
     for rec in records:
         pred = rec.get("pred")
+        if pred and isinstance(pred, list):
+            pred = pred[0]
         passthrough = rec.get("passthrough", {})
         target = passthrough.get("target")
 
@@ -278,11 +306,15 @@ def extract_regression(
             continue
 
         score = pred.get(spec.pred_key)
-        if score is None or not isinstance(score, (int, float)):
+        if score is None or not isinstance(score, (int, float, str)):
             invalid += 1
             continue
 
-        raw_score = float(score)
+        try:
+            raw_score = float(score)
+        except ValueError:
+            invalid += 1
+            continue
         int_score = int(round(raw_score))
         if clamp:
             int_score = max(spec.min_value, min(spec.max_value, int_score))
@@ -298,7 +330,7 @@ def extract_regression(
 
 
 def extract_geolocation(
-    records: List[Dict[str, Any]],
+    records: List[Dict[str, Any]], spec: TaskSpec = TASK_SPECS["vaanigeo"]
 ) -> Tuple[List[Tuple[float, float, float]], List[Tuple[float, float]], int, int]:
     """Extract geolocation predictions (lat/lon in degrees) and targets (lat_rad, lon_rad).
 
@@ -312,6 +344,8 @@ def extract_geolocation(
 
     for rec in records:
         pred = rec.get("pred")
+        if pred and isinstance(pred, list):
+            pred = pred[0]
         passthrough = rec.get("passthrough", {})
         target = passthrough.get("target")
 
@@ -323,9 +357,15 @@ def extract_geolocation(
             invalid += 1
             continue
 
+        try:
+            pred = json.loads(pred.get(spec.pred_key, "{}"))
+        except Exception:
+            pred = pred
         lat_deg = pred.get("lat")
         lon_deg = pred.get("lon")
-        if any(v is None or not isinstance(v, (int, float)) for v in [lat_deg, lon_deg]):
+        if any(
+            v is None or not isinstance(v, (int, float)) for v in [lat_deg, lon_deg]
+        ):
             invalid += 1
             continue
 
@@ -635,7 +675,9 @@ def main() -> None:
         metrics = compute_classification_metrics(preds, targets, spec.num_classes)
 
     elif spec.task_type == TaskType.REGRESSION:
-        raw_preds, int_preds, targets, valid, invalid = extract_regression(records, spec)
+        raw_preds, int_preds, targets, valid, invalid = extract_regression(
+            records, spec
+        )
         if valid == 0:
             print("Error: No valid regression predictions found")
             return

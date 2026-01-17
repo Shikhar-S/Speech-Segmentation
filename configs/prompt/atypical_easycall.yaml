@@ -26,7 +26,7 @@ prompt_config:
     - Return JSON with a single field `score` containing an INTEGER from 0 to 3.
     - Do NOT include any explanation, markdown, or extra text.
     - If uncertain, give your best estimate within the valid range.
-  user_prompt_template: "Assess dysarthria severity using the TOM-based 4-class mapping: 0=Control (healthy), 1=Mild, 2=Mild-moderate or Moderate, 3=Moderate-severe or Severe. Output only the integer score (0-3)."
+  user_prompt: "Assess dysarthria severity using the TOM-based 4-class mapping: 0=Control (healthy), 1=Mild, 2=Mild-moderate or Moderate, 3=Moderate-severe or Severe. Output only the integer score (0-3)."
 
 client_config:
   response_schema:

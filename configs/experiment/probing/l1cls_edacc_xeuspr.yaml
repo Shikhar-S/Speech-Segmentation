@@ -1,0 +1,56 @@
+# @package _global_
+
+# To execute this experiment run:
+# python src/main.py experiment=probing/l1cls_edacc_xeuspr
+
+defaults:
+  - override /data: edacc
+  - override /model: classification
+  - override /model/head: attnmlp
+  - override /model/net: xeuspr
+  - override /trainer: gpu
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "l1cls_edacc_xeuspr"
+tags: ["xeuspr", "l1cls", "edacc_accent13"]
+
+seed: 42
+
+trainer:
+  min_epochs: 10
+  max_epochs: 50
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 2 # eff bs 48, same as others!
+  val_check_interval: 0.25  # validate 4 times per epoch
+
+model:
+  net:
+    checkpoint: exp/runs/train_ipapack_xeuspr/20251225_221757/checkpoints/step_030000.ckpt
+  head:
+    task_type: "classification"
+  freeze_encoder: true
+  optimizer:
+    lr: 0.0002
+  scheduler:
+    total_iters: 200
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/f1"
+    mode: "max"
+    save_top_k: 1
+  early_stopping:
+    monitor: "val/f1"
+    patience: 5
+    mode: "max"
+
+
+data:
+  batch_size: 24
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}
+    name: ${task_name}

@@ -28,15 +28,6 @@ nvidia-smi
 export NCCL_P2P_DISABLE=1
 echo "RunningCMD: python src/main.py $*"
 ###########################
-# python src/main.py "$@"
-
-export NCCL_P2P_DISABLE=1
-srun python src/main.py \
-    experiment=train/fleurs_xeuspr \
-    trainer=ddp trainer.devices=-1 \
-    trainer.strategy=ddp_find_unused_parameters_true \
-    model.freeze_encoder=false \
-    data.batch_size=2 +trainer.precision=bf16 \
-    data.num_workers=5
+python src/main.py "$@"
 ###########################
 ###########################

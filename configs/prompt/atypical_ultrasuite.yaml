@@ -22,7 +22,7 @@ prompt_config:
     ### Output Format
     - Return JSON with a single field `class_id` containing either 0 (typical) or 1 (atypical).
     - Do NOT include any explanation, markdown, or extra text.
-  user_prompt_template: "Classify the child speaker: 0=Typically developing, 1=Speech sound disorder. Output only the class_id (0 or 1)."
+  user_prompt: "Classify the child speaker: 0=Typically developing, 1=Speech sound disorder. Output only the class_id (0 or 1)."
 
 client_config:
   response_schema:
