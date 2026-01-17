@@ -95,6 +95,8 @@ class KaldiDataset(Dataset):
         with open(path) as f:
             for line in f:
                 key, tag = line.strip().split()[:2]
+                if key.endswith("_pr"):
+                    key = key[:-3]
                 key2lang[key] = tag.split("><")[0][1:].strip()
         return key2lang
 
@@ -309,9 +311,18 @@ def build_kaldi_datamodule(
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
     ds_config = config["datasets"][dataset_name]
-    wav_scp_file = data_dir / ds_config["wav_scp"]
-    text_file = data_dir / ds_config["text_phoneme"]
-    lang_file = data_dir / ds_config["language"]
+    #############################################
+    wav_scp_file = Path(ds_config["wav_scp"])
+    text_file = Path(ds_config["text_phoneme"])
+    lang_file = Path(ds_config["language"])
+    #############################################
+    if not wav_scp_file.is_absolute():
+        wav_scp_file = data_dir / wav_scp_file
+    if not text_file.is_absolute():
+        text_file = data_dir / text_file
+    if not lang_file.is_absolute():
+        lang_file = data_dir / lang_file
+    #############################################
 
     return KaldiDataModule(
         wav_scp_file=wav_scp_file,
@@ -340,5 +351,7 @@ if __name__ == "__main__":
     )
     datamodule.setup()
     for batch in datamodule.predict_dataloader().dataset:
-        print(batch)
+        key = batch["key"]
+        speech = batch["speech"].cpu().numpy()
+        print(speech.shape)
         break

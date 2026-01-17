@@ -23,14 +23,24 @@ class KaldiDataset(Dataset):
         lang_file,
         sampling_rate=16000,
         split="test",
+        limit_samples=None,
+        filter_langs=None,
+        read_asr_text=False,
         vocab_file: Optional[str] = None,
         task_set: Optional[List[str]] = None,
     ):
         self.sampling_rate = sampling_rate
         self.task_set = task_set  # set of tasks to filter on, e.g., ['pr', 'asr']
-        self.wav_scp = self._load_wav_scp(wav_scp_file)
-        self.text = self._load_text(text_file)
-        self.key2lang = self._extract_language(lang_file)
+        self.wav_scp = self._load_wav_scp(wav_scp_file, limit_samples)
+        self.text = self._load_text(text_file, limit_samples)
+        self.key2lang = self._extract_language(lang_file, limit_samples)
+        if read_asr_text:
+            # lang file also has asr text
+            self.asr_text = self._load_asr_text(lang_file, limit_samples)
+        else:
+            self.asr_text = None
+        if filter_langs:
+            self.filter_by_langs(filter_langs)
         self.split = split
         self.max_duration_sec = 20
 
@@ -55,13 +65,31 @@ class KaldiDataset(Dataset):
                 f" Unk ID: {self.unk_id}"
             )
 
+    def filter_by_langs(self, filter_langs: List[str]):
+        """Filter dataset to only include samples from specified languages."""
+        original_sz = len(self.key2lang)
+        filtered_keys = set(
+            [k for k in self.key2lang if self.key2lang[k] in filter_langs]
+        )
+        self.wav_scp = {k: v for k, v in self.wav_scp.items() if k in filtered_keys}
+        self.text = {k: v for k, v in self.text.items() if k in filtered_keys}
+        if self.asr_text:
+            self.asr_text = {
+                k: v for k, v in self.asr_text.items() if k in filtered_keys
+            }
+        log.info(
+            f"Filtering dataset by languages {filter_langs}. "
+            f"Reduced samples from {original_sz} to {len(filtered_keys)}."
+        )
+        self.key2lang = {k: v for k, v in self.key2lang.items() if k in filtered_keys}
+
     def _keep_key(self, key: str) -> bool:
         """Check if a key should be kept based on task_set."""
         if self.task_set is None:
             return True
         return any(key.endswith(f"_{task}") for task in self.task_set)
 
-    def _load_wav_scp(self, path):
+    def _load_wav_scp(self, path, limit_samples: Optional[int] = None):
         wav_scp = {}
         with open(path) as f:
             for line in f:
@@ -73,9 +101,11 @@ class KaldiDataset(Dataset):
                     if not wav_path.startswith("/work"):
                         wav_path = f"/work/hdd/bbjs/shared/powsm/s2t1/{wav_path}"
                     wav_scp[key] = wav_path
+                if limit_samples and len(wav_scp) >= limit_samples:
+                    break
         return wav_scp
 
-    def _load_text(self, path):
+    def _load_text(self, path, limit_samples: Optional[int] = None):
         text_dict = {}
         with open(path) as f:
             for line in tqdm(f, desc="Reading text"):
@@ -86,9 +116,29 @@ class KaldiDataset(Dataset):
                     # some examples have spaces in between
                     # we must retain full length of transcript
                     text_dict[key] = " ".join(remaining)
+                if limit_samples and len(text_dict) >= limit_samples:
+                    break
         return text_dict
 
-    def _extract_language(self, path):
+    def _load_asr_text(self, path, limit_samples: Optional[int] = None):
+        # TODO(shikhar): ADHOC ANALYSIS FUNCTION, REMOVE LATER
+        asr_text_dict = {}
+        with open(path) as f:
+            for line in tqdm(f, desc="Reading ASR text"):
+                key, *remaining = line.strip().split()
+                if not key.endswith("_asr"):
+                    continue
+                if len(remaining) >= 1:
+                    # some examples have spaces in between
+                    # we must retain full length of transcript
+                    key = key[:-4] + "_pr"
+                    asr_text_dict[key] = " ".join(remaining[1:])
+                if limit_samples and len(asr_text_dict) >= limit_samples:
+                    break
+        log.info("Loaded ASR text for %d samples", len(asr_text_dict))
+        return asr_text_dict
+
+    def _extract_language(self, path, limit_samples: Optional[int] = None):
         key2lang = {}
         with open(path) as f:
             for line in tqdm(f, desc="Reading language"):
@@ -101,6 +151,8 @@ class KaldiDataset(Dataset):
                     # TODO(shikhar): Bad design, should be modified at source to make it generic.
                     key = key[:-3]
                 key2lang[key] = tag.split("><")[0][1:].strip()
+                if limit_samples and len(key2lang) >= limit_samples:
+                    break
         return key2lang
 
     def _load_vocab(self, vocab_file: str) -> Dict[str, int]:
@@ -130,6 +182,7 @@ class KaldiDataset(Dataset):
         key = self.keys[idx]
         wav_path = self.wav_scp[key]
         transcription = self.text[key]
+        asr_text = self.asr_text[key] if self.asr_text else None
 
         if ".ark" in wav_path:
             sr, wav = kaldiio.load_mat(wav_path)
@@ -162,6 +215,7 @@ class KaldiDataset(Dataset):
             "metadata_idx": idx,
             "target": transcription,
             "text": transcription,
+            "asr_text": asr_text,
         }
 
 
@@ -174,6 +228,9 @@ class KaldiDataModule(L.LightningDataModule):
         sampling_rate=16000,
         batch_size=16,
         num_workers=4,
+        limit_samples: Optional[int] = None,
+        filter_langs: Optional[List[str]] = None,
+        read_asr_text: bool = False,
         task_set: Dict[str, List[str]] = None,
         vocab_file: Optional[str] = None,
     ):
@@ -189,6 +246,9 @@ class KaldiDataModule(L.LightningDataModule):
         self.text_file = text_file
         self.lang_file = lang_file
         self.sampling_rate = sampling_rate
+        self.limit_samples = limit_samples
+        self.filter_langs = filter_langs
+        self.read_asr_text = read_asr_text
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.vocab_file = vocab_file
@@ -206,8 +266,11 @@ class KaldiDataModule(L.LightningDataModule):
             self.lang_file[split],
             self.sampling_rate,
             split=split,
+            limit_samples=self.limit_samples,
+            filter_langs=self.filter_langs,
             vocab_file=self.vocab_file,
             task_set=self.task_set[split],
+            read_asr_text=self.read_asr_text,
         )
 
     def setup(self, stage=None):
@@ -240,6 +303,7 @@ class KaldiDataModule(L.LightningDataModule):
         speeches = [item["speech"] for item in batch]
         speech_lengths = torch.tensor([item["speech_length"] for item in batch])
         texts = [item["text"] for item in batch]
+        asr_texts = [item["asr_text"] for item in batch]
         wavpaths = [item["wavpath"] for item in batch]
         languages = [item["lang_sym"] for item in batch]
 
@@ -280,6 +344,7 @@ class KaldiDataModule(L.LightningDataModule):
             "text_length": text_data.get("text_length"),
             "wavpath": wavpaths,
             "lang_sym": languages,
+            "asr_text": asr_texts,
         }
 
 
@@ -288,6 +353,9 @@ def build_kaldi_datamodule(
     dataset_config_path="configs/data/powsm_evalset_index.yaml",
     batch_size=16,
     num_workers=4,
+    limit_samples: Optional[int] = None,
+    filter_langs: Optional[List[str]] = None,
+    read_asr_text: bool = False,
     vocab_file: Optional[str] = None,
 ):
     with open(dataset_config_path) as f:
@@ -322,6 +390,9 @@ def build_kaldi_datamodule(
         sampling_rate=sampling_rate,
         batch_size=batch_size,
         num_workers=num_workers,
+        limit_samples=limit_samples,
+        filter_langs=filter_langs,
+        read_asr_text=read_asr_text,
         task_set=task_set,
         vocab_file=vocab_file,
     )

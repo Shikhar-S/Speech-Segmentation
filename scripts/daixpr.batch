@@ -36,7 +36,5 @@ echo "Running on $SLURM_JOB_NUM_NODES nodes with $SLURM_GPUS_ON_NODE GPUs per no
 
 srun python src/main.py \
     experiment=train/ipapack_xeuspr \
-    data.batch_size=16 \
-    data.num_workers=12 \
     trainer.num_nodes=${SLURM_JOB_NUM_NODES} \
     trainer.devices=auto "$@"
