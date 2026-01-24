@@ -45,7 +45,7 @@ class GreedyCTCInference:
         results = []
         for ids in collapsed_ids:
             tokens = [self.token_list[i] for i in ids]
-            raw_text = "".join(tokens)
+            raw_text = "/".join(tokens)
             # Filter special tokens
             clean_tokens = [
                 t for t in tokens if not (t.startswith("<") and t.endswith(">"))

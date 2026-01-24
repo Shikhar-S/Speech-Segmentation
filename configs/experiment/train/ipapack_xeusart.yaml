@@ -1,7 +1,7 @@
 # @package _global_
 
 # export HF_HOME="exp/cache/hf"
-# python src/main.py experiment=train/ipapack_xeuspr trainer.max_steps=100 trainer.val_check_interval=100 run_folder=test
+# python src/main.py experiment=train/ipapack_xeusart trainer.max_steps=1000 trainer.val_check_interval=100 run_folder=test
 
 defaults:
   - override /data: null # defined below
@@ -11,8 +11,8 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: train_ipapack_xeuspr
-tags: ["ipapack", "xeuspr", "phone_recognition"]
+task_name: train_ipapack_xeusart
+tags: ["ipapack", "xeusart", "phone_recognition"]
 
 seed: 42
 
@@ -32,13 +32,20 @@ trainer:
 
 data:
   _target_: src.data.kaldi_pretraining_dataset.build_kaldi_datamodule
-  dataset_name: development # pr_fixed - full
+  dataset_name: development # pr_fixed
   dataset_config_path: configs/data/ipapack_index.yaml
   vocab_file: ${model.net.vocab_file}
   batch_size: 16
   num_workers: 12
 
 model:
+  net:
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+    ctc_config:
+      ctc_type: articulatory_ctc
+      artctc_beta: 1.0 # between 1 and 2. more than 2 means substitution is costlier than insertion/deletion
+      artctc_topk: 8 # consider top-k closest phonemes for each phoneme
+      artctc_normalize: true # whether to normalize distances between 0 and 1 in loss computation
   optimizer:
     lr: 0.00005
   scheduler:

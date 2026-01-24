@@ -18,8 +18,52 @@ from src.utils import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=False)
 
 
+def build_panphon_distance_matrix(vocab: list[str]) -> torch.Tensor:
+    """Build panphon distance matrix for articulatory CTC.
+    Args:
+        vocab: List where vocab[i] is the phone string for token id i
+    Returns:
+        Distance matrix of shape (V, V) with values in [0, 1]
+    """
+    from panphon.distance import Distance
+
+    dst = Distance()
+    V = len(vocab)
+    special = {"<blank>", "<sos>", "<eos>", "<unk>", "<pad>"}
+
+    dist_matrix = torch.zeros((V, V), dtype=torch.float32)
+
+    for i in range(V):
+        for j in range(i + 1, V):
+            if vocab[i] in special or vocab[j] in special:
+                dist = float("inf")
+            else:
+                try:
+                    dist = dst.feature_edit_distance(vocab[i], vocab[j])
+                except Exception:
+                    log.warning(
+                        f'!! Distance between "{vocab[i]}" and "{vocab[j]}" failed, setting to inf !!'
+                    )
+                    dist = float("inf")
+            dist_matrix[i, j] = dist_matrix[j, i] = dist
+
+    # Replace inf with 2x max finite distance, then normalize to [0, 1]
+    finite = dist_matrix[torch.isfinite(dist_matrix)]
+    max_dist = finite.max().item() if finite.numel() > 0 else 1.0
+    dist_matrix = torch.where(
+        torch.isfinite(dist_matrix), dist_matrix, torch.tensor(max_dist * 2.0)
+    )
+    dist_matrix = dist_matrix / dist_matrix.max()
+    dist_matrix.fill_diagonal_(0.0)
+    log.info(f"Built panphon distance matrix with shape {dist_matrix.shape}")
+    return dist_matrix
+
+
 def build_xeus_pr(
-    config_file: str, checkpoint: Optional[str] = None, vocab_file: Optional[str] = None
+    config_file: str,
+    checkpoint: Optional[str] = None,
+    vocab_file: Optional[str] = None,
+    ctc_config: Optional[dict] = None,
 ) -> XeusPRModel:
     """Build Xeus PR model from config and optional checkpoint.
 
@@ -27,6 +71,7 @@ def build_xeus_pr(
         config_file: Path to config yaml file
         checkpoint: Path to model checkpoint (pretrained or fully trained)
         vocab_file: Path to vocabulary file. If None, use vocab in config.
+        ctc_config: Optional dict of CTC config
 
     Returns:
         XeusPRModel
@@ -67,11 +112,15 @@ def build_xeus_pr(
     ), f"Only e_branchformer supported, got {args.encoder}"
     encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
 
+    ctc_config = ctc_config or getattr(args, "ctc_conf", {})
+    if ctc_config.get("ctc_type", "builtin") == "articulatory_ctc":
+        dist_matrix = build_panphon_distance_matrix(token_list)
+        ctc_config["artctc_dist"] = dist_matrix
     # Build CTC
     ctc = CTC(
         odim=vocab_size,
         encoder_output_size=encoder.output_size(),
-        **getattr(args, "ctc_conf", {}),
+        **ctc_config,
     )
 
     # Build model
@@ -112,6 +161,7 @@ def build_xeus_pr_from_hf(
     config_file: Optional[str] = None,
     checkpoint: Optional[str] = None,
     vocab_file: Optional[str] = None,
+    ctc_config: Optional[dict] = None,
 ) -> XeusPRModel:
     """Build Xeus PR model from local files or HuggingFace repo.
 
@@ -125,7 +175,7 @@ def build_xeus_pr_from_hf(
         checkpoint: Path to checkpoint file. If None, use default path in work_dir.
             Takes precedence over hf_repo download.
         vocab_file: Path to vocabulary file. If None, use path in config.
-
+        ctc_config: Optional dict of CTC config
     Returns:
         XeusPRModel
     """
@@ -154,7 +204,9 @@ def build_xeus_pr_from_hf(
     log.info(f"Building model from config: {cfg}")
     log.info(f"Loading checkpoint: {ckpt}")
 
-    return build_xeus_pr(config_file=cfg, checkpoint=ckpt, vocab_file=vocab_file)
+    return build_xeus_pr(
+        config_file=cfg, checkpoint=ckpt, vocab_file=vocab_file, ctc_config=ctc_config
+    )
 
 
 def build_xeus_pr_inference(
@@ -166,6 +218,7 @@ def build_xeus_pr_inference(
     hf_repo: Optional[str] = None,
     force_download: bool = False,
     dtype: str = "float32",
+    ctc_config: Optional[dict] = None,
 ) -> XeusPRInference:
     model = build_xeus_pr_from_hf(
         work_dir=work_dir,
@@ -174,6 +227,20 @@ def build_xeus_pr_inference(
         config_file=config_file,
         checkpoint=checkpoint,
         vocab_file=vocab_file,
+        ctc_config=ctc_config,
     )
     inference_obj = XeusPRInference(model, device=device, dtype=dtype)
     return inference_obj
+
+
+if __name__ == "__main__":
+    # python -m src.model.xeusphoneme.builders
+    vocab_path = "src/model/xeusphoneme/resources/ipa_vocab.json"
+    V = json.load(open(vocab_path))
+    dist_matrix = build_panphon_distance_matrix(vocab=list(V.keys()))
+    print(dist_matrix)
+    print("Distance matrix shape:", dist_matrix.shape)
+    import numpy as np
+
+    np.set_printoptions(threshold=np.inf, linewidth=200, suppress=True)
+    np.savetxt("dist_matrix.txt", dist_matrix.cpu().numpy(), fmt="%.6f")

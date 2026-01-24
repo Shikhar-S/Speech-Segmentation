@@ -163,6 +163,11 @@ class PhoneRecognitionModel(LightningModule):
         )
         return results
 
+    def set_inference_strategy(self, inference_strategy_cls: Any) -> None:
+        self.inference_strategy = inference_strategy_cls(
+            self.net.token_list, self.blank_id
+        )
+
     def configure_optimizers(self) -> Dict[str, Any]:
         trainable_params = self.net.get_trainable_parameters()
         # must have two keys - head and encoder

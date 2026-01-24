@@ -12,8 +12,8 @@ import torch.nn.functional as F
 from typeguard import typechecked
 
 from espnet_import.nets.beam_search import Hypothesis
-from espnet_importnets.batch_beam_search import BatchBeamSearch
-from espnet_importets.scorer_interface import BatchScorerInterface
+from espnet_import.nets.batch_beam_search import BatchBeamSearch
+from espnet_import.nets.scorer_interface import BatchScorerInterface
 from espnet_import.nets.scorers.ctc import CTCPrefixScorer
 from espnet_import.nets.scorers.length_bonus import LengthBonus
 

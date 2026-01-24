@@ -34,6 +34,10 @@ class CTC(torch.nn.Module):
         brctc_risk_strategy: str = "exp",
         brctc_group_strategy: str = "end",
         brctc_risk_factor: float = 0.0,
+        artctc_dist: Optional[torch.Tensor] = None,
+        artctc_beta: float = 1.0,
+        artctc_topk: int = 8,
+        artctc_normalize: bool = True,
     ):
         super().__init__()
         eprojs = encoder_output_size
@@ -68,6 +72,20 @@ class CTC(torch.nn.Module):
             self.ctc_loss = BayesRiskCTC(
                 brctc_risk_strategy, brctc_group_strategy, brctc_risk_factor
             )
+        elif self.ctc_type == "articulatory_ctc":
+            try:
+                import k2  # noqa
+            except ImportError:
+                raise ImportError("You should install K2 to use Articulatory CTC")
+
+            from src.model.powsm.articulatory_ctc import ArticulatoryCTC
+
+            self.ctc_loss = ArticulatoryCTC(
+                dist=artctc_dist,
+                beta=artctc_beta,
+                topk=artctc_topk,
+                normalize=artctc_normalize,
+            )
 
         else:
             raise ValueError(f'ctc_type must be "builtin" or "gtnctc": {self.ctc_type}')
@@ -75,7 +93,11 @@ class CTC(torch.nn.Module):
         self.reduce = reduce
 
     def loss_fn(self, th_pred, th_target, th_ilen, th_olen) -> torch.Tensor:
-        if self.ctc_type == "builtin" or self.ctc_type == "brctc":
+        if (
+            self.ctc_type == "builtin"
+            or self.ctc_type == "brctc"
+            or self.ctc_type == "articulatory_ctc"
+        ):
             th_pred = th_pred.log_softmax(2).float()
             loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
             if self.ctc_type == "builtin":
@@ -164,7 +186,7 @@ class CTC(torch.nn.Module):
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
 
-        if self.ctc_type == "brctc":
+        if self.ctc_type == "brctc" or self.ctc_type == "articulatory_ctc":
             loss = self.loss_fn(ys_hat, ys_pad, hlens, ys_lens).to(
                 device=hs_pad.device, dtype=hs_pad.dtype
             )
