@@ -6,10 +6,11 @@ import kaldiio
 from torch.utils.data import Dataset
 import lightning as L
 import yaml
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union
 from tqdm import tqdm
 from src.utils import RankedLogger
 import json
+import random
 
 log = RankedLogger(__name__, rank_zero_only=True)
 # TODO(shikhar): Separate out tokenizer. Use char_tokenizer.
@@ -18,7 +19,7 @@ log = RankedLogger(__name__, rank_zero_only=True)
 class KaldiDataset(Dataset):
     def __init__(
         self,
-        wav_scp_file,
+        wav_scp_file: Union[str, Dict[str, Union[str, Dict[str, float]]]],
         text_file,
         lang_file,
         sampling_rate=16000,
@@ -89,20 +90,40 @@ class KaldiDataset(Dataset):
             return True
         return any(key.endswith(f"_{task}") for task in self.task_set)
 
-    def _load_wav_scp(self, path, limit_samples: Optional[int] = None):
+    def _load_wav_scp(self, path_or_mixpath, limit_samples: Optional[int] = None):
         wav_scp = {}
-        with open(path) as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 2:
-                    key, wav_path = parts[0], parts[1]
-                    if not self._keep_key(key):
-                        continue
-                    if not wav_path.startswith("/work"):
-                        wav_path = f"/work/hdd/bbjs/shared/powsm/s2t1/{wav_path}"
-                    wav_scp[key] = wav_path
-                if limit_samples and len(wav_scp) >= limit_samples:
-                    break
+        if isinstance(path_or_mixpath, str):
+            path_cnt = [(path_or_mixpath, 0)]  # <=0 means load all
+        else:
+            path_cnt = [(p, c) for p, c in path_or_mixpath.items()]
+        for path, cnt in path_cnt:
+            wav_scp_ = {}
+            with open(path) as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        key, wav_path = parts[0], parts[1]
+                        if not self._keep_key(key):
+                            continue
+                        if not wav_path.startswith("/work"):
+                            wav_path = f"/work/hdd/bbjs/shared/powsm/s2t1/{wav_path}"
+                        wav_scp_[key] = wav_path
+                    if limit_samples and len(wav_scp_) >= limit_samples:
+                        break
+            if cnt > 0:
+                wav_scp_ = dict(
+                    random.choices(list(wav_scp_.items()), k=cnt)
+                    if cnt > len(wav_scp_)
+                    else random.sample(list(wav_scp_.items()), k=cnt)
+                )
+            log.info(
+                f"Loaded {len(wav_scp_)} samples from wav.scp: {path} with count {cnt}"
+            )
+            print(
+                f"Loaded {len(wav_scp_)} samples from wav.scp: {path} with count {cnt}"
+            )
+            wav_scp.update(wav_scp_)
+        print("Total loaded wavs:", len(wav_scp))
         return wav_scp
 
     def _load_text(self, path, limit_samples: Optional[int] = None):
@@ -222,7 +243,7 @@ class KaldiDataset(Dataset):
 class KaldiDataModule(L.LightningDataModule):
     def __init__(
         self,
-        wav_scp_file: Dict[str, str],
+        wav_scp_file: Dict[str, Union[str, Dict[str, float]]],
         text_file: Dict[str, str],
         lang_file: Dict[str, str],
         sampling_rate=16000,
@@ -399,7 +420,7 @@ def build_kaldi_datamodule(
 
 
 if __name__ == "__main__":
-    # Test with: python -m src.data.kaldi_dataset
+    # Test with: python -m src.data.kaldi_pretraining_dataset
     # datamodule = build_kaldi_datamodule("doreco", batch_size=2, num_workers=1)
     # datamodule.setup()
     # print(len(datamodule.predict_dataloader().dataset))
@@ -408,15 +429,15 @@ if __name__ == "__main__":
     #     break
     #######
     datamodule = build_kaldi_datamodule(
-        dataset_name="pr_fixed",
+        dataset_name="accentmix_multi",
         dataset_config_path="configs/data/ipapack_index.yaml",
         batch_size=2,
         num_workers=1,
         vocab_file="src/model/xeusphoneme/resources/ipa_vocab.json",
     )
     datamodule.setup()
-    for i in datamodule.train_dataloader().dataset:
-        print(i["speech_length"])
+    for i in datamodule.train_dataloader():
+        print(i)
         break
     # print(len(datamodule.predict_dataloader().dataset))
     # for batch in datamodule.predict_dataloader().dataset:
