@@ -134,6 +134,7 @@ def build_xeus_pr(
         preencoder=preencoder,
         ignore_id=getattr(args, "ignore_id", -1),
         sym_blank=getattr(args, "sym_blank", "<blank>"),
+        freeze_frontend=checkpoint is not None,
     )
 
     if checkpoint:
@@ -162,6 +163,7 @@ def build_xeus_pr_from_hf(
     checkpoint: Optional[str] = None,
     vocab_file: Optional[str] = None,
     ctc_config: Optional[dict] = None,
+    load_ckpt: bool = True,
 ) -> XeusPRModel:
     """Build Xeus PR model from local files or HuggingFace repo.
 
@@ -176,6 +178,7 @@ def build_xeus_pr_from_hf(
             Takes precedence over hf_repo download.
         vocab_file: Path to vocabulary file. If None, use path in config.
         ctc_config: Optional dict of CTC config
+        load_ckpt: Whether to load checkpoint weights
     Returns:
         XeusPRModel
     """
@@ -199,7 +202,10 @@ def build_xeus_pr_from_hf(
 
     # Verify files exist
     assert Path(cfg).exists(), f"Config file not found: {cfg}"
-    assert Path(ckpt).exists(), f"Checkpoint file not found: {ckpt}"
+    if not load_ckpt:
+        ckpt = None
+    else:
+        assert Path(ckpt).exists(), f"Checkpoint file not found: {ckpt}"
 
     log.info(f"Building model from config: {cfg}")
     log.info(f"Loading checkpoint: {ckpt}")
@@ -235,12 +241,41 @@ def build_xeus_pr_inference(
 
 if __name__ == "__main__":
     # python -m src.model.xeusphoneme.builders
-    vocab_path = "src/model/xeusphoneme/resources/ipa_vocab.json"
-    V = json.load(open(vocab_path))
-    dist_matrix = build_panphon_distance_matrix(vocab=list(V.keys()))
-    print(dist_matrix)
-    print("Distance matrix shape:", dist_matrix.shape)
+    import torch
     import numpy as np
 
-    np.set_printoptions(threshold=np.inf, linewidth=200, suppress=True)
-    np.savetxt("dist_matrix.txt", dist_matrix.cpu().numpy(), fmt="%.6f")
+    vocab_path = "src/model/xeusphoneme/resources/ipa_vocab.json"
+    V = json.load(open(vocab_path))
+    revV = {v: k for k, v in V.items()}
+    print("Loaded vocab of size:", len(V))
+    dist_matrix = build_panphon_distance_matrix(vocab=list(V.keys()))
+    print("Distance matrix shape:", dist_matrix.shape)
+    TOPK = 10
+    BETA = 80.0
+    THRESH = 100
+    BLANK_ID = 0
+    mxlen = 0
+    for sym in V:
+        p = V[sym]
+        drow = torch.as_tensor(dist_matrix[p], dtype=torch.float32).clone()
+        drow[BLANK_ID] = float("inf")
+        k = min(TOPK, len(V) - 1)
+        cand = torch.topk(drow, k=k, largest=False).indices
+        if not (cand == p).any().item():
+            cand = torch.cat([cand[:-1], torch.tensor([p], dtype=cand.dtype)])
+        logits = -BETA * drow[cand]  # shape (k,)
+        scores = torch.log_softmax(logits, dim=0)  # log-probs
+        keep = drow[cand] < THRESH
+        cand_keep = cand[keep].tolist()
+        scores_keep = scores[keep].tolist()
+        mxlen = max(mxlen, len(cand_keep))
+        if True or sym == "bʰ":
+            pairs = sorted(zip(cand_keep, scores_keep), key=lambda x: x[0])
+            print(
+                f"Neighbors shown (dist<{THRESH}) for {sym}:",
+                sorted(
+                    [(revV[i], s) for i, s in pairs], key=lambda x: x[1], reverse=True
+                ),
+                sorted([drow[i].item() for i in cand_keep]),
+            )
+    print("Max neighbors with dist < 0.02 (shown):", mxlen)

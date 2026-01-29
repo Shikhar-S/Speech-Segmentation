@@ -4,22 +4,20 @@ Tag accent and langid (multi-worker loading via TorchDataModule).
 Examples:
   # Lang
   python -m src.core.tools.data_tagger \
-      --wav_scp /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_1k_fixed_1task/wav.scp \
+      --wav_scp /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/wav.scp \
       --hf_repo "speechbrain/lang-id-voxlingua107-ecapa" \
-      --out exp/runs/tags/lang --batch_size 24 --num_workers 8
+      --out exp/data/tags/train_fixed_all.lang --batch_size 24 --num_workers 8
 
       python -m src.core.tools.data_tagger \
       --wav_scp /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_1k_fixed_1task/wav.scp \
       --hf_repo "speechbrain/lang-id-voxlingua107-ecapa" \
-      --out exp/runs/tags/langwscore --batch_size 24 --num_workers 8 --max_utts 1000
-      
-      
+      --out exp/data/tags/langwscore --batch_size 24 --num_workers 8 --max_utts 1000
       
   # Accent
   python -m src.core.tools.data_tagger \
-      --wav_scp /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_1k_fixed_1task/wav.scp \
+      --wav_scp /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/wav.scp \
       --hf_repo "Jzuluaga/accent-id-commonaccent_ecapa" \
-      --out exp/runs/tags/accent --batch_size 24 --num_workers 8
+      --out exp/data/tags/train_fixed_all.accent --batch_size 24 --num_workers 8
 
 Output:
   <out>.shard<SLURM_ARRAY_TASK_ID>.jsonl
@@ -56,7 +54,7 @@ def filter_ds(lines: List[str]) -> List[str]:
     out = []
     for ln in lines:
         utt, _ = ln.strip().split(None, 1)
-        if "_cv_" in utt:
+        if "_cv_" in utt and utt.endswith("_pr"):
             out.append(ln)
     return out
 

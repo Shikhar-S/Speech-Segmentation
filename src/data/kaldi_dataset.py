@@ -156,6 +156,10 @@ class KaldiDataset(Dataset):
             max_samples = int(self.max_time_sec * sr)
             waveform = waveform[:, :max_samples]
 
+        # to mono
+        if waveform.shape[0] > 1:
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
+
         if sr != self.sampling_rate:
             waveform = torchaudio.functional.resample(waveform, sr, self.sampling_rate)
 

@@ -37,6 +37,7 @@ class XeusPRModel(torch.nn.Module):
         preencoder: Optional[Any] = None,
         ignore_id: int = -1,
         sym_blank: str = "<blank>",
+        freeze_frontend: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -50,6 +51,7 @@ class XeusPRModel(torch.nn.Module):
         self.ignore_id = ignore_id
         self.blank_id = token_list.index(sym_blank) if sym_blank in token_list else 0
         sym_space = kwargs.get("sym_space", "<space>")
+        self.freeze_frontend = freeze_frontend
         self.error_calculator = ErrorCalculator(
             token_list, sym_space, sym_blank, report_cer=True, report_wer=False
         )
@@ -173,9 +175,11 @@ class XeusPRModel(torch.nn.Module):
                 trainable_params["head"].append(p)
             elif n.startswith("encoder"):
                 trainable_params["encoder"].append(p)
+            elif n.startswith("frontend"):
+                if not self.freeze_frontend:
+                    trainable_params["encoder"].append(p)
             else:
                 # freeze other parts:
-                # frontend
                 p.requires_grad = False
         return trainable_params
 

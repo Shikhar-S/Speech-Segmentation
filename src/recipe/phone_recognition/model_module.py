@@ -14,7 +14,11 @@ from lightning.pytorch.utilities import grad_norm
 
 
 def get_w2v2ph_schedule(
-    optimizer, num_training_steps: int, encoder_unfreeze_step: int = 0
+    optimizer,
+    num_training_steps: int,
+    encoder_unfreeze_step: int = 0,
+    warmup_fraction: float = 0.1,
+    constant_fraction: float = 0.4,
 ):
     """
     Implements the schedule:
@@ -25,11 +29,18 @@ def get_w2v2ph_schedule(
     Additionally, if encoder_unfreeze_step > 0, the encoder parameters are
     frozen until that step is reached.
     """
+    assert 0.0 <= warmup_fraction <= 1.0, "warmup_fraction must be in [0.0, 1.0]"
+    assert 0.0 <= constant_fraction <= 1.0, "constant_fraction must be in [0.0, 1.0]"
+    assert (
+        warmup_fraction + constant_fraction <= 1.0
+    ), "Sum of warmup_fraction and constant_fraction must be less than or equal to 1.0"
 
     def three_piece_factor(current_step: int):
-        warmup_steps = int(0.1 * num_training_steps)
+        warmup_steps = int(warmup_fraction * num_training_steps)
         # The constant phase lasts for 40% of updates, so it ends at 10% + 40% = 50%
-        constant_end_step = int(0.5 * num_training_steps)
+        constant_end_step = int(
+            (warmup_fraction + constant_fraction) * num_training_steps
+        )
 
         if current_step < warmup_steps:
             # Phase 1: Linear Warmup

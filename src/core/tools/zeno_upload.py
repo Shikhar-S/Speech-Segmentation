@@ -1,9 +1,9 @@
 """Upload predictions to Zeno from JSONL file.
 Usage:
     python -m src.core.tools.zeno_upload \
-        --input /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/xeusresultsdump/mls_fra.jsonl \
+        --input /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/xeusresultsdump/gmuaccent.jsonl \
         --api-key zen_G7yVGaqFT6C69mT9XequKW9sOyIOis3EqCBUlJT7oMA \
-        --project-name mls_fra \
+        --project-name gmuaccent \
         --model-name phonetic-xeus \
         --s3-base-url https://l2arctic.s3.us-east-2.amazonaws.com
         

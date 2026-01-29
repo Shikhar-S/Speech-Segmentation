@@ -7,3 +7,4 @@ force: false # whether to force download even if files exist
 config_file: null
 checkpoint: null
 vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+load_ckpt: true

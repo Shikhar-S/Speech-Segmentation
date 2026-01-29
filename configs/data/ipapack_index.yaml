@@ -46,3 +46,53 @@ datasets:
       text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text.ctc"
       language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text"
       task_set: ["pr"]
+    
+  # eng_us     835233
+  # eng_other  451793
+  # multi_mid  6921146  (langs=45)
+  # multi_low  90110  (langs=40)
+  accentmix_multi:
+    train:
+      # around 1M total
+      wav_scp: 
+        /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.eng_other.scp: 451793
+        /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.eng_us.scp: 400000
+        /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.multi_mid.scp: 74000
+        /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.multi_low.scp: 74000
+      text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text.ctc"
+      language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text"
+      task_set: ["pr"]
+
+    dev1k:
+      wav_scp: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/wav.scp"
+      text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text.ctc"
+      language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text"
+      task_set: ["pr"]
+
+    predict:
+      wav_scp: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/wav.scp"
+      text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text.ctc"
+      language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text"
+      task_set: ["pr"]
+  
+  accentmix_en:
+    train:
+      # around 850k total
+      wav_scp: 
+        /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.eng_other.scp: 451793
+        /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.eng_us.scp: 400000
+      text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text.ctc"
+      language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text"
+      task_set: ["pr"]
+    
+    dev1k:
+      wav_scp: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/wav.scp"
+      text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text.ctc"
+      language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text"
+      task_set: ["pr"]
+
+    predict:
+      wav_scp: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/wav.scp"
+      text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text.ctc"
+      language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/dev_1k_fixed/text"
+      task_set: ["pr"]

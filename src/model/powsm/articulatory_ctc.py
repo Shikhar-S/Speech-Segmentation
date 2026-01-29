@@ -135,11 +135,10 @@ class ArticulatoryCTC(torch.nn.Module):
             drow[0] = float("inf")
 
             k = min(self.topk, V - 1)
-            # nearest by distance => largest by -distance
-            cand = torch.topk(-drow, k=k, largest=True).indices
-
+            cand = torch.topk(drow, k=k, largest=False).indices
             # ensure self included
-            if (cand == p).any().item() is False:
+            if not (cand == p).any().item():
+                logging.warning("Check distance, distance to self should be 0!")
                 cand = torch.cat(
                     [cand[:-1], torch.tensor([p], device=device, dtype=cand.dtype)]
                 )
