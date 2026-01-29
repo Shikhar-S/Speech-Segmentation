@@ -1,16 +1,19 @@
 """Datamodule to read kaldi style powsm datasets using scp indices."""
 
+import json
+import random
+
 import torch
 import torchaudio
 import kaldiio
+import yaml
 from torch.utils.data import Dataset
 import lightning as L
-import yaml
+from lightning.pytorch.utilities import CombinedLoader
 from typing import Optional, Dict, List, Union
 from tqdm import tqdm
+
 from src.utils import RankedLogger
-import json
-import random
 
 log = RankedLogger(__name__, rank_zero_only=True)
 # TODO(shikhar): Separate out tokenizer. Use char_tokenizer.
@@ -251,6 +254,9 @@ class KaldiDataModule(L.LightningDataModule):
         wav_scp_file: Dict[str, Union[str, Dict[str, float]]],
         text_file: Dict[str, str],
         lang_file: Dict[str, str],
+        train_splits: List[str],
+        dev_splits: List[str],
+        predict_split: Optional[str] = None,
         sampling_rate=16000,
         max_duration_sec=20,
         batch_size=16,
@@ -265,6 +271,9 @@ class KaldiDataModule(L.LightningDataModule):
         self.wav_scp_file = wav_scp_file
         self.text_file = text_file
         self.lang_file = lang_file
+        self.train_splits = train_splits
+        self.dev_splits = dev_splits
+        self.predict_split = predict_split
         self.sampling_rate = sampling_rate
         self.max_duration_sec = max_duration_sec
         self.limit_samples = limit_samples
@@ -307,19 +316,26 @@ class KaldiDataModule(L.LightningDataModule):
         )
 
     def train_dataloader(self):
-        return self._dl(split="train")
+        loaders = {s: self._dl(split=s) for s in self.train_splits}
+        if len(loaders) == 1:
+            return list(loaders.values())[0]
+        return CombinedLoader(loaders, mode="max_size_cycle")
 
     def val_dataloader(self):
-        """Return dataloader(s) for validation splits (all non-train/predict splits)."""
-        loaders = [self._dl(split=s) for s in self.splits if s.startswith('dev')]
+        """Return dataloader(s) for validation splits."""
+        loaders = [self._dl(split=s) for s in self.dev_splits]
         assert len(loaders) > 0, "No validation splits found."
         return loaders
 
     def test_dataloader(self):
-        return self._dl(split="predict")
+        if self.predict_split is None:
+            raise ValueError("No predict_split specified.")
+        return self._dl(split=self.predict_split)
 
     def predict_dataloader(self):
-        return self._dl(split="predict")
+        if self.predict_split is None:
+            raise ValueError("No predict_split specified.")
+        return self._dl(split=self.predict_split)
 
     def collate_fn(self, batch):
         keys = [item["key"] for item in batch]
@@ -372,55 +388,41 @@ class KaldiDataModule(L.LightningDataModule):
 
 
 def build_kaldi_datamodule(
-    dataset_name,
-    dataset_config_path="configs/data/powsm_evalset_index.yaml",
-    batch_size=16,
-    num_workers=4,
+    train_splits: List[str],
+    dev_splits: List[str],
+    dataset_config_path: str = "configs/data/ipapack_index.yaml",
+    predict_split: Optional[str] = None,
+    batch_size: int = 16,
+    num_workers: int = 4,
     limit_samples: Optional[int] = None,
     filter_langs: Optional[List[str]] = None,
     read_asr_text: bool = False,
     vocab_file: Optional[str] = None,
-    dev_splits: Optional[List[str]] = None,
 ):
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
 
-    if dataset_name not in config["datasets"]:
-        raise ValueError(f"Unknown dataset: {dataset_name}")
-
-    ds_config = config["datasets"][dataset_name]
-
-    if "wav_scp" in ds_config:
-        ds_config = {"predict": ds_config}
-
-    # Only parse splits we need: train + val_splits + predict
-    splits_to_load = []
-    if "train" in ds_config:
-        splits_to_load.append("train")
-    
-    for split in dev_splits:
-        if split not in ds_config:
-            raise ValueError(f"Split '{split}' not found in dataset config")
-        splits_to_load.append(split)
-    
-    if "predict" in ds_config:
-        splits_to_load.append("predict")
-
+    all_splits = train_splits + dev_splits + ([predict_split] if predict_split else [])
     wav_scp_file, text_file, lang_file, task_set = {}, {}, {}, {}
-    for split in splits_to_load:
-        wav_scp_file[split] = ds_config[split]["wav_scp"]
-        text_file[split] = ds_config[split]["text_phoneme"]
-        lang_file[split] = ds_config[split]["language"]
-        task_set[split] = ds_config[split].get("task_set", None)
+    for split_key in all_splits:
+        if split_key not in config["datasets"]:
+            raise ValueError(f"Split '{split_key}' not found in dataset config")
+        ds_config = config["datasets"][split_key]
+        wav_scp_file[split_key] = ds_config["wav_scp"]
+        text_file[split_key] = ds_config["text_phoneme"]
+        lang_file[split_key] = ds_config["language"]
+        task_set[split_key] = ds_config.get("task_set", None)
 
-    log.info(f"Loaded splits: {splits_to_load}")
+    log.info(f"Loaded splits: {all_splits}")
 
     return KaldiDataModule(
         wav_scp_file=wav_scp_file,
         text_file=text_file,
         lang_file=lang_file,
+        train_splits=train_splits,
+        dev_splits=dev_splits,
+        predict_split=predict_split,
         sampling_rate=config.get("sampling_rate", 16000),
-        max_duration_sec=ds_config.get("max_duration_sec", 20),
         batch_size=batch_size,
         num_workers=num_workers,
         limit_samples=limit_samples,
@@ -433,15 +435,10 @@ def build_kaldi_datamodule(
 
 if __name__ == "__main__":
     # Test with: python -m src.data.kaldi_pretraining_dataset
-    # datamodule = build_kaldi_datamodule("doreco", batch_size=2, num_workers=1)
-    # datamodule.setup()
-    # print(len(datamodule.predict_dataloader().dataset))
-    # for batch in datamodule.predict_dataloader().dataset:
-    #     print(batch)
-    #     break
-    #######
     datamodule = build_kaldi_datamodule(
-        dataset_name="accentmix_multi",
+        train_splits=["train_accentmix_multi"],
+        dev_splits=["dev1k_accentmix_multi"],
+        predict_split="predict_accentmix_multi",
         dataset_config_path="configs/data/ipapack_index.yaml",
         batch_size=2,
         num_workers=1,
@@ -451,7 +448,3 @@ if __name__ == "__main__":
     for i in datamodule.train_dataloader():
         print(i)
         break
-    # print(len(datamodule.predict_dataloader().dataset))
-    # for batch in datamodule.predict_dataloader().dataset:
-    #     print(batch)
-    #     break

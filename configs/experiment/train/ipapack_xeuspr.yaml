@@ -32,13 +32,15 @@ trainer:
 
 data:
   _target_: src.data.kaldi_pretraining_dataset.build_kaldi_datamodule
-  dataset_name: development # pr_fixed - full
+  train_splits: ["train_development"]
+  dev_splits: ["dev1k_development"]
   dataset_config_path: configs/data/ipapack_index.yaml
   vocab_file: ${model.net.vocab_file}
   batch_size: 16
   num_workers: 12
 
 model:
+  dev_splits: ${data.dev_splits}
   optimizer:
     lr: 0.00005
   scheduler:
