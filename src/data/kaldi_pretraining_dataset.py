@@ -29,6 +29,7 @@ class KaldiDataset(Dataset):
         read_asr_text=False,
         vocab_file: Optional[str] = None,
         task_set: Optional[List[str]] = None,
+        max_duration_sec: Optional[int] = 20,
     ):
         self.sampling_rate = sampling_rate
         self.task_set = task_set  # set of tasks to filter on, e.g., ['pr', 'asr']
@@ -43,7 +44,7 @@ class KaldiDataset(Dataset):
         if filter_langs:
             self.filter_by_langs(filter_langs)
         self.split = split
-        self.max_duration_sec = 20
+        self.max_duration_sec = max_duration_sec
 
         # Load vocabulary for tokenization
         self.vocab = self._load_vocab(vocab_file) if vocab_file else None
@@ -210,6 +211,10 @@ class KaldiDataset(Dataset):
             waveform = torch.from_numpy(wav).float().unsqueeze(0)
         else:
             waveform, sr = torchaudio.load(wav_path)
+        
+        if waveform.shape[0] > 1:
+            # to mono
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
 
         if sr != self.sampling_rate:
             waveform = torchaudio.functional.resample(waveform, sr, self.sampling_rate)
@@ -247,6 +252,7 @@ class KaldiDataModule(L.LightningDataModule):
         text_file: Dict[str, str],
         lang_file: Dict[str, str],
         sampling_rate=16000,
+        max_duration_sec=20,
         batch_size=16,
         num_workers=4,
         limit_samples: Optional[int] = None,
@@ -255,18 +261,12 @@ class KaldiDataModule(L.LightningDataModule):
         task_set: Dict[str, List[str]] = None,
         vocab_file: Optional[str] = None,
     ):
-        """
-        For wav_scp_file, text_file, lang_file
-        Dict[str, str] (mapping split name to file path) must be provided.
-        """
         super().__init__()
-        log.info(
-            f"Initializing KaldiDataModule with {wav_scp_file}, {text_file}, {lang_file}"
-        )
         self.wav_scp_file = wav_scp_file
         self.text_file = text_file
         self.lang_file = lang_file
         self.sampling_rate = sampling_rate
+        self.max_duration_sec = max_duration_sec
         self.limit_samples = limit_samples
         self.filter_langs = filter_langs
         self.read_asr_text = read_asr_text
@@ -275,10 +275,8 @@ class KaldiDataModule(L.LightningDataModule):
         self.vocab_file = vocab_file
         self.task_set = task_set
         self.splits = list(wav_scp_file.keys())
-        assert (
-            set(self.splits) == set(text_file.keys()) == set(lang_file.keys())
-        ), "Mismatch in splits across wav_scp, text, and lang files."
-        self.ignore_id = -1  # for CTC loss padding
+        self.ignore_id = -1
+        log.info(f"Splits: {self.splits}")
 
     def _ds(self, split):
         return KaldiDataset(
@@ -292,6 +290,7 @@ class KaldiDataModule(L.LightningDataModule):
             vocab_file=self.vocab_file,
             task_set=self.task_set[split],
             read_asr_text=self.read_asr_text,
+            max_duration_sec=self.max_duration_sec,
         )
 
     def setup(self, stage=None):
@@ -311,7 +310,10 @@ class KaldiDataModule(L.LightningDataModule):
         return self._dl(split="train")
 
     def val_dataloader(self):
-        return self._dl(split="dev1k")
+        """Return dataloader(s) for validation splits (all non-train/predict splits)."""
+        loaders = [self._dl(split=s) for s in self.splits if s.startswith('dev')]
+        assert len(loaders) > 0, "No validation splits found."
+        return loaders
 
     def test_dataloader(self):
         return self._dl(split="predict")
@@ -330,7 +332,7 @@ class KaldiDataModule(L.LightningDataModule):
 
         # Pad speeches to the max length in the batch
         max_speech_length = max(speech_lengths)
-        max_speech_length = 20 * self.sampling_rate  # enforce max length
+        max_speech_length = self.max_duration_sec * self.sampling_rate  # enforce max length
         padded_speeches = torch.zeros(len(batch), max_speech_length)
         for i, speech in enumerate(speeches):
             padded_speeches[i, : speech.shape[-1]] = speech
@@ -378,6 +380,7 @@ def build_kaldi_datamodule(
     filter_langs: Optional[List[str]] = None,
     read_asr_text: bool = False,
     vocab_file: Optional[str] = None,
+    dev_splits: Optional[List[str]] = None,
 ):
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
@@ -388,27 +391,36 @@ def build_kaldi_datamodule(
     ds_config = config["datasets"][dataset_name]
 
     if "wav_scp" in ds_config:
-        # we are missing the split level.
-        # typically for eval datasets
-        splits = ["predict"]
-        ds_config = {splits[0]: ds_config}
-    else:
-        splits = list(ds_config.keys())
-    log.info("splits:", splits)
+        ds_config = {"predict": ds_config}
+
+    # Only parse splits we need: train + val_splits + predict
+    splits_to_load = []
+    if "train" in ds_config:
+        splits_to_load.append("train")
+    
+    for split in dev_splits:
+        if split not in ds_config:
+            raise ValueError(f"Split '{split}' not found in dataset config")
+        splits_to_load.append(split)
+    
+    if "predict" in ds_config:
+        splits_to_load.append("predict")
+
     wav_scp_file, text_file, lang_file, task_set = {}, {}, {}, {}
-    for split in splits:
+    for split in splits_to_load:
         wav_scp_file[split] = ds_config[split]["wav_scp"]
         text_file[split] = ds_config[split]["text_phoneme"]
         lang_file[split] = ds_config[split]["language"]
         task_set[split] = ds_config[split].get("task_set", None)
 
-    sampling_rate = config.get("sampling_rate", 16000)
+    log.info(f"Loaded splits: {splits_to_load}")
 
     return KaldiDataModule(
         wav_scp_file=wav_scp_file,
         text_file=text_file,
         lang_file=lang_file,
-        sampling_rate=sampling_rate,
+        sampling_rate=config.get("sampling_rate", 16000),
+        max_duration_sec=ds_config.get("max_duration_sec", 20),
         batch_size=batch_size,
         num_workers=num_workers,
         limit_samples=limit_samples,

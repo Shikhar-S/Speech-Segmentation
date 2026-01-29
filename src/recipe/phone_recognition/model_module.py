@@ -4,7 +4,7 @@ Usage:
     python -m src.recipe.phone_recognition.model_module
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import LambdaLR
@@ -75,94 +75,70 @@ class PhoneRecognitionModel(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         inference_strategy: Optional[Any] = None,
+        dev_splits: Optional[List[str]] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net", "inference_strategy"])
         self.net = net
         self.inference_strategy = inference_strategy
         self.blank_id: Optional[int] = getattr(self.net, "blank_id", None)
-        # Loss tracking
-        self.train_loss = MeanMetric()
-        self.val_loss = MeanMetric()
-        self.test_loss = MeanMetric()
+        self.dev_splits = dev_splits or []
+        self.losses = nn.ModuleDict({s: MeanMetric() for s in ["train", "test"] + self.dev_splits})
+        self.cers = nn.ModuleDict({s: MeanMetric() for s in self.dev_splits})
         self.val_loss_best = MinMetric()
 
-    def forward(
-        self,
-        batch: Dict[str, torch.Tensor],
-    ) -> Dict[str, torch.Tensor]:
-        # TODO(shikhar): fix typo throughtout length --> lengths
-        speech = batch["speech"]
-        speech_length = batch["speech_length"]
-        text = batch["text"]
-        text_length = batch["text_length"]
+    def forward(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         return self.net(
-            speech=speech,
-            speech_lengths=speech_length,
-            text=text,
-            text_lengths=text_length,
+            speech=batch["speech"],
+            speech_lengths=batch["speech_length"],
+            text=batch["text"],
+            text_lengths=batch["text_length"],
         )
 
     def on_before_optimizer_step(self, optimizer) -> None:
-        norms = grad_norm(self, norm_type=2)
-        self.log_dict(norms)
+        self.log_dict(grad_norm(self, norm_type=2))
 
     def on_train_start(self) -> None:
         if hasattr(self.net, "frontend") and self.net.frontend is not None:
-            self.net.frontend.eval()
-        self.train_loss.reset()
-        self.val_loss.reset()
-        self.test_loss.reset()
-        self.val_loss_best.reset()  # clears on !resume!
+            self.net.frontend.eval() #TODO(shikhar): set this trainable for some settings
+        for m in self.losses.values():
+            m.reset()
+        for m in self.cers.values():
+            m.reset()
+        self.val_loss_best.reset()
 
-    def _run_stage(
-        self,
-        split: str,
-        batch: Dict[str, torch.Tensor],
-        *,
-        log_on_step: bool,
-    ) -> Dict[str, torch.Tensor]:
+    def _run_stage(self, batch, split: str, log_on_step: bool):
+        """Run forward pass and log metrics for a split."""
         out = self(batch)
-        loss_metric = getattr(self, f"{split}_loss")
-        loss_metric(out["loss"].detach())
-        self.log(
-            f"{split}/loss",
-            loss_metric,
-            on_step=log_on_step,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        # log all stats
-        for k, v in out["stats"].items():
-            self.log(
-                f"{split}/{k}",
-                v,
-                on_step=log_on_step,
-                on_epoch=True,
-                prog_bar=False,
-            )
+        self.losses[split](out["loss"].detach())
+        self.log(f"{split}/loss", self.losses[split],
+                 on_step=log_on_step, on_epoch=True, prog_bar=True)
+
+        stats = out.get("stats", {})
+        if split in self.cers and stats.get("cer_ctc") is not None:
+            self.cers[split](stats["cer_ctc"])
+            self.log(f"{split}/cer", self.cers[split],
+                     on_step=log_on_step, on_epoch=True, prog_bar=True)
+        for k, v in stats.items():
+            if k == "cer_ctc" and split in self.cers:
+                continue
+            self.log(f"{split}/{k}", v, on_step=log_on_step, on_epoch=True, prog_bar=False)
         return out
 
-    def training_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
-    ) -> torch.Tensor:
-        return self._run_stage("train", batch, log_on_step=True)["loss"]
+    def training_step(self, batch, batch_idx) -> torch.Tensor:
+        return self._run_stage(batch, "train", log_on_step=True)["loss"]
 
-    def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
-        self._run_stage("val", batch, log_on_step=False)
+    def validation_step(self, batch, batch_idx, dataloader_idx: int = 0) -> None:
+        self._run_stage(batch, self.dev_splits[dataloader_idx], log_on_step=False)
 
     def on_validation_epoch_end(self) -> None:
-        loss = self.val_loss.compute()
+        loss = self.losses[self.dev_splits[0]].compute()
         self.val_loss_best(loss)
-        self.log(
-            "val/loss_best",
-            self.val_loss_best.compute(),
-            sync_dist=True,
-            prog_bar=True,
-        )
+        self.log("val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True)
+        self.log("val/loss", loss, sync_dist=True, prog_bar=False)
 
-    def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
-        self._run_stage("test", batch, log_on_step=False)
+    def test_step(self, batch, batch_idx) -> None:
+        self._run_stage(batch, "test", log_on_step=False)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):
         if self.inference_strategy is None:
