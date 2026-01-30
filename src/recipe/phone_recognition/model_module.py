@@ -83,7 +83,9 @@ class PhoneRecognitionModel(LightningModule):
         self.inference_strategy = inference_strategy
         self.blank_id: Optional[int] = getattr(self.net, "blank_id", None)
         self.dev_splits = dev_splits or []
-        self.losses = nn.ModuleDict({s: MeanMetric() for s in ["train", "test"] + self.dev_splits})
+        self.losses = nn.ModuleDict(
+            {s: MeanMetric() for s in ["trainloss", "testloss"] + self.dev_splits}
+        )
         self.cers = nn.ModuleDict({s: MeanMetric() for s in self.dev_splits})
         self.val_loss_best = MinMetric()
 
@@ -100,7 +102,7 @@ class PhoneRecognitionModel(LightningModule):
 
     def on_train_start(self) -> None:
         if hasattr(self.net, "frontend") and self.net.frontend is not None:
-            self.net.frontend.eval() #TODO(shikhar): set this trainable for some settings
+            self.net.frontend.eval()  # TODO(shikhar): set this trainable for some settings
         for m in self.losses.values():
             m.reset()
         for m in self.cers.values():
@@ -110,22 +112,34 @@ class PhoneRecognitionModel(LightningModule):
     def _run_stage(self, batch, split: str, log_on_step: bool):
         """Run forward pass and log metrics for a split."""
         out = self(batch)
-        self.losses[split](out["loss"].detach())
-        self.log(f"{split}/loss", self.losses[split],
-                 on_step=log_on_step, on_epoch=True, prog_bar=True)
+        self.losses[f"{split}loss"](out["loss"].detach())
+        self.log(
+            f"{split}/loss",
+            self.losses[f"{split}loss"],
+            on_step=log_on_step,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
         stats = out.get("stats", {})
         if split in self.cers and stats.get("cer_ctc") is not None:
             self.cers[split](stats["cer_ctc"])
-            self.log(f"{split}/cer", self.cers[split],
-                     on_step=log_on_step, on_epoch=True, prog_bar=True)
+            self.log(
+                f"{split}/cer",
+                self.cers[split],
+                on_step=log_on_step,
+                on_epoch=True,
+                prog_bar=True,
+            )
         for k, v in stats.items():
             if k == "cer_ctc" and split in self.cers:
                 continue
-            self.log(f"{split}/{k}", v, on_step=log_on_step, on_epoch=True, prog_bar=False)
+            self.log(
+                f"{split}/{k}", v, on_step=log_on_step, on_epoch=True, prog_bar=False
+            )
         return out
 
-    def training_step(self, batch, batch_idx) -> torch.Tensor:
+    def training_step(self, batch, batch_idx, dataloader_idx: int = 0) -> torch.Tensor:
         return self._run_stage(batch, "train", log_on_step=True)["loss"]
 
     def validation_step(self, batch, batch_idx, dataloader_idx: int = 0) -> None:
@@ -134,7 +148,9 @@ class PhoneRecognitionModel(LightningModule):
     def on_validation_epoch_end(self) -> None:
         loss = self.losses[self.dev_splits[0]].compute()
         self.val_loss_best(loss)
-        self.log("val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True)
+        self.log(
+            "val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True
+        )
         self.log("val/loss", loss, sync_dist=True, prog_bar=False)
 
     def test_step(self, batch, batch_idx) -> None:
@@ -181,3 +197,48 @@ class PhoneRecognitionModel(LightningModule):
             }
 
         return {"optimizer": optimizer}
+
+
+if __name__ == "__main__":
+    # python -m src.recipe.phone_recognition.model_module
+    from src.data.kaldi_pretraining_dataset import build_kaldi_datamodule
+    from src.model.wav2vec2.builders import build_wav2vec2_model
+
+    net = build_wav2vec2_model(hf_repo="facebook/mms-300m", output_vocabsz=500)
+    print("Built Wav2Vec2 model ")
+
+    datamodule = build_kaldi_datamodule(
+        train_splits=["dev_1k"],  # "train_accentmix_multi",
+        dev_splits=[
+            "dev_1k",
+            "dev_gmuaccent",
+            "dev_buckeye",
+            "dev_epadb",
+            "dev_speechoceanotth",
+            "dev_l2arctic",
+        ],
+        predict_split="predict",
+        dataset_config_path="configs/data/ipapack_index.yaml",
+        batch_size=1,
+        num_workers=1,
+        vocab_file="src/model/xeusphoneme/resources/ipa_vocab.json",
+        limit_samples=2,
+    )
+    datamodule.setup()
+    batch = next(iter(datamodule.train_dataloader()))
+    print(batch)
+    model = PhoneRecognitionModel(
+        net=net,
+        optimizer=torch.optim.AdamW,
+        scheduler=None,
+        dev_splits=[
+            "dev_1k",
+            "dev_gmuaccent",
+            "dev_buckeye",
+            "dev_epadb",
+            "dev_speechoceanotth",
+            "dev_l2arctic",
+        ],
+    )
+    out = model.training_step(*batch)
+    print(out)

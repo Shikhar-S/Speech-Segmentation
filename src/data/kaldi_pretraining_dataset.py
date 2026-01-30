@@ -53,13 +53,15 @@ class KaldiDataset(Dataset):
         self.vocab = self._load_vocab(vocab_file) if vocab_file else None
         self.unk_id = -1 if not self.vocab else self.vocab.get("<unk>", -1)
 
-        assert set(self.wav_scp.keys()).issubset(
-            set(self.text.keys())
-        ), "Extra key in wav.scp"
-        self.keys = list(self.wav_scp.keys())
+        self.keys = list(set(self.wav_scp.keys()).intersection(set(self.text.keys())))
+        assert (
+            self.keys
+        ), "Keyset is empty after loading wav_scp and text files. WAV keys: {}, TEXT keys: {}".format(
+            list(self.wav_scp.keys())[:2], list(self.text.keys())[:2]
+        )
         assert all(
             k in self.key2lang for k in self.keys
-        ), "Missing language tags for some keys"
+        ), "Missing language tags for some keys, check the task_set in config."
         log.info(
             f"Loaded dataset: {len(self.key2lang)} lang keys, {len(self.keys)} samples"
         )
@@ -90,16 +92,16 @@ class KaldiDataset(Dataset):
 
     def _keep_key(self, key: str) -> bool:
         """Check if a key should be kept based on task_set."""
-        if self.task_set is None:
+        if not self.task_set:
             return True
         return any(key.endswith(f"_{task}") for task in self.task_set)
 
-    def _load_wav_scp(self, path_or_mixpath, limit_samples: Optional[int] = None):
+    def _load_wav_scp(self, path_or_pathcnt, limit_samples: Optional[int] = None):
         wav_scp = {}
-        if isinstance(path_or_mixpath, str):
-            path_cnt = [(path_or_mixpath, 0)]  # <=0 means load all
+        if isinstance(path_or_pathcnt, str):
+            path_cnt = [(path_or_pathcnt, 0)]  # <=0 means load all
         else:
-            path_cnt = [(p, c) for p, c in path_or_mixpath.items()]
+            path_cnt = [(p, c) for p, c in path_or_pathcnt.items()]
         for path, cnt in path_cnt:
             wav_scp_ = {}
             with open(path) as f:
@@ -127,7 +129,6 @@ class KaldiDataset(Dataset):
                 f"Loaded {len(wav_scp_)} samples from wav.scp: {path} with count {cnt}"
             )
             wav_scp.update(wav_scp_)
-        print("Total loaded wavs:", len(wav_scp))
         return wav_scp
 
     def _load_text(self, path, limit_samples: Optional[int] = None):
@@ -214,9 +215,8 @@ class KaldiDataset(Dataset):
             waveform = torch.from_numpy(wav).float().unsqueeze(0)
         else:
             waveform, sr = torchaudio.load(wav_path)
-        
-        if waveform.shape[0] > 1:
-            # to mono
+
+        if waveform.shape[0] > 1:  # to mono
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
         if sr != self.sampling_rate:
@@ -317,15 +317,13 @@ class KaldiDataModule(L.LightningDataModule):
 
     def train_dataloader(self):
         loaders = {s: self._dl(split=s) for s in self.train_splits}
-        if len(loaders) == 1:
-            return list(loaders.values())[0]
-        return CombinedLoader(loaders, mode="max_size_cycle")
+        return CombinedLoader(loaders, mode="sequential")
 
     def val_dataloader(self):
         """Return dataloader(s) for validation splits."""
         loaders = [self._dl(split=s) for s in self.dev_splits]
         assert len(loaders) > 0, "No validation splits found."
-        return loaders
+        return CombinedLoader(loaders, mode="sequential")
 
     def test_dataloader(self):
         if self.predict_split is None:
@@ -348,7 +346,9 @@ class KaldiDataModule(L.LightningDataModule):
 
         # Pad speeches to the max length in the batch
         max_speech_length = max(speech_lengths)
-        max_speech_length = self.max_duration_sec * self.sampling_rate  # enforce max length
+        max_speech_length = (
+            self.max_duration_sec * self.sampling_rate
+        )  # enforce max length
         padded_speeches = torch.zeros(len(batch), max_speech_length)
         for i, speech in enumerate(speeches):
             padded_speeches[i, : speech.shape[-1]] = speech
@@ -436,15 +436,38 @@ def build_kaldi_datamodule(
 if __name__ == "__main__":
     # Test with: python -m src.data.kaldi_pretraining_dataset
     datamodule = build_kaldi_datamodule(
-        train_splits=["train_accentmix_multi"],
-        dev_splits=["dev1k_accentmix_multi"],
-        predict_split="predict_accentmix_multi",
+        train_splits=["dev_1k"],  # "train_accentmix_multi",
+        dev_splits=[
+            "dev_1k",
+            "dev_gmuaccent",
+            "dev_buckeye",
+            "dev_epadb",
+            "dev_speechoceanotth",
+            "dev_l2arctic",
+        ],
+        predict_split="predict",
         dataset_config_path="configs/data/ipapack_index.yaml",
-        batch_size=2,
+        batch_size=1,
         num_workers=1,
         vocab_file="src/model/xeusphoneme/resources/ipa_vocab.json",
+        limit_samples=2,
     )
     datamodule.setup()
+    print("Train dataloader:")
     for i in datamodule.train_dataloader():
         print(i)
-        break
+
+    print("--" * 20)
+    print("Dev dataloader:")
+    for i in datamodule.val_dataloader():
+        print(i)
+
+    print("--" * 20)
+    print("Test dataloader:")
+    for i in datamodule.test_dataloader():
+        print(i)
+
+    print("--" * 20)
+    print("Predict dataloader:")
+    for i in datamodule.predict_dataloader():
+        print(i)
