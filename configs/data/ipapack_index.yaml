@@ -13,7 +13,8 @@ datasets:
     wav_scp: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_1k_fixed_1task/wav.scp"
     text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_1k_fixed_1task/text.ctc"
     language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_1k_fixed_1task/text"
-
+    task_set: ["pr"]
+    
   # accentmix_multi splits
   # eng_us     835233
   # eng_other  451793
@@ -25,15 +26,17 @@ datasets:
       /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.eng_us.scp: 400000
       /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.multi_mid.scp: 74000
       /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.multi_low.scp: 74000
-    text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text.ctc"
-    language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text"
+    text_phoneme: "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/text.ctc"
+    language: "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/text"
+    task_set: ["pr"]
 
   train_accentmix_en: # around 850k total
     wav_scp: 
       /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.eng_other.scp: 451793
       /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/wav.eng_us.scp: 400000
-    text_phoneme: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text.ctc"
-    language: "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text"
+    text_phoneme: "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/text.ctc"
+    language: "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/train_fixed_all_partitions/text"
+    task_set: ["pr"]
 
 #############################################################################################################
 

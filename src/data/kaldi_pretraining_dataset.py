@@ -254,7 +254,7 @@ class KaldiDataModule(L.LightningDataModule):
         wav_scp_file: Dict[str, Union[str, Dict[str, float]]],
         text_file: Dict[str, str],
         lang_file: Dict[str, str],
-        train_splits: List[str],
+        train_split: str,
         dev_splits: List[str],
         predict_split: Optional[str] = None,
         sampling_rate=16000,
@@ -271,7 +271,7 @@ class KaldiDataModule(L.LightningDataModule):
         self.wav_scp_file = wav_scp_file
         self.text_file = text_file
         self.lang_file = lang_file
-        self.train_splits = train_splits
+        self.train_split = train_split
         self.dev_splits = dev_splits
         self.predict_split = predict_split
         self.sampling_rate = sampling_rate
@@ -316,8 +316,7 @@ class KaldiDataModule(L.LightningDataModule):
         )
 
     def train_dataloader(self):
-        loaders = {s: self._dl(split=s) for s in self.train_splits}
-        return CombinedLoader(loaders, mode="sequential")
+        return self._dl(split=self.train_split)
 
     def val_dataloader(self):
         """Return dataloader(s) for validation splits."""
@@ -388,7 +387,7 @@ class KaldiDataModule(L.LightningDataModule):
 
 
 def build_kaldi_datamodule(
-    train_splits: List[str],
+    train_split: str,
     dev_splits: List[str],
     dataset_config_path: str = "configs/data/ipapack_index.yaml",
     predict_split: Optional[str] = None,
@@ -402,7 +401,7 @@ def build_kaldi_datamodule(
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
 
-    all_splits = train_splits + dev_splits + ([predict_split] if predict_split else [])
+    all_splits = [train_split] + dev_splits + ([predict_split] if predict_split else [])
     wav_scp_file, text_file, lang_file, task_set = {}, {}, {}, {}
     for split_key in all_splits:
         if split_key not in config["datasets"]:
@@ -419,7 +418,7 @@ def build_kaldi_datamodule(
         wav_scp_file=wav_scp_file,
         text_file=text_file,
         lang_file=lang_file,
-        train_splits=train_splits,
+        train_split=train_split,
         dev_splits=dev_splits,
         predict_split=predict_split,
         sampling_rate=config.get("sampling_rate", 16000),
@@ -436,7 +435,7 @@ def build_kaldi_datamodule(
 if __name__ == "__main__":
     # Test with: python -m src.data.kaldi_pretraining_dataset
     datamodule = build_kaldi_datamodule(
-        train_splits=["dev_1k"],  # "train_accentmix_multi",
+        train_split="dev_1k",  # "train_accentmix_multi",
         dev_splits=[
             "dev_1k",
             "dev_gmuaccent",

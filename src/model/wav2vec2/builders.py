@@ -31,7 +31,7 @@ def build_wav2vec2_model(
     hf_repo: str = "facebook/mms-300m",
     output_vocabsz: Optional[int] = None,
     blank_id: int = 0,
-    freeze_encoder: bool = False,
+    freeze_frontend: bool = False,
 ):
     """Build Wav2Vec2 model
 
@@ -39,7 +39,7 @@ def build_wav2vec2_model(
         hf_repo: HuggingFace repository ID
         output_vocabsz: Optional output vocabulary size
         blank_id: Blank token ID for CTC
-        freeze_encoder: Whether to freeze the encoder layers
+        freeze_frontend: Whether to freeze the encoder layers
 
     Returns:
         Wav2Vec2 model
@@ -48,7 +48,6 @@ def build_wav2vec2_model(
         hf_repo=hf_repo,
         output_vocabsz=output_vocabsz,
         blank_id=blank_id,
-        freeze_encoder=freeze_encoder,
     )
     log.info(f"Wav2Vec2 model loaded from {hf_repo}")
     log.info(f"Model vocab size: {model.vocab_size}")
@@ -71,11 +70,11 @@ def build_wav2vec2_inference(
     return inference_module
 
 
-def build_wav2vec2_pr(
+def build_wav2vec2pr(
     hf_repo: str = "facebook/mms-300m",
     vocab_file: Optional[str] = None,
     ctc_config: Optional[dict] = None,
-    freeze_encoder: bool = True,
+    freeze_frontend: bool = True,
 ) -> Wav2Vec2PRModel:
     """Build Wav2Vec2 Phone Recognition model.
 
@@ -83,7 +82,7 @@ def build_wav2vec2_pr(
         hf_repo: HuggingFace repository ID for the pretrained Wav2Vec2 model
         vocab_file: Path to vocabulary JSON file (token -> id mapping)
         ctc_config: Optional dict of CTC configuration
-        freeze_encoder: Whether to freeze the encoder layers
+        freeze_frontend: Whether to freeze the feature extraction layers
 
     Returns:
         Wav2Vec2PRModel instance
@@ -104,7 +103,6 @@ def build_wav2vec2_pr(
     encoder = Wav2Vec2Model(
         hf_repo=hf_repo,
         output_vocabsz=None,
-        freeze_encoder=freeze_encoder,
     )
     log.info(f"Wav2Vec2 encoder loaded from {hf_repo}")
 
@@ -121,7 +119,7 @@ def build_wav2vec2_pr(
         encoder=encoder,
         ctc=ctc,
         token_list=token_list,
-        freeze_encoder=freeze_encoder,
+        freeze_frontend=freeze_frontend,
     )
     log.info("Wav2Vec2PRModel built successfully")
 

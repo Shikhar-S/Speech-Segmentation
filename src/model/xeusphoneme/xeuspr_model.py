@@ -168,6 +168,9 @@ class XeusPRModel(torch.nn.Module):
     def get_blank_id(self) -> int:
         return self.blank_id
 
+    def get_frontend(self):
+        return self.frontend
+
     def get_trainable_parameters(self):
         trainable_params = {"head": [], "encoder": []}
         for n, p in self.named_parameters():
@@ -176,7 +179,9 @@ class XeusPRModel(torch.nn.Module):
             elif n.startswith("encoder"):
                 trainable_params["encoder"].append(p)
             elif n.startswith("frontend"):
-                if not self.freeze_frontend:
+                if self.freeze_frontend:
+                    p.requires_grad = False
+                else:
                     trainable_params["encoder"].append(p)
             else:
                 # freeze other parts:

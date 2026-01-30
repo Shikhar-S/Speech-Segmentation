@@ -84,7 +84,11 @@ class PhoneRecognitionModel(LightningModule):
         self.blank_id: Optional[int] = getattr(self.net, "blank_id", None)
         self.dev_splits = dev_splits or []
         self.losses = nn.ModuleDict(
-            {s: MeanMetric() for s in ["trainloss", "testloss"] + self.dev_splits}
+            {
+                s: MeanMetric()
+                for s in ["trainloss", "testloss"]
+                + [f"{x}loss" for x in self.dev_splits]
+            }
         )
         self.cers = nn.ModuleDict({s: MeanMetric() for s in self.dev_splits})
         self.val_loss_best = MinMetric()
@@ -101,8 +105,6 @@ class PhoneRecognitionModel(LightningModule):
         self.log_dict(grad_norm(self, norm_type=2))
 
     def on_train_start(self) -> None:
-        if hasattr(self.net, "frontend") and self.net.frontend is not None:
-            self.net.frontend.eval()  # TODO(shikhar): set this trainable for some settings
         for m in self.losses.values():
             m.reset()
         for m in self.cers.values():
@@ -146,7 +148,7 @@ class PhoneRecognitionModel(LightningModule):
         self._run_stage(batch, self.dev_splits[dataloader_idx], log_on_step=False)
 
     def on_validation_epoch_end(self) -> None:
-        loss = self.losses[self.dev_splits[0]].compute()
+        loss = self.losses[f"{self.dev_splits[0]}loss"].compute()
         self.val_loss_best(loss)
         self.log(
             "val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True
@@ -202,9 +204,14 @@ class PhoneRecognitionModel(LightningModule):
 if __name__ == "__main__":
     # python -m src.recipe.phone_recognition.model_module
     from src.data.kaldi_pretraining_dataset import build_kaldi_datamodule
-    from src.model.wav2vec2.builders import build_wav2vec2_model
+    from src.model.wav2vec2.builders import build_wav2vec2pr
 
-    net = build_wav2vec2_model(hf_repo="facebook/mms-300m", output_vocabsz=500)
+    net = build_wav2vec2pr(
+        hf_repo="facebook/mms-300m",
+        vocab_file="src/model/xeusphoneme/resources/ipa_vocab.json",
+        freeze_frontend=True,
+    )
+    net.get_trainable_parameters()
     print("Built Wav2Vec2 model ")
 
     datamodule = build_kaldi_datamodule(

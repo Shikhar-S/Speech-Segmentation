@@ -8,4 +8,4 @@ optimizer:
 
 scheduler: null
 net: ???
-dev_dataloader_names: ???
+dev_splits: ???

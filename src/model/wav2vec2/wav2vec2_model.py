@@ -54,7 +54,6 @@ class Wav2Vec2Model(nn.Module):
         hf_repo: str,
         output_vocabsz: int = None,
         blank_id: int = 0,
-        freeze_encoder: bool = False,
     ):
         """
         Args:
@@ -63,7 +62,6 @@ class Wav2Vec2Model(nn.Module):
                 facebook/mms-1b
             output_vocabsz: If set, creates a CTC head with this vocab size.
             blank_id: Blank token ID for CTC
-            freeze_encoder: Whether to freeze encoder weights
         """
         super().__init__()
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(hf_repo)
@@ -73,7 +71,6 @@ class Wav2Vec2Model(nn.Module):
         self.vocab_size = self.model.config.vocab_size
         self.sampling_rate = self.feature_extractor.sampling_rate
         print("Sampling rate:", self.sampling_rate)
-        self.freeze_encoder = freeze_encoder
         # pad is the blank token for w2v2
         self.blank_id = blank_id
         if output_vocabsz is not None:

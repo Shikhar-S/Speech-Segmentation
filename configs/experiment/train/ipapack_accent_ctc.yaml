@@ -1,21 +1,21 @@
 # @package _global_
 
 # export HF_HOME="exp/cache/hf"
-# python src/main.py experiment=train/ipapack_accent_xeusctc trainer.max_steps=100 trainer.val_check_interval=10 run_folder=test
+# python src/main.py experiment=train/ipapack_accent_ctc model.net=mmspr logger=csv trainer.max_steps=100 trainer.val_check_interval=10 run_folder=test
 
-# sbatch -c 36 --ntasks-per-node=2 --gpus-per-node=2 --mem=240G scripts/daixpr.batch run_folder=CHANGE experiment=train/ipapack_accent_xeusctc trainer.accumulate_grad_batches=8 model.optimizer.lr=0.0001
+# sbatch -c 36 --ntasks-per-node=2 --gpus-per-node=2 --mem=240G scripts/daixpr.batch run_folder=CHANGE model.net=mmspr experiment=train/ipapack_accent_ctc trainer.accumulate_grad_batches=8 model.optimizer.lr=0.0001
 
 
 defaults:
   - override /data: null # defined below
   - override /model: phone_recognition
-  - override /model/net: xeuspr
+  - override /model/net: mmspr
   - override /trainer: ddp
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: ipaaccent_xeus
-tags: ["ipapack", "xeusctc", "phone_recognition", "accentmix"]
+task_name: ipaaccent_ctc
+tags: ["ipapack_accent", "ctc", "phone_recognition"]
 
 seed: 42
 
@@ -33,11 +33,11 @@ trainer:
 
 data:
   _target_: src.data.kaldi_pretraining_dataset.build_kaldi_datamodule
-  train_splits: ["train_accentmix_en"]
+  train_split: "train_accentmix_en"
   dev_splits: ["dev_1k", "dev_gmuaccent", "dev_buckeye", "dev_epadb", "dev_speechoceanotth", "dev_l2arctic"]
   dataset_config_path: configs/data/ipapack_index.yaml
   vocab_file: ${model.net.vocab_file}
-  batch_size: 16
+  batch_size: 40 # 16
   num_workers: 12
 
 model:

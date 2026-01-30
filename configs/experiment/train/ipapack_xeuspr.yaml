@@ -32,7 +32,7 @@ trainer:
 
 data:
   _target_: src.data.kaldi_pretraining_dataset.build_kaldi_datamodule
-  train_splits: ["train"]
+  train_split: "train"
   dev_splits: ["dev_1k"]
   dataset_config_path: configs/data/ipapack_index.yaml
   vocab_file: ${model.net.vocab_file}
