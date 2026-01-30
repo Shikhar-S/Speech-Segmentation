@@ -1,8 +1,12 @@
+import json
+from typing import Optional
+
 from src.model.wav2vec2.tokenizer import Wav2Vec2Tokenizer
 from src.model.wav2vec2.wav2vec2_model import Wav2Vec2Model
 from src.model.wav2vec2.wav2vec2_inference import Wav2Vec2Inference
+from src.model.wav2vec2.wav2vec2pr_model import Wav2Vec2PRModel
+from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger
-from typing import Optional
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -65,6 +69,63 @@ def build_wav2vec2_inference(
     inference_module = Wav2Vec2Inference(model, tokenizer, device=device)
     log.info("Wav2Vec2 inference module built")
     return inference_module
+
+
+def build_wav2vec2_pr(
+    hf_repo: str = "facebook/mms-300m",
+    vocab_file: Optional[str] = None,
+    ctc_config: Optional[dict] = None,
+    freeze_encoder: bool = True,
+) -> Wav2Vec2PRModel:
+    """Build Wav2Vec2 Phone Recognition model.
+
+    Args:
+        hf_repo: HuggingFace repository ID for the pretrained Wav2Vec2 model
+        vocab_file: Path to vocabulary JSON file (token -> id mapping)
+        ctc_config: Optional dict of CTC configuration
+        freeze_encoder: Whether to freeze the encoder layers
+
+    Returns:
+        Wav2Vec2PRModel instance
+    """
+    # Load vocabulary
+    if vocab_file is not None:
+        with open(vocab_file) as f:
+            tok2id = json.load(f)
+            id2tok = {v: k for k, v in tok2id.items()}
+            token_list = [id2tok[i] for i in range(len(id2tok))]
+    else:
+        raise ValueError("vocab_file is required for Wav2Vec2PRModel")
+
+    vocab_size = len(token_list)
+    log.info(f"Vocabulary size: {vocab_size}")
+
+    # Build encoder (without output vocab, CTC handles projection)
+    encoder = Wav2Vec2Model(
+        hf_repo=hf_repo,
+        output_vocabsz=None,
+        freeze_encoder=freeze_encoder,
+    )
+    log.info(f"Wav2Vec2 encoder loaded from {hf_repo}")
+
+    # Build CTC module
+    ctc_config = ctc_config or {}
+    ctc = CTC(
+        odim=vocab_size,
+        encoder_output_size=encoder.encoder_output_size(),
+        **ctc_config,
+    )
+
+    # Build model
+    model = Wav2Vec2PRModel(
+        encoder=encoder,
+        ctc=ctc,
+        token_list=token_list,
+        freeze_encoder=freeze_encoder,
+    )
+    log.info("Wav2Vec2PRModel built successfully")
+
+    return model
 
 
 if __name__ == "__main__":
