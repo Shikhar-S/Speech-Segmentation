@@ -1,6 +1,10 @@
 import pyarrow.parquet as pq  # before torch
 from typing import Any, Dict, Optional, Tuple
+import os
 
+# Limit the number of threads to prevent hangup with multiprocessing
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 import hydra
 import lightning as L
 import rootutils
