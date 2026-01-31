@@ -1,6 +1,6 @@
 import json
 from typing import Optional
-
+import torch
 from src.model.wav2vec2.tokenizer import Wav2Vec2Tokenizer
 from src.model.wav2vec2.wav2vec2_model import Wav2Vec2Model
 from src.model.wav2vec2.wav2vec2_inference import Wav2Vec2Inference
@@ -54,7 +54,9 @@ def build_wav2vec2_model(
     return model
 
 
-def build_wav2vec2_inference(
+def build_wav2vec2pr_inference(
+    checkpoint: str,
+    vocab_file: str,
     hf_repo: str = "facebook/mms-300m",
     device: str = "cpu",
 ):
@@ -63,9 +65,14 @@ def build_wav2vec2_inference(
     Returns:
         Wav2Vec2 inference module
     """
-    model = build_wav2vec2_model(hf_repo=hf_repo)
-    tokenizer = build_wav2vec2_tokenizer(hf_repo=hf_repo)
-    inference_module = Wav2Vec2Inference(model, tokenizer, device=device)
+    net = build_wav2vec2pr(
+        hf_repo=hf_repo,
+        vocab_file=vocab_file,
+        ctc_config=None,
+        freeze_frontend=False,
+        checkpoint=checkpoint,
+    )
+    inference_module = Wav2Vec2Inference(net, device=device)
     log.info("Wav2Vec2 inference module built")
     return inference_module
 
@@ -75,6 +82,7 @@ def build_wav2vec2pr(
     vocab_file: Optional[str] = None,
     ctc_config: Optional[dict] = None,
     freeze_frontend: bool = True,
+    checkpoint: Optional[str] = None,
 ) -> Wav2Vec2PRModel:
     """Build Wav2Vec2 Phone Recognition model.
 
@@ -83,6 +91,7 @@ def build_wav2vec2pr(
         vocab_file: Path to vocabulary JSON file (token -> id mapping)
         ctc_config: Optional dict of CTC configuration
         freeze_frontend: Whether to freeze the feature extraction layers
+        checkpoint: Optional path to a checkpoint file to load model weights
 
     Returns:
         Wav2Vec2PRModel instance
@@ -122,6 +131,19 @@ def build_wav2vec2pr(
         freeze_frontend=freeze_frontend,
     )
     log.info("Wav2Vec2PRModel built successfully")
+    if checkpoint:
+        state_dict = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        if "state_dict" in state_dict:
+            # convert to standard w2v2 checkpoint
+            state_dict = state_dict["state_dict"]  # for finetuned lightning checkpoints
+            state_dict = {
+                k.replace("net.", ""): v
+                for k, v in state_dict.items()
+                if k.startswith("net.")
+            }
+        load_info = model.load_state_dict(state_dict, strict=False)
+        log.info(f"Loaded checkpoint: {checkpoint} with load info: {load_info}")
+        print(f"Loaded checkpoint: {checkpoint} with load info: {load_info}")
 
     return model
 
