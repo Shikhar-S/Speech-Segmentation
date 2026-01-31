@@ -66,6 +66,7 @@ class Wav2Vec2Model(nn.Module):
         super().__init__()
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(hf_repo)
         self.model = Wav2Vec2ForCTC.from_pretrained(hf_repo)
+        self.model.train()
         self.model_stride = np.prod(self.model.config.conv_stride)
         self.encoder_dim = self.model.config.output_hidden_size
         self.vocab_size = self.model.config.vocab_size

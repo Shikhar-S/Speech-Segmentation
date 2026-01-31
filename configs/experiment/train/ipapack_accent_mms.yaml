@@ -27,7 +27,7 @@ trainer:
   max_steps: 100000
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
-  val_check_interval: 3000
+  val_check_interval: 500
   check_val_every_n_epoch: null
   log_every_n_steps: 200
 
@@ -37,8 +37,8 @@ data:
   dev_splits: ["dev_1k", "dev_gmuaccent", "dev_buckeye", "dev_epadb", "dev_speechoceanotth", "dev_l2arctic"]
   dataset_config_path: configs/data/ipapack_index.yaml
   vocab_file: ${model.net.vocab_file}
-  batch_size: 40 # 16
-  num_workers: 12
+  batch_size: 80
+  num_workers: 5
 
 model:
   dev_splits: ${data.dev_splits}
