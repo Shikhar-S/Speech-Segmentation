@@ -313,7 +313,7 @@ class KaldiDataModule(L.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=self.collate_fn,
-            persistent_workers=True,
+            # persistent_workers=True,
             # prefetch_factor=2,
         )
 
