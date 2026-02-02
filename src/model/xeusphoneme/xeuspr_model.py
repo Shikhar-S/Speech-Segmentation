@@ -38,6 +38,7 @@ class XeusPRModel(torch.nn.Module):
         ignore_id: int = -1,
         sym_blank: str = "<blank>",
         freeze_frontend: bool = True,
+        weighted_sum: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -55,6 +56,14 @@ class XeusPRModel(torch.nn.Module):
         self.error_calculator = ErrorCalculator(
             token_list, sym_space, sym_blank, report_cer=True, report_wer=False
         )
+
+        self.weighted_sum = weighted_sum
+        if self.weighted_sum:
+            n_layers = encoder.num_blocks
+            assert (
+                n_layers is not None and n_layers > 0
+            ), "Cannot infer number of encoder layers for weighted_sum"
+            self.layer_weights = torch.nn.Parameter(torch.zeros(int(n_layers)))
 
     def collect_feats(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor, **kwargs
@@ -110,7 +119,16 @@ class XeusPRModel(torch.nn.Module):
         encoder_out, encoder_out_lens, _ = self.encoder(
             speech, speech_lengths, masks=pad_masks, return_all_hs=True
         )
-        return encoder_out[0], encoder_out_lens
+        if not self.weighted_sum:
+            return encoder_out[0], encoder_out_lens
+
+        hs_list = encoder_out[1]
+        assert len(hs_list) == self.layer_weights.numel()
+        w = torch.softmax(self.layer_weights, dim=0).to(
+            hs_list[0].device, hs_list[0].dtype
+        )
+        hs = torch.stack(hs_list, dim=0)  # (L, B, T, D)
+        return (w.view(-1, 1, 1, 1) * hs).sum(0), encoder_out_lens
 
     def ctc_collapse_batch(self, x: torch.Tensor, max_length: int, pad: int = -1):
         B, T = x.shape
@@ -190,13 +208,15 @@ class XeusPRModel(torch.nn.Module):
 
 
 if __name__ == "__main__":
+    # python -m src.model.xeusphoneme.xeuspr_model
     import argparse
+    from src.model.xeusphoneme.builders import build_xeus_pr_from_hf
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--work_dir",
         type=str,
-        required=True,
+        default="exp/cache/xeus",
         help="Working directory for model files",
     )
     parser.add_argument(
@@ -222,6 +242,7 @@ if __name__ == "__main__":
         force=False,
         config_file=args.config,
         checkpoint=args.checkpoint,
+        weighted_sum=True,
     )
     print(model)
     total_params = sum(p.numel() for p in model.parameters())

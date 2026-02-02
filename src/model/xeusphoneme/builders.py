@@ -64,6 +64,7 @@ def build_xeus_pr(
     checkpoint: Optional[str] = None,
     vocab_file: Optional[str] = None,
     ctc_config: Optional[dict] = None,
+    weighted_sum: bool = False,
 ) -> XeusPRModel:
     """Build Xeus PR model from config and optional checkpoint.
 
@@ -72,6 +73,7 @@ def build_xeus_pr(
         checkpoint: Path to model checkpoint (pretrained or fully trained)
         vocab_file: Path to vocabulary file. If None, use vocab in config.
         ctc_config: Optional dict of CTC config
+        weighted_sum: Whether to use weighted sum of transformer layers
 
     Returns:
         XeusPRModel
@@ -135,6 +137,7 @@ def build_xeus_pr(
         ignore_id=getattr(args, "ignore_id", -1),
         sym_blank=getattr(args, "sym_blank", "<blank>"),
         freeze_frontend=checkpoint is not None,
+        weighted_sum=weighted_sum,
     )
 
     if checkpoint:
@@ -164,6 +167,7 @@ def build_xeus_pr_from_hf(
     vocab_file: Optional[str] = None,
     ctc_config: Optional[dict] = None,
     load_ckpt: bool = True,
+    weighted_sum: bool = False,
 ) -> XeusPRModel:
     """Build Xeus PR model from local files or HuggingFace repo.
 
@@ -179,6 +183,7 @@ def build_xeus_pr_from_hf(
         vocab_file: Path to vocabulary file. If None, use path in config.
         ctc_config: Optional dict of CTC config
         load_ckpt: Whether to load checkpoint weights
+        weighted_sum: Whether to use weighted sum of transformer layers
     Returns:
         XeusPRModel
     """
@@ -211,7 +216,11 @@ def build_xeus_pr_from_hf(
     log.info(f"Loading checkpoint: {ckpt}")
 
     return build_xeus_pr(
-        config_file=cfg, checkpoint=ckpt, vocab_file=vocab_file, ctc_config=ctc_config
+        config_file=cfg,
+        checkpoint=ckpt,
+        vocab_file=vocab_file,
+        ctc_config=ctc_config,
+        weighted_sum=weighted_sum,
     )
 
 

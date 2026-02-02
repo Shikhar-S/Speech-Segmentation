@@ -6,7 +6,8 @@ This file supports the following pretrained models:
 
 Usage:
     python -m src.model.wav2vec2.wav2vec2_model
-
+NOTE(shikhar): The code here is inverse of the forward(encode) pattern followed elsewhere.
+NOTE(shikhar): keeping all hs may also be wasteful for memory.
 """
 
 import torch
@@ -54,6 +55,7 @@ class Wav2Vec2Model(nn.Module):
         hf_repo: str,
         output_vocabsz: int = None,
         blank_id: int = 0,
+        weighted_sum: bool = False,
     ):
         """
         Args:
@@ -62,6 +64,7 @@ class Wav2Vec2Model(nn.Module):
                 facebook/mms-1b
             output_vocabsz: If set, creates a CTC head with this vocab size.
             blank_id: Blank token ID for CTC
+            weighted_sum: Whether to use a weighted sum of encoder layers for CTC
         """
         super().__init__()
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(hf_repo)
@@ -71,7 +74,13 @@ class Wav2Vec2Model(nn.Module):
         self.encoder_dim = self.model.config.output_hidden_size
         self.vocab_size = self.model.config.vocab_size
         self.sampling_rate = self.feature_extractor.sampling_rate
-        print("Sampling rate:", self.sampling_rate)
+        self.weighted_sum = weighted_sum
+        if self.weighted_sum:
+            self.n_layers = self.model.config.num_hidden_layers
+            assert (
+                self.n_layers is not None and self.n_layers > 0
+            ), "Cannot infer number of encoder layers for weighted_sum"
+            self.layer_weights = torch.nn.Parameter(torch.zeros(int(self.n_layers)))
         # pad is the blank token for w2v2
         self.blank_id = blank_id
         if output_vocabsz is not None:
@@ -110,12 +119,20 @@ class Wav2Vec2Model(nn.Module):
         return {"acc": acc}
 
     def forward(self, inputs) -> Any:
-        """Forward pass compatible with PowsmModel interface"""
         model_out = self.model(
             **inputs,
             output_hidden_states=True,
             return_dict=True,
         )
+        if self.weighted_sum:
+            hs_list = model_out.hidden_states  # 25!=nlayers=24, +input
+            w = torch.softmax(self.layer_weights, dim=0).to(
+                hs_list[0].device, hs_list[0].dtype
+            )
+            hs = torch.stack(hs_list[-self.n_layers :], dim=0)  # (L, B, T, D)
+            model_out["embedding"] = (w.view(-1, 1, 1, 1) * hs).sum(0)
+        else:
+            model_out["embedding"] = model_out.hidden_states[-1]
         stats = self._calculate_stats(model_out, inputs)
         model_out["stats"] = stats
         return model_out
@@ -131,10 +148,10 @@ class Wav2Vec2Model(nn.Module):
         """Frontend + Encoder"""
         inputs = self._extract_feats(speech, speech_lengths)
         model_out = self(inputs)
-        encoder_out = model_out.hidden_states[-1]
         encoder_out_lens = self.model._get_feat_extract_output_lengths(
             inputs["attention_mask"].sum(-1)
         )
+        encoder_out = model_out["embedding"]
         return encoder_out, encoder_out_lens
 
     def ctc_logits(self, speech, speech_lengths) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -208,7 +225,7 @@ class Wav2Vec2Model(nn.Module):
 
 if __name__ == "__main__":
     # python -m src.model.wav2vec2.wav2vec2_model
-    model = Wav2Vec2Model("facebook/mms-300m")
+    model = Wav2Vec2Model("facebook/mms-300m", weighted_sum=True)
     dummy_speech = [
         torch.randn(16000),
         torch.randn(8000),

@@ -32,6 +32,7 @@ def build_wav2vec2_model(
     output_vocabsz: Optional[int] = None,
     blank_id: int = 0,
     freeze_frontend: bool = False,
+    weighted_sum: bool = False,
 ):
     """Build Wav2Vec2 model
 
@@ -40,6 +41,7 @@ def build_wav2vec2_model(
         output_vocabsz: Optional output vocabulary size
         blank_id: Blank token ID for CTC
         freeze_frontend: Whether to freeze the encoder layers
+        weighted_sum: Whether to use a weighted sum of encoder layers for CTC
 
     Returns:
         Wav2Vec2 model
@@ -48,6 +50,7 @@ def build_wav2vec2_model(
         hf_repo=hf_repo,
         output_vocabsz=output_vocabsz,
         blank_id=blank_id,
+        weighted_sum=weighted_sum,
     )
     log.info(f"Wav2Vec2 model loaded from {hf_repo}")
     log.info(f"Model vocab size: {model.vocab_size}")
@@ -83,6 +86,7 @@ def build_wav2vec2pr(
     ctc_config: Optional[dict] = None,
     freeze_frontend: bool = True,
     checkpoint: Optional[str] = None,
+    weighted_sum: bool = True,
 ) -> Wav2Vec2PRModel:
     """Build Wav2Vec2 Phone Recognition model.
 
@@ -92,6 +96,7 @@ def build_wav2vec2pr(
         ctc_config: Optional dict of CTC configuration
         freeze_frontend: Whether to freeze the feature extraction layers
         checkpoint: Optional path to a checkpoint file to load model weights
+        weighted_sum: Whether to use a weighted sum of encoder layers for CTC
 
     Returns:
         Wav2Vec2PRModel instance
@@ -112,6 +117,7 @@ def build_wav2vec2pr(
     encoder = Wav2Vec2Model(
         hf_repo=hf_repo,
         output_vocabsz=None,
+        weighted_sum=weighted_sum,
     )
     log.info(f"Wav2Vec2 encoder loaded from {hf_repo}")
 
