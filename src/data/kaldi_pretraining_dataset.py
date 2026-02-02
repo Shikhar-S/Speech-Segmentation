@@ -12,6 +12,7 @@ import lightning as L
 from lightning.pytorch.utilities import CombinedLoader
 from typing import Optional, Dict, List, Union
 from tqdm import tqdm
+import panphon  # 0.22.2
 
 from src.utils import RankedLogger
 
@@ -39,6 +40,7 @@ class KaldiDataset(Dataset):
         self.wav_scp = self._load_wav_scp(wav_scp_file, limit_samples)
         self.text = self._load_text(text_file, limit_samples)
         self.key2lang = self._extract_language(lang_file, limit_samples)
+        self.ipa_segmenter = panphon.FeatureTable()
         if read_asr_text:
             # lang file also has asr text
             self.asr_text = self._load_asr_text(lang_file, limit_samples)
@@ -195,10 +197,12 @@ class KaldiDataset(Dataset):
         """
         if self.vocab is None:
             raise ValueError("Vocabulary not loaded. Provide vocab_file parameter.")
-        tokens = [
-            self.vocab.get(token.strip(), self.unk_id)
-            for token in text.strip("/").split("//")
-        ]
+        tokens = []
+        for ipastr in text.split("/"):
+            if not ipastr:
+                continue
+            for ipasym in self.ipa_segmenter.ipa_segs(ipastr):
+                tokens.append(self.vocab.get(ipasym, self.unk_id))
         return tokens
 
     def __len__(self):
