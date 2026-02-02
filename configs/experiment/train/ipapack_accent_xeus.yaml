@@ -24,10 +24,10 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   min_epochs: 0
   max_epochs: -1
-  max_steps: 100000
+  max_steps: 40000
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
-  val_check_interval: 500
+  val_check_interval: 2000
   check_val_every_n_epoch: null
   log_every_n_steps: 200
 
@@ -38,12 +38,12 @@ data:
   dataset_config_path: configs/data/ipapack_index.yaml
   vocab_file: ${model.net.vocab_file}
   batch_size: 16
-  num_workers: 5
+  num_workers: 6
 
 model:
   dev_splits: ${data.dev_splits}
   optimizer:
-    lr: 0.00005
+    lr: 0.00003
   scheduler:
     _target_: src.recipe.phone_recognition.model_module.get_w2v2ph_schedule
     _partial_: true
