@@ -1570,23 +1570,9 @@ def get_substitutions(lang_code, eng_phoneme):
         return [eng_phoneme]  # No data, return original
 
     lang_map = ENGLISH_PHONEME_SUBSTITUTIONS[lang_code]
-    return lang_map.get(eng_phoneme, [eng_phoneme])
-
-
-# Helper function to get primary (most common) substitution
-def get_primary_substitution(lang_code, eng_phoneme):
-    """
-    Get the primary (most common) substitution for an English phoneme.
-
-    Args:
-        lang_code: ISO 639-3 language code
-        eng_phoneme: English IPA phoneme
-
-    Returns:
-        str: Primary substitution (first in list)
-    """
-    substitutions = get_substitutions(lang_code, eng_phoneme)
-    return substitutions[0]
+    substitution_set = lang_map.get(eng_phoneme, [eng_phoneme])
+    substitution_set = set(substitution_set).union({eng_phoneme})
+    return list(substitution_set)
 
 
 if __name__ == "__main__":

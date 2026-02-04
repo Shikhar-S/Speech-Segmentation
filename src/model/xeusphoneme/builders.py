@@ -14,6 +14,10 @@ from src.model.xeusphoneme.xeuspr_model import XeusPRModel
 from src.model.xeusphoneme.xeuspr_inference import XeusPRInference
 from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger
+from src.model.xeusphoneme.resources.phonetic_substitutions import (
+    ENGLISH_PHONEME_SUBSTITUTIONS,
+    get_substitutions,
+)
 
 log = RankedLogger(__name__, rank_zero_only=False)
 
@@ -56,6 +60,93 @@ def build_panphon_distance_matrix(vocab: list[str]) -> torch.Tensor:
     dist_matrix = dist_matrix / dist_matrix.max()
     dist_matrix.fill_diagonal_(0.0)
     log.info(f"Built panphon distance matrix with shape {dist_matrix.shape}")
+    return dist_matrix
+
+
+def build_diacritic_distance_matrix(vocab: list[str]) -> torch.Tensor:
+    """
+    Distance matrix where phones in the same "base-variant set" have distance 0,
+    and all others have distance 1. Handles affricates like 'd͡ʒ' / 't͡ɕʰ' as a single unit.
+    Using this effectively reduces vocabulary size.
+    """
+
+    def base_key(s: str) -> str:
+        if not s:
+            return ""
+        # affricate/connected: base is first 3 codepoints, e.g. "t͡ɕ"
+        return s[:3] if len(s) >= 3 and s[1] == "͡" else s[0]
+
+    # build base index: base_key -> list of symbol strings
+    base_idx: dict[str, list[str]] = {}
+    for s in vocab:
+        k = base_key(s)
+        if k:
+            base_idx.setdefault(k, []).append(s)
+
+    def same_base_variants(sym: str) -> list[str]:
+        if not sym:
+            return []
+        if len(sym) >= 3 and sym[1] == "͡":
+            base = sym[:3]  # e.g. "t͡ɕ"
+            # only those that truly share the connected base (diacritics may follow)
+            return [s for s in base_idx.get(base, []) if s.startswith(base)]
+        return base_idx.get(sym[0], [])
+
+    V = len(vocab)
+    dist_matrix = torch.ones((V, V), dtype=torch.float32)
+    dist_matrix.fill_diagonal_(0.0)
+
+    # string -> id (assumes vocab[i] is token i)
+    sid = {s: i for i, s in enumerate(vocab)}
+
+    # set dist_matrix=0 within each base-variant set
+    for s in vocab:
+        ids = [sid[t] for t in same_base_variants(s) if t in sid]
+        if len(ids) <= 1:
+            continue
+        idx = torch.tensor(ids, dtype=torch.long)
+        dist_matrix[idx[:, None], idx[None, :]] = 0.0
+
+    return dist_matrix
+
+
+def build_manual_distance_matrix(vocab: list[str]) -> torch.Tensor:
+    """
+    Distance matrix derived from ENGLISH_PHONEME_SUBSTITUTIONS / get_substitutions:
+
+    For each source symbol x (treated as an "English phoneme" key), define its neighbor set
+    as the UNION over all languages of get_substitutions(lang, x), intersected with vocab.
+
+    Distance is:
+      - 0 if y is in that union-substitution set for x (and symmetric closure is applied)
+      - 1 otherwise
+
+    Notes:
+      - We also include x itself via get_substitutions' behavior.
+      - We symmetrize to make dist[i,j]==dist[j,i].
+    """
+    V = len(vocab)
+    sid = {s: i for i, s in enumerate(vocab)}
+    langs = list(ENGLISH_PHONEME_SUBSTITUTIONS.keys())
+
+    dist_matrix = torch.ones((V, V), dtype=torch.float32)
+    dist_matrix.fill_diagonal_(0.0)
+
+    # Build directed edges x -> y if y is a substitution of x in ANY language (union).
+    edges = [set() for _ in range(V)]
+    for x in vocab:
+        i = sid[x]
+        union_syms = set()
+        for lang in langs:
+            union_syms.update(get_substitutions(lang, x))
+        edges[i] = {sid[y] for y in union_syms if y in sid}
+
+    # Symmetric closure: i~j if i->j or j->i
+    for i in range(V):
+        for j in edges[i]:
+            dist_matrix[i, j] = 0.0
+            dist_matrix[j, i] = 0.0
+
     return dist_matrix
 
 
@@ -115,8 +206,14 @@ def build_xeus_pr(
     encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
 
     ctc_config = ctc_config or getattr(args, "ctc_conf", {})
-    if ctc_config.get("ctc_type", "builtin") == "articulatory_ctc":
+    if ctc_config.get("ctc_type", "builtin") == "panphon_distance":
         dist_matrix = build_panphon_distance_matrix(token_list)
+        ctc_config["artctc_dist"] = dist_matrix
+    elif ctc_config.get("ctc_type", "builtin") == "diacritic_distance":
+        dist_matrix = build_diacritic_distance_matrix(token_list)
+        ctc_config["artctc_dist"] = dist_matrix
+    elif ctc_config.get("ctc_type", "builtin") == "manual_distance":
+        dist_matrix = build_manual_distance_matrix(token_list)
         ctc_config["artctc_dist"] = dist_matrix
     # Build CTC
     ctc = CTC(
@@ -246,45 +343,3 @@ def build_xeus_pr_inference(
     )
     inference_obj = XeusPRInference(model, device=device, dtype=dtype)
     return inference_obj
-
-
-if __name__ == "__main__":
-    # python -m src.model.xeusphoneme.builders
-    import torch
-    import numpy as np
-
-    vocab_path = "src/model/xeusphoneme/resources/ipa_vocab.json"
-    V = json.load(open(vocab_path))
-    revV = {v: k for k, v in V.items()}
-    print("Loaded vocab of size:", len(V))
-    dist_matrix = build_panphon_distance_matrix(vocab=list(V.keys()))
-    print("Distance matrix shape:", dist_matrix.shape)
-    TOPK = 10
-    BETA = 80.0
-    THRESH = 100
-    BLANK_ID = 0
-    mxlen = 0
-    for sym in V:
-        p = V[sym]
-        drow = torch.as_tensor(dist_matrix[p], dtype=torch.float32).clone()
-        drow[BLANK_ID] = float("inf")
-        k = min(TOPK, len(V) - 1)
-        cand = torch.topk(drow, k=k, largest=False).indices
-        if not (cand == p).any().item():
-            cand = torch.cat([cand[:-1], torch.tensor([p], dtype=cand.dtype)])
-        logits = -BETA * drow[cand]  # shape (k,)
-        scores = torch.log_softmax(logits, dim=0)  # log-probs
-        keep = drow[cand] < THRESH
-        cand_keep = cand[keep].tolist()
-        scores_keep = scores[keep].tolist()
-        mxlen = max(mxlen, len(cand_keep))
-        if True or sym == "bʰ":
-            pairs = sorted(zip(cand_keep, scores_keep), key=lambda x: x[0])
-            print(
-                f"Neighbors shown (dist<{THRESH}) for {sym}:",
-                sorted(
-                    [(revV[i], s) for i, s in pairs], key=lambda x: x[1], reverse=True
-                ),
-                sorted([drow[i].item() for i in cand_keep]),
-            )
-    print("Max neighbors with dist < 0.02 (shown):", mxlen)

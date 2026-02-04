@@ -25,11 +25,11 @@ class ArticulatoryCTC(torch.nn.Module):
     def __init__(
         self,
         dist: torch.Tensor,  # (V, V) articulatory distance matrix
-        beta: float = 1.0,  # larger => harsher penalty for far substitutions
-        topk: int = 8,  # number of allowed substitutions per target token
+        beta: float = 50.0,  # larger => harsher penalty for far substitutions
+        topk: int = 5,  # number of allowed substitutions per target token
         normalize: bool = True,  # if True, per-position substitution weights are log-softmaxed
         modified_topo: bool = False,  # if True, skip blanks in CTC topology, efficient but approx
-        output_beam: float = 1e20,  # set huge to mimic "no pruning"
+        output_beam: float = 200,
         use_double_scores: bool = True,  # float scores in double precision
     ):
         super().__init__()
