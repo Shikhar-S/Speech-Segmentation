@@ -7,6 +7,11 @@ from src.model.wav2vec2.wav2vec2_inference import Wav2Vec2Inference
 from src.model.wav2vec2.wav2vec2pr_model import Wav2Vec2PRModel
 from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger
+from src.model.xeusphoneme.builders import (
+    build_diacritic_distance_matrix,
+    build_manual_distance_matrix,
+    build_panphon_distance_matrix,
+)
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -123,6 +128,15 @@ def build_wav2vec2pr(
 
     # Build CTC module
     ctc_config = ctc_config or {}
+    if ctc_config.get("ctc_type", "builtin") == "panphon_distance":
+        dist_matrix = build_panphon_distance_matrix(token_list)
+        ctc_config["artctc_dist"] = dist_matrix
+    elif ctc_config.get("ctc_type", "builtin") == "diacritic_distance":
+        dist_matrix = build_diacritic_distance_matrix(token_list)
+        ctc_config["artctc_dist"] = dist_matrix
+    elif ctc_config.get("ctc_type", "builtin") == "manual_distance":
+        dist_matrix = build_manual_distance_matrix(token_list)
+        ctc_config["artctc_dist"] = dist_matrix
     ctc = CTC(
         odim=vocab_size,
         encoder_output_size=encoder.encoder_output_size(),
