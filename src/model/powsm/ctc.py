@@ -72,11 +72,17 @@ class CTC(torch.nn.Module):
             self.ctc_loss = BayesRiskCTC(
                 brctc_risk_strategy, brctc_group_strategy, brctc_risk_factor
             )
-        elif self.ctc_type == "articulatory_ctc":
+        elif self.ctc_type in [
+            "panphon_distance",
+            "diacritic_distance",
+            "manual_distance",
+        ]:
             try:
                 import k2  # noqa
             except ImportError:
-                raise ImportError("You should install K2 to use Articulatory CTC")
+                raise ImportError(
+                    "You should install K2 to use panphon/diacritic/manual distance CTC"
+                )
 
             from src.model.powsm.articulatory_ctc import ArticulatoryCTC
 
@@ -96,7 +102,12 @@ class CTC(torch.nn.Module):
         if (
             self.ctc_type == "builtin"
             or self.ctc_type == "brctc"
-            or self.ctc_type == "articulatory_ctc"
+            or self.ctc_type
+            in [
+                "panphon_distance",
+                "diacritic_distance",
+                "manual_distance",
+            ]
         ):
             th_pred = th_pred.log_softmax(2).float()
             loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
@@ -186,7 +197,11 @@ class CTC(torch.nn.Module):
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
 
-        if self.ctc_type == "brctc" or self.ctc_type == "articulatory_ctc":
+        if self.ctc_type == "brctc" or self.ctc_type in [
+            "panphon_distance",
+            "diacritic_distance",
+            "manual_distance",
+        ]:
             loss = self.loss_fn(ys_hat, ys_pad, hlens, ys_lens).to(
                 device=hs_pad.device, dtype=hs_pad.dtype
             )
