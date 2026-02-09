@@ -22,7 +22,9 @@ from src.utils import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=False)
 
 
-def load_token_list(token_list_source: Union[str, List[str], Tuple[str, ...]]) -> List[str]:
+def load_token_list(
+    token_list_source: Union[str, List[str], Tuple[str, ...]],
+) -> List[str]:
     """Load token list from file path or return as-is if already a list.
 
     Args:
@@ -173,7 +175,12 @@ def resolve_model_paths(
     stats = stats_file or str(root / rel_stats)
 
     if hf_repo:
-        needs_download = force_download or (not Path(cfg).exists()) or (not Path(mdl).exists()) or (not Path(stats).exists())
+        needs_download = (
+            force_download
+            or (not Path(cfg).exists())
+            or (not Path(mdl).exists())
+            or (not Path(stats).exists())
+        )
         if needs_download:
             download_hf_snapshot(
                 repo_id=hf_repo,
@@ -187,6 +194,7 @@ def resolve_model_paths(
     assert Path(stats).exists(), f"Stats file not found: {stats}"
 
     return cfg, mdl, stats
+
 
 # Relative paths from hf repo structure (espnet style)
 # TODO(shikhar): Convert to patterns and match patterns within downloaded files.
@@ -204,5 +212,3 @@ POWSM_CTC_REL_CONFIG = "exp/temp/config.yaml"
 POWSM_CTC_REL_CKPT = "exp/temp/valid.total_count.ave.till70epoch.pth"
 POWSM_CTC_REL_STATS = "exp/s2t_stats_raw_bpe40000/train/feats_stats.npz"
 POWSM_CTC_REL_BPE = "data/token_list/bpe_unigram40000/bpe.model"
-
-

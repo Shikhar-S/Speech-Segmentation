@@ -4,3 +4,4 @@ dataset_config_path: configs/data/powsm_evalset_index.yaml
 data_dir: /work/hdd/bbjs/shared/powsm/s2t1/dump/raw
 portable_wavscp: False
 num_workers: 1
+batch_size: 2

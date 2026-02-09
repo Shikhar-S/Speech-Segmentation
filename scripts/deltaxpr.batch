@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH -c 16
 #SBATCH --mem=62G
-#SBATCH -t 24:00:00
+#SBATCH -t 2:00:00
 #SBATCH -o exp/slurm_logs/%A_%a.out
 #SBATCH -e exp/slurm_logs/%A_%a.out
 

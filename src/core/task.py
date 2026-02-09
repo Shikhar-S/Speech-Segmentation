@@ -8,6 +8,7 @@ import os
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
+import torch
 from src.core.distributed_inference import run_distributed_inference_
 
 from src.utils import (
@@ -25,15 +26,32 @@ class Task:
         self.task_cfg = cfg
         self.name = cfg.get("task_name", "Task")
 
+    def _load_partial_ckpt_for_training(
+        self, model: LightningModule, ckpt_path: str
+    ) -> None:
+        if not ckpt_path:
+            return
+        log.info(f"Loading (non-strict) checkpoint weights from: {ckpt_path}")
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        state_dict = ckpt.get(
+            "state_dict", ckpt
+        )  # handle raw state_dict checkpoints too
+        load_info = model.load_state_dict(state_dict, strict=False)
+        if load_info:
+            log.info(f"Missing keys when loading checkpoint: {load_info.missing_keys}")
+            log.info(
+                f"Unexpected keys when loading checkpoint: {load_info.unexpected_keys}"
+            )
+
     def train(
         self, trainer: Trainer, model: LightningModule, datamodule: LightningDataModule
     ) -> Tuple[Dict[str, Any], str]:
         log.info("Starting training!")
+        if self.task_cfg.get("ckpt_path") is not None:
+            self._load_partial_ckpt_for_training(model, self.task_cfg.ckpt_path)
         trainer.fit(
             model=model,
             datamodule=datamodule,
-            ckpt_path=self.task_cfg.get("ckpt_path"),
-            weights_only=False,
         )
         ckpt_cb = getattr(trainer, "checkpoint_callback", None)
         ckpt_path = getattr(ckpt_cb, "best_model_path", "") if ckpt_cb else ""
