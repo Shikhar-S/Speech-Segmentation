@@ -31,6 +31,7 @@ class ArticulatoryCTC(torch.nn.Module):
         modified_topo: bool = False,  # if True, skip blanks in CTC topology, efficient but approx
         output_beam: float = 200,
         use_double_scores: bool = True,  # float scores in double precision
+        label_smoothing: float = 0.0,  # if >0: force (1-label_smoothing) mass on self token
     ):
         super().__init__()
         assert dist.dim() == 2 and dist.size(0) == dist.size(1), "dist must be (V, V)"
@@ -41,6 +42,9 @@ class ArticulatoryCTC(torch.nn.Module):
         self.modified_topo = bool(modified_topo)
         self.output_beam = float(output_beam)
         self.use_double_scores = bool(use_double_scores)
+
+        self.label_smoothing = float(label_smoothing)
+        assert 0.0 <= self.label_smoothing < 1.0, "label_smoothing must be in [0, 1)."
 
         self._topo = None  # cached per-device topo
 
@@ -117,6 +121,69 @@ class ArticulatoryCTC(torch.nn.Module):
             )
         return self._topo
 
+    def _rescore_candidates(
+        self, p: int, cand: List[int], dist: torch.Tensor, device: torch.device
+    ) -> torch.Tensor:
+        """
+        Returns per-candidate arc scores aligned with `cand`.
+
+        Base logits: s_c = -beta * dist[p, c]
+        If normalize: scores = log_softmax(logits)
+        If label_smoothing > 0:
+          force P(self)=1-label_smoothing, and distribute label_smoothing over others
+          proportionally to the base distribution over others.
+        """
+        # raw logits from distance
+        logits = torch.tensor(
+            [-self.beta * float(dist[p, c].item()) for c in cand],
+            device=device,
+            dtype=torch.float32,
+        )
+
+        # no smoothing: keep existing behavior exactly
+        if self.label_smoothing <= 0.0:
+            return torch.log_softmax(logits, dim=0) if self.normalize else logits
+
+        # smoothing requires probabilities; use log-probs internally
+        logp = torch.log_softmax(logits, dim=0)
+
+        cand_t = torch.tensor(cand, device=device, dtype=torch.long)
+        self_pos = (cand_t == int(p)).nonzero(as_tuple=False)
+        self_i = int(self_pos[0].item())
+
+        # if there are no "other" candidates, put all mass on self
+        if len(cand) == 1:
+            forced = torch.empty_like(logp)
+            forced[0] = 0.0  # log(1)
+            return forced if self.normalize else forced  # log-scores are fine
+
+        eps = self.label_smoothing
+        p_self = 1.0 - eps
+
+        mask = torch.ones(len(cand), dtype=torch.bool, device=device)
+        mask[self_i] = False
+
+        # renormalize others relative to their base distribution
+        logp_other = torch.log_softmax(
+            logp[mask], dim=0
+        )  # stable; equivalent to log-softmax(logits_other)
+
+        forced = torch.empty_like(logp)
+        forced[self_i] = torch.log(
+            torch.tensor(p_self, device=device, dtype=torch.float32)
+        )
+        forced[mask] = logp_other + torch.log(
+            torch.tensor(eps, device=device, dtype=torch.float32)
+        )
+
+        # Return forced log-probs (recommended). If normalize=False, we still return log-probs
+        # because the guarantee ">=0.8 on self" is defined in probability space.
+        if not self.normalize:
+            logging.warning(
+                "label_smoothing>0 requested but normalize=False; returning log-prob scores anyway."
+            )
+        return forced
+
     def _build_weighted_transcript_fsa(
         self, y: List[int], V: int, device: torch.device
     ) -> k2.Fsa:
@@ -145,16 +212,7 @@ class ArticulatoryCTC(torch.nn.Module):
 
             cand = cand.tolist()
 
-            # scores = -beta * dist[p, c]
-            scores = torch.tensor(
-                [-self.beta * float(dist[p, c].item()) for c in cand],
-                device=device,
-                dtype=torch.float32,
-            )
-
-            if self.normalize:
-                scores = torch.log_softmax(scores, dim=0)
-
+            scores = self._rescore_candidates(p=p, cand=cand, dist=dist, device=device)
             # Sort by candidate label to ensure arc-sorted FSA (required by k2)
             cand_score_pairs = sorted(zip(cand, scores.tolist()), key=lambda x: x[0])
 
@@ -191,20 +249,187 @@ class ArticulatoryCTC(torch.nn.Module):
         return ys, min_hlens
 
 
+# if __name__ == "__main__":
+#     # python -m src.model.powsm.articulatory_ctc
+#     V = 5
+#     dist = torch.randn(V, V)
+#     dist = (dist + dist.t()).abs()  # make it symmetric and non-negative
+
+#     model = ArticulatoryCTC(dist=dist, beta=1.0, topk=3)
+
+#     B, T = 2, 10
+#     nnet_output = torch.randn(B, T, V).log_softmax(dim=-1)
+
+#     ys_pad = torch.tensor([[1, 2, 3, 0, 0], [2, 2, 4, 3, 0]])
+#     hlens = torch.tensor([10, 8])
+#     ylens = torch.tensor([3, 4])
+
+#     loss_utt = model(nnet_output, ys_pad, hlens, ylens)
+#     print(loss_utt)
+
+
+def create_network_output(sequence_labels, T, V, temperature=1.0):
+    """
+    Create network output that strongly predicts the given sequence.
+
+    Args:
+        sequence_labels: list of label indices (including blank=0)
+        T: total number of timesteps
+        V: vocabulary size
+        temperature: softmax temperature (lower = more confident)
+    """
+    B = 1
+    nnet_output = torch.zeros(B, T, V)
+
+    # Distribute sequence across timesteps
+    for t, label in enumerate(sequence_labels[:T]):
+        nnet_output[0, t, label] = 10.0 / temperature
+
+    # Fill remaining timesteps with blank
+    for t in range(len(sequence_labels), T):
+        nnet_output[0, t, 0] = 10.0 / temperature
+
+    return torch.log_softmax(nnet_output, dim=-1)
+
+
+def test_sequence(
+    model, sequence_labels, sequence_name, target_ys_pad, hlens, ylens, V
+):
+    """Test a specific sequence against the target."""
+    T = max(len(sequence_labels), 5)  # Ensure enough timesteps
+    nnet_output = create_network_output(sequence_labels, T, V)
+
+    # Adjust hlens to match T
+    hlens_adjusted = torch.tensor([T])
+
+    try:
+        loss = model(nnet_output, target_ys_pad, hlens_adjusted, ylens)
+        loss_val = loss.item()
+        status = "✓ ACCEPTED" if loss_val < 5 else "? UNCLEAR"
+        if loss_val == float("inf"):
+            status = "✗ REJECTED"
+    except Exception as e:
+        loss_val = float("inf")
+        status = "✗ REJECTED (error)"
+
+    return sequence_name, loss_val, status
+
+
 if __name__ == "__main__":
     # python -m src.model.powsm.articulatory_ctc
+    print("=" * 70)
+    print("TESTING ArticulatoryCTC: Which sequences match target 'CAT'?")
+    print("=" * 70)
+
+    # Setup
+    # Vocabulary: {blank=0, C=1, A=2, T=3, E=4}
     V = 5
-    dist = torch.randn(V, V)
-    dist = (dist + dist.t()).abs()  # make it symmetric and non-negative
+    label_names = ["blank", "C", "A", "T", "E"]
 
-    model = ArticulatoryCTC(dist=dist, beta=1.0, topk=3)
+    # Create distance matrix where A and E are close
+    dist = torch.zeros(V, V)
+    for i in range(V):
+        dist[i, i] = 0.0  # Self-distance is 0
 
-    B, T = 2, 10
-    nnet_output = torch.randn(B, T, V).log_softmax(dim=-1)
+    # A (2) and E (4) are close
+    dist[2, 4] = 0.1
+    dist[4, 2] = 0.1
 
-    ys_pad = torch.tensor([[1, 2, 3, 0, 0], [2, 2, 4, 3, 0]])
-    hlens = torch.tensor([10, 8])
-    ylens = torch.tensor([3, 4])
+    # All other non-self distances are large
+    for i in range(V):
+        for j in range(V):
+            if i != j and dist[i, j] == 0:
+                dist[i, j] = 10.0
 
-    loss_utt = model(nnet_output, ys_pad, hlens, ylens)
-    print(loss_utt)
+    print("\nDistance Matrix:")
+    print("        " + "  ".join(f"{name:5s}" for name in label_names))
+    for i, label in enumerate(label_names):
+        row_str = " ".join(f"{dist[i, j].item():5.1f}" for j in range(V))
+        print(f"{label:5s}   {row_str}")
+
+    # Create model
+    model = ArticulatoryCTC(dist=dist, beta=10.0, topk=2, normalize=True)
+
+    # Target: CAT = [C=1, A=2, T=3]
+    target_ys_pad = torch.tensor([[1, 2, 3]])
+    ylens = torch.tensor([3])
+    hlens = torch.tensor([7])  # Will be adjusted per test
+
+    print("\n" + "=" * 70)
+    print("TARGET: CAT (indices [1, 2, 3])")
+    print("=" * 70)
+
+    # Test cases: (sequence_labels, name)
+    # Note: 0 = blank
+    test_cases = [
+        # Exact matches
+        ([1, 2, 3], "CAT (exact)"),
+        ([0, 1, 0, 2, 0, 3, 0], "blank-C-blank-A-blank-T-blank"),
+        ([1, 1, 2, 2, 3, 3], "CCAATT (with repeats)"),
+        # E substituting for A
+        ([1, 4, 3], "CET (E substitutes A)"),
+        ([0, 1, 0, 4, 0, 3, 0], "blank-C-blank-E-blank-T-blank"),
+        ([1, 4, 4, 3], "CEET (E repeated)"),
+        # Both A and E - should be REJECTED
+        ([1, 2, 4, 3], "CAET (both A and E)"),
+        ([1, 0, 2, 0, 4, 0, 3], "C-blank-A-blank-E-blank-T"),
+        ([1, 2, 2, 4, 3], "CAAET"),
+        # Missing symbols
+        ([1, 3], "CT (missing middle)"),
+        ([1, 2], "CA (missing end)"),
+        ([2, 3], "AT (missing beginning)"),
+        # Wrong symbols at positions
+        ([1, 3, 3], "CTT (wrong at pos 1)"),
+        ([4, 2, 3], "EAT (E at pos 0, not allowed)"),
+        ([1, 1, 3], "CCT (C repeated at pos 1)"),
+        # Extra symbols
+        ([1, 2, 3, 1], "CATC (extra at end)"),
+        ([1, 2, 1, 3], "CACT (extra in middle)"),
+    ]
+
+    print("\nTest Results:")
+    print("-" * 70)
+    print(f"{'Sequence':<35} {'Loss':>12} {'Status':>15}")
+    print("-" * 70)
+
+    results = []
+    for seq_labels, seq_name in test_cases:
+        name, loss, status = test_sequence(
+            model, seq_labels, seq_name, target_ys_pad, hlens, ylens, V
+        )
+        results.append((name, loss, status))
+
+        # Format loss display
+        if loss == float("inf"):
+            loss_str = "inf"
+        elif loss > 1000:
+            loss_str = f"{loss:.2e}"
+        else:
+            loss_str = f"{loss:.4f}"
+
+        print(f"{name:<35} {loss_str:>12} {status:>15}")
+
+    # Summary
+    print("\n" + "=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+
+    accepted = [r for r in results if "ACCEPTED" in r[2]]
+    rejected = [r for r in results if "REJECTED" in r[2]]
+
+    print(f"\n✓ ACCEPTED ({len(accepted)}):")
+    for name, loss, status in accepted:
+        print(f"  - {name}")
+
+    print(f"\n✗ REJECTED ({len(rejected)}):")
+    for name, loss, status in rejected:
+        print(f"  - {name}")
+
+    print("\n" + "=" * 70)
+    print("KEY FINDINGS:")
+    print("=" * 70)
+    print("1. CAT (exact match): Should be accepted")
+    print("2. CET (E for A): Should be accepted (A and E are neighbors)")
+    print("3. CAET (both A and E): Should be REJECTED (4 positions vs 3 in target)")
+    print("4. CT (missing symbol): Depends on CTC topology and blanks")
+    print("=" * 70)

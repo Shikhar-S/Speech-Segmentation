@@ -38,6 +38,7 @@ class CTC(torch.nn.Module):
         artctc_beta: float = 1.0,
         artctc_topk: int = 8,
         artctc_normalize: bool = True,
+        artctc_label_smoothing: float = 0.0,
     ):
         super().__init__()
         eprojs = encoder_output_size
@@ -91,6 +92,7 @@ class CTC(torch.nn.Module):
                 beta=artctc_beta,
                 topk=artctc_topk,
                 normalize=artctc_normalize,
+                label_smoothing=artctc_label_smoothing,
             )
 
         else:
