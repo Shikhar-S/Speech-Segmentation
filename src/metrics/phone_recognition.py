@@ -249,7 +249,10 @@ class PhoneRecognitionEvaluator:
         return get_inventory_metrics(ref_inventory, pred_inventory, search_max=True)
 
     def evaluate(
-        self, test_data: Dict[str, Dict[str, Any]], compute_inventory: bool = True
+        self,
+        test_data: Dict[str, Dict[str, Any]],
+        compute_inventory: bool = True,
+        tqdm_enabled: bool = True,
     ) -> Tuple[PhoneRecognitionSummary, Dict[str, Dict[str, float]]]:
         """
         Evaluate a full dataset.
@@ -287,9 +290,13 @@ class PhoneRecognitionEvaluator:
         ins_err_sum = 0
         del_err_sum = 0
 
-        for utt_id, sample in tqdm(
-            test_data.items(), total=len(test_data), desc="Evaluating", leave=False
-        ):
+        iterator = test_data.items()
+        if tqdm_enabled:
+            iterator = tqdm(
+                iterator, total=len(test_data), desc="Evaluating", leave=False
+            )
+
+        for utt_id, sample in iterator:
             hyp = sample.get("prediction", "")
             ref = sample.get("transcription", "")
 
