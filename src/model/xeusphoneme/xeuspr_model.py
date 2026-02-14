@@ -84,7 +84,7 @@ class XeusPRModel(torch.nn.Module):
     def forward(self, speech, speech_lengths, text, text_lengths, **kwargs):
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
         loss_ctc, stats = self._calc_ctc_loss(
-            encoder_out, encoder_out_lens, text, text_lengths
+            encoder_out, encoder_out_lens, text, text_lengths, **kwargs
         )
         loss, stats, weight = force_gatherable(
             (loss_ctc, stats, speech.shape[0]), loss_ctc.device
@@ -168,10 +168,16 @@ class XeusPRModel(torch.nn.Module):
         lengths = torch.clamp(lengths, max=max_length)
         return out, lengths
 
-    def _calc_ctc_loss(self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens):
+    def _calc_ctc_loss(self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens, **kwargs):
         ys_pad = torch.where(ys_pad == -1, self.ignore_id, ys_pad)
         ys_pad = ys_pad[:, : ys_pad_lens.max()]
-        loss_ctc = self.ctc(encoder_out, encoder_out_lens, ys_pad, ys_pad_lens)
+        loss_ctc = self.ctc(
+            encoder_out,
+            encoder_out_lens,
+            ys_pad,
+            ys_pad_lens,
+            lang_sym=kwargs.get("lang_sym"),
+        )
         stats = {}
         assert self.error_calculator is not None, "ErrorCalculator not initialized"
         if not self.training:  # err calc, slow?

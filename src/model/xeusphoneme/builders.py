@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Tuple
 import argparse
 import yaml
 import json
@@ -150,6 +150,67 @@ def build_manual_distance_matrix(vocab: list[str]) -> torch.Tensor:
     return dist_matrix
 
 
+def matrix_to_neighbor_lists(
+    dist: torch.Tensor,
+    topk: int,
+    blank_id: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Convert (V, V) distance matrix to compact neighbor lists: at most topk-1 others
+    per phone (self excluded, always implied). Blank is never a neighbor.
+
+    Returns:
+        neighbor_ids: (V, topk - 1) int64, -1 for unused slots
+        neighbor_dists: (V, topk - 1) float32
+    """
+    V = dist.size(0)
+    k_others = max(0, topk - 1)
+    neighbor_ids = torch.full((V, k_others), -1, dtype=torch.long)
+    neighbor_dists = torch.zeros((V, k_others), dtype=torch.float32)
+    if k_others == 0:
+        return neighbor_ids, neighbor_dists
+    dist = dist.clone()
+    dist[:, blank_id] = float("inf")
+    k_actual = min(topk, V)
+    for p in range(V):
+        idx = torch.topk(dist[p], k=k_actual, largest=False).indices
+        others = idx[idx != p][:k_others]
+        n = others.size(0)
+        neighbor_ids[p, :n] = others
+        neighbor_dists[p, :n] = dist[p, others]
+    return neighbor_ids, neighbor_dists
+
+
+def build_language_specific_distance_matrix(vocab: list[str], lang_code: str) -> torch.Tensor:
+    """
+    Distance matrix for one language: 0 between phoneme pairs that are
+    substitutions of each other for that language (from get_substitutions),
+    1 otherwise. Diagonal 0, symmetric.
+    """
+    V = len(vocab)
+    sid = {s: i for i, s in enumerate(vocab)}
+    dist_matrix = torch.ones((V, V), dtype=torch.float32)
+    dist_matrix.fill_diagonal_(0.0)
+    edges = [set() for _ in range(V)]
+    for x in vocab:
+        i = sid[x]
+        subs = get_substitutions(lang_code, x)
+        edges[i] = {sid[y] for y in subs if y in sid}
+    for i in range(V):
+        for j in edges[i]:
+            dist_matrix[i, j] = 0.0
+            dist_matrix[j, i] = 0.0
+    return dist_matrix
+
+
+def build_all_language_distance_matrices(vocab: list[str]) -> Dict[str, torch.Tensor]:
+    """Returns dict lang_code -> (V, V) distance matrix for each language in ENGLISH_PHONEME_SUBSTITUTIONS."""
+    return {
+        lang: build_language_specific_distance_matrix(vocab, lang)
+        for lang in ENGLISH_PHONEME_SUBSTITUTIONS.keys()
+    }
+
+
 def build_xeus_pr(
     config_file: str,
     checkpoint: Optional[str] = None,
@@ -206,15 +267,33 @@ def build_xeus_pr(
     encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
 
     ctc_config = ctc_config or getattr(args, "ctc_conf", {})
+    topk = ctc_config.get("artctc_topk", 8)
     if ctc_config.get("ctc_type", "builtin") == "panphon_distance":
         dist_matrix = build_panphon_distance_matrix(token_list)
-        ctc_config["artctc_dist"] = dist_matrix
+        nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
+        ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
     elif ctc_config.get("ctc_type", "builtin") == "diacritic_distance":
         dist_matrix = build_diacritic_distance_matrix(token_list)
-        ctc_config["artctc_dist"] = dist_matrix
+        nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
+        ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
     elif ctc_config.get("ctc_type", "builtin") == "manual_distance":
         dist_matrix = build_manual_distance_matrix(token_list)
-        ctc_config["artctc_dist"] = dist_matrix
+        nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
+        ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
+    elif ctc_config.get("ctc_type", "builtin") == "manual_distance_per_lang":
+        dist_by_lang = build_all_language_distance_matrices(token_list)
+        V = len(token_list)
+        # Identity (self-only): no other neighbors; use (V, 1) with -1 to avoid allocating (V, topk-1)
+        identity_ids = torch.full((V, 1), -1, dtype=torch.long)
+        identity_dists = torch.zeros((V, 1), dtype=torch.float32)
+        per_lang = {
+            lang: matrix_to_neighbor_lists(dist_by_lang[lang], topk=topk, blank_id=0)
+            for lang in dist_by_lang
+        }
+        ctc_config["artctc_neighbors_by_lang"] = {
+            "global": (identity_ids, identity_dists),
+            **per_lang,
+        }
     # Build CTC
     ctc = CTC(
         odim=vocab_size,

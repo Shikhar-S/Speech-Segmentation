@@ -5,7 +5,7 @@ Usage:
 """
 
 import logging
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 import k2
 import torch
@@ -24,9 +24,9 @@ class ArticulatoryCTC(torch.nn.Module):
 
     def __init__(
         self,
-        dist: torch.Tensor,  # (V, V) articulatory distance matrix
+        neighbors_by_lang: Dict[str, Tuple[torch.Tensor, torch.Tensor]],  # lang -> (neighbor_ids (V,k-1), neighbor_dists (V,k-1))
         beta: float = 50.0,  # larger => harsher penalty for far substitutions
-        topk: int = 5,  # number of allowed substitutions per target token
+        topk: int = 5,  # number of allowed substitutions per target token (must match k-1 in tensors + 1)
         normalize: bool = True,  # if True, per-position substitution weights are log-softmaxed
         modified_topo: bool = False,  # if True, skip blanks in CTC topology, efficient but approx
         output_beam: float = 200,
@@ -34,8 +34,11 @@ class ArticulatoryCTC(torch.nn.Module):
         label_smoothing: float = 0.0,  # if >0: force (1-label_smoothing) mass on self token
     ):
         super().__init__()
-        assert dist.dim() == 2 and dist.size(0) == dist.size(1), "dist must be (V, V)"
-        self.register_buffer("dist", dist.float())
+        assert "global" in neighbors_by_lang, "neighbors_by_lang must contain key 'global'"
+        self._neighbors_by_lang = neighbors_by_lang
+        nids, _ = next(iter(neighbors_by_lang.values()))
+        self._V = nids.size(0)
+        # Second dim can vary by lang (e.g. 1 for identity fallback); we use actual tensor.size(1) at lookup
         self.beta = float(beta)
         self.topk = int(topk)
         self.normalize = bool(normalize)
@@ -48,7 +51,7 @@ class ArticulatoryCTC(torch.nn.Module):
 
         self._topo = None  # cached per-device topo
 
-    def forward(self, nnet_output, ys_pad, hlens, ylens):
+    def forward(self, nnet_output, ys_pad, hlens, ylens, lang_per_utt: Optional[List[str]] = None):
         # Reorder and filter invalid examples
         indices = torch.argsort(hlens, descending=True)
         ys, min_hlens = self.find_minimum_hlens(ys_pad[indices], ylens[indices])
@@ -61,13 +64,23 @@ class ArticulatoryCTC(torch.nn.Module):
         indices = indices[valid_sample_indices]
         nnet_output, hlens, ylens = nnet_output[indices], hlens[indices], ylens[indices]
         ys = [ys[i.item()] for i in valid_sample_indices]  # list[list[int]]
-        loss_utt = self.forward_core(nnet_output, ys, hlens, ylens)
+        if lang_per_utt is not None:
+            # indices at this point are original batch indices of the valid samples
+            lang_per_utt = [lang_per_utt[indices[i].item()] for i in range(len(indices))]
+        loss_utt = self.forward_core(nnet_output, ys, hlens, ylens, lang_per_utt=lang_per_utt)
         # Recover original order for the remaining valid examples
         indices2 = torch.argsort(indices)
         loss_utt = loss_utt[indices2]
         return loss_utt
 
-    def forward_core(self, nnet_output, ys: List[List[int]], hlens, ylens):
+    def forward_core(
+        self,
+        nnet_output,
+        ys: List[List[int]],
+        hlens,
+        ylens,
+        lang_per_utt: Optional[List[str]] = None,
+    ):
         """
         nnet_output: (B, T, V) log-probs (log_softmaxed)
         ys: list of target sequences (already stripped of padding), tokens in [0..V-1] but normally non-blank
@@ -85,14 +98,20 @@ class ArticulatoryCTC(torch.nn.Module):
         topo = self._get_topo(V=V, device=device)  # FSA on correct device
 
         graphs = []
-        for y in ys:
+        for b, y in enumerate(ys):
+            lang = (lang_per_utt[b] if (lang_per_utt and b < len(lang_per_utt)) else None) or "global"
+            nids, ndists = self._neighbors_by_lang.get(lang, self._neighbors_by_lang["global"])
+            nids = nids.to(device)
+            ndists = ndists.to(device)
             # IMPORTANT: CTC topo handles blank (0); transcript should NOT include blank.
             y = [int(t) for t in y if int(t) != 0]
             if len(y) == 0:
                 # Empty transcript: build trivial acceptor with final arc
                 transcript = k2.Fsa.from_str("0 1 -1 0.0\n1").to(device)
             else:
-                transcript = self._build_weighted_transcript_fsa(y, V=V, device=device)
+                transcript = self._build_weighted_transcript_fsa(
+                    y, V=V, device=device, neighbor_ids=nids, neighbor_dists=ndists
+                )
 
             transcript = k2.arc_sort(k2.add_epsilon_self_loops(transcript))
             g = k2.compose(topo, transcript, treat_epsilons_specially=False)
@@ -122,20 +141,25 @@ class ArticulatoryCTC(torch.nn.Module):
         return self._topo
 
     def _rescore_candidates(
-        self, p: int, cand: List[int], dist: torch.Tensor, device: torch.device
+        self,
+        p: int,
+        cand: List[int],
+        dist_list: List[float],
+        device: torch.device,
     ) -> torch.Tensor:
         """
         Returns per-candidate arc scores aligned with `cand`.
+        dist_list[i] is the distance for cand[i]; self has distance 0.
 
-        Base logits: s_c = -beta * dist[p, c]
+        Base logits: s_c = -beta * dist_list[i]
         If normalize: scores = log_softmax(logits)
         If label_smoothing > 0:
           force P(self)=1-label_smoothing, and distribute label_smoothing over others
           proportionally to the base distribution over others.
         """
-        # raw logits from distance
+        assert len(dist_list) == len(cand)
         logits = torch.tensor(
-            [-self.beta * float(dist[p, c].item()) for c in cand],
+            [-self.beta * float(d) for d in dist_list],
             device=device,
             dtype=torch.float32,
         )
@@ -185,42 +209,36 @@ class ArticulatoryCTC(torch.nn.Module):
         return forced
 
     def _build_weighted_transcript_fsa(
-        self, y: List[int], V: int, device: torch.device
+        self,
+        y: List[int],
+        V: int,
+        device: torch.device,
+        neighbor_ids: torch.Tensor,
+        neighbor_dists: torch.Tensor,
     ) -> k2.Fsa:
         """
         Build an acceptor with states 0..L, arcs i->i+1 with label=c and score=log_prior(p->c).
+        neighbor_ids, neighbor_dists: (V, k_others); self is not stored, always first in cand with dist 0.
+        k_others can vary by language (e.g. 1 for identity/"global" fallback).
         """
-        dist = self.dist.to(device)
-
+        assert neighbor_ids.size(0) == V and neighbor_dists.shape == neighbor_ids.shape
+        k_others = neighbor_ids.size(1)
         lines = []
         L = len(y)
         for i, p in enumerate(y):
             p = int(p)
-            # distances from p to all candidates
-            drow = dist[p].clone()
-            # disallow blank in transcript lattice
-            drow[0] = float("inf")
-
-            k = min(self.topk, V - 1)
-            cand = torch.topk(drow, k=k, largest=False).indices
-            # ensure self included
-            if not (cand == p).any().item():
-                logging.warning("Check distance, distance to self should be 0!")
-                cand = torch.cat(
-                    [cand[:-1], torch.tensor([p], device=device, dtype=cand.dtype)]
-                )
-
-            cand = cand.tolist()
-
-            scores = self._rescore_candidates(p=p, cand=cand, dist=dist, device=device)
-            # Sort by candidate label to ensure arc-sorted FSA (required by k2)
+            assert 0 <= p < V, f"phone index {p} out of range [0, {V})"
+            cand = [p]
+            dist_list = [0.0]
+            for j in range(k_others):
+                c = neighbor_ids[p, j].item()
+                if c >= 0:
+                    cand.append(c)
+                    dist_list.append(neighbor_dists[p, j].item())
+            scores = self._rescore_candidates(p=p, cand=cand, dist_list=dist_list, device=device)
             cand_score_pairs = sorted(zip(cand, scores.tolist()), key=lambda x: x[0])
-
             for c, s in cand_score_pairs:
-                # format: src dst label score
                 lines.append(f"{i} {i+1} {int(c)} {float(s)}")
-
-        # Add final arc: from state L to super-final state (L+1) with label -1
         lines.append(f"{L} {L+1} -1 0.0")
         lines.append(f"{L+1}")
         return k2.Fsa.from_str("\n".join(lines)).to(device)
@@ -347,8 +365,15 @@ if __name__ == "__main__":
         row_str = " ".join(f"{dist[i, j].item():5.1f}" for j in range(V))
         print(f"{label:5s}   {row_str}")
 
-    # Create model
-    model = ArticulatoryCTC(dist=dist, beta=10.0, topk=2, normalize=True)
+    from src.model.xeusphoneme.builders import matrix_to_neighbor_lists
+
+    nids, ndists = matrix_to_neighbor_lists(dist, topk=2, blank_id=0)
+    model = ArticulatoryCTC(
+        neighbors_by_lang={"global": (nids, ndists)},
+        beta=10.0,
+        topk=2,
+        normalize=True,
+    )
 
     # Target: CAT = [C=1, A=2, T=3]
     target_ys_pad = torch.tensor([[1, 2, 3]])

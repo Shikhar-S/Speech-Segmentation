@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -34,7 +34,9 @@ class CTC(torch.nn.Module):
         brctc_risk_strategy: str = "exp",
         brctc_group_strategy: str = "end",
         brctc_risk_factor: float = 0.0,
-        artctc_dist: Optional[torch.Tensor] = None,
+        artctc_neighbors_by_lang: Optional[
+            Dict[str, Tuple[torch.Tensor, torch.Tensor]]
+        ] = None,
         artctc_beta: float = 1.0,
         artctc_topk: int = 8,
         artctc_normalize: bool = True,
@@ -77,6 +79,7 @@ class CTC(torch.nn.Module):
             "panphon_distance",
             "diacritic_distance",
             "manual_distance",
+            "manual_distance_per_lang",
         ]:
             try:
                 import k2  # noqa
@@ -87,8 +90,11 @@ class CTC(torch.nn.Module):
 
             from src.model.powsm.articulatory_ctc import ArticulatoryCTC
 
+            assert artctc_neighbors_by_lang is not None and "global" in artctc_neighbors_by_lang, (
+                "articulatory CTC requires artctc_neighbors_by_lang with at least 'global'"
+            )
             self.ctc_loss = ArticulatoryCTC(
-                dist=artctc_dist,
+                neighbors_by_lang=artctc_neighbors_by_lang,
                 beta=artctc_beta,
                 topk=artctc_topk,
                 normalize=artctc_normalize,
@@ -100,7 +106,14 @@ class CTC(torch.nn.Module):
 
         self.reduce = reduce
 
-    def loss_fn(self, th_pred, th_target, th_ilen, th_olen) -> torch.Tensor:
+    def loss_fn(
+        self,
+        th_pred,
+        th_target,
+        th_ilen,
+        th_olen,
+        lang_sym: Optional[Union[List[str], None]] = None,
+    ) -> torch.Tensor:
         if (
             self.ctc_type == "builtin"
             or self.ctc_type == "brctc"
@@ -109,10 +122,26 @@ class CTC(torch.nn.Module):
                 "panphon_distance",
                 "diacritic_distance",
                 "manual_distance",
+                "manual_distance_per_lang",
             ]
         ):
             th_pred = th_pred.log_softmax(2).float()
-            loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
+            if self.ctc_type in [
+                "panphon_distance",
+                "diacritic_distance",
+                "manual_distance",
+                "manual_distance_per_lang",
+            ]:
+                lang_per_utt = None
+                if lang_sym is not None:
+                    lang_per_utt = (
+                        lang_sym if isinstance(lang_sym, list) else list(lang_sym)
+                    )
+                loss = self.ctc_loss(
+                    th_pred, th_target, th_ilen, th_olen, lang_per_utt=lang_per_utt
+                )
+            else:
+                loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
             if self.ctc_type == "builtin":
                 size = th_pred.size(1)
             else:
@@ -187,7 +216,14 @@ class CTC(torch.nn.Module):
         else:
             raise NotImplementedError
 
-    def forward(self, hs_pad, hlens, ys_pad, ys_lens):
+    def forward(
+        self,
+        hs_pad,
+        hlens,
+        ys_pad,
+        ys_lens,
+        lang_sym: Optional[Union[List[str], None]] = None,
+    ):
         """Calculate CTC loss.
 
         Args:
@@ -195,6 +231,7 @@ class CTC(torch.nn.Module):
             hlens: batch of lengths of hidden state sequences (B)
             ys_pad: batch of padded character id sequence tensor (B, Lmax)
             ys_lens: batch of lengths of character sequence (B)
+            lang_sym: optional list of language codes per utterance (for manual_distance_per_lang)
         """
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
@@ -203,10 +240,11 @@ class CTC(torch.nn.Module):
             "panphon_distance",
             "diacritic_distance",
             "manual_distance",
+            "manual_distance_per_lang",
         ]:
-            loss = self.loss_fn(ys_hat, ys_pad, hlens, ys_lens).to(
-                device=hs_pad.device, dtype=hs_pad.dtype
-            )
+            loss = self.loss_fn(
+                ys_hat, ys_pad, hlens, ys_lens, lang_sym=lang_sym
+            ).to(device=hs_pad.device, dtype=hs_pad.dtype)
             return loss
 
         elif self.ctc_type == "gtnctc":
