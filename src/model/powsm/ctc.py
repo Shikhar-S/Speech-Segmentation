@@ -88,12 +88,12 @@ class CTC(torch.nn.Module):
                     "You should install K2 to use panphon/diacritic/manual distance CTC"
                 )
 
-            from src.model.powsm.articulatory_ctc import ArticulatoryCTC
+            from src.model.powsm.vectorized_articulatory_ctc import VectorizedArticulatoryCTC
 
             assert artctc_neighbors_by_lang is not None and "global" in artctc_neighbors_by_lang, (
                 "articulatory CTC requires artctc_neighbors_by_lang with at least 'global'"
             )
-            self.ctc_loss = ArticulatoryCTC(
+            self.ctc_loss = VectorizedArticulatoryCTC(
                 neighbors_by_lang=artctc_neighbors_by_lang,
                 beta=artctc_beta,
                 topk=artctc_topk,
@@ -114,17 +114,14 @@ class CTC(torch.nn.Module):
         th_olen,
         lang_sym: Optional[Union[List[str], None]] = None,
     ) -> torch.Tensor:
-        if (
-            self.ctc_type == "builtin"
-            or self.ctc_type == "brctc"
-            or self.ctc_type
-            in [
-                "panphon_distance",
-                "diacritic_distance",
-                "manual_distance",
-                "manual_distance_per_lang",
-            ]
-        ):
+        if self.ctc_type in [
+            "builtin",
+            "brctc",
+            "panphon_distance",
+            "diacritic_distance",
+            "manual_distance",
+            "manual_distance_per_lang",
+        ]:
             th_pred = th_pred.log_softmax(2).float()
             if self.ctc_type in [
                 "panphon_distance",
@@ -142,6 +139,7 @@ class CTC(torch.nn.Module):
                 )
             else:
                 loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
+
             if self.ctc_type == "builtin":
                 size = th_pred.size(1)
             else:
@@ -236,7 +234,8 @@ class CTC(torch.nn.Module):
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
 
-        if self.ctc_type == "brctc" or self.ctc_type in [
+        if self.ctc_type in [
+            "brctc",
             "panphon_distance",
             "diacritic_distance",
             "manual_distance",
