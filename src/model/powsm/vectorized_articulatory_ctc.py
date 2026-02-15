@@ -218,7 +218,9 @@ class VectorizedArticulatoryCTC(torch.nn.Module):
             ],
             dim=1,
         )
-        sort_idx = torch.lexsort((labels.cpu(), src.cpu())).to(device)
+        # sort_idx = torch.lexsort((labels.cpu(), src.cpu())).to(device)
+        key = src.to(torch.int64) * (V + 1) + labels.to(torch.int64)  # labels are in [0, V-1]
+        sort_idx = torch.argsort(key)
         arcs_no_final = arcs_no_final[sort_idx]
         zero_score_int = _float_to_int32_score(
             torch.tensor([0.0], device=device, dtype=torch.float32)
@@ -228,6 +230,7 @@ class VectorizedArticulatoryCTC(torch.nn.Module):
             device=device,
             dtype=torch.int32,
         )
-        final_row = torch.cat([final_row, zero_score_int.unsqueeze(0).unsqueeze(1)], dim=1)
+        # final_row = torch.cat([final_row, zero_score_int.unsqueeze(0).unsqueeze(1)], dim=1)
+        final_row = torch.cat([final_row, zero_score_int.view(1, 1)], dim=1)
         full_arcs = torch.cat([arcs_no_final, final_row], dim=0)
         return k2.Fsa(full_arcs)
