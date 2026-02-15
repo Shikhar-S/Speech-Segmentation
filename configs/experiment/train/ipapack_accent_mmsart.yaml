@@ -21,7 +21,6 @@ seed: 42
 
 trainer:
   devices: -1  # use all available GPUs
-  strategy: ddp_find_unused_parameters_true
   min_epochs: 0
   max_epochs: -1
   max_steps: 40000
