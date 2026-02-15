@@ -34,9 +34,7 @@ class CTC(torch.nn.Module):
         brctc_risk_strategy: str = "exp",
         brctc_group_strategy: str = "end",
         brctc_risk_factor: float = 0.0,
-        artctc_neighbors_by_lang: Optional[
-            Dict[str, Tuple[torch.Tensor, torch.Tensor]]
-        ] = None,
+        artctc_neighbors_by_lang=None,  # type: Optional[Dict[str, List[Tuple[int, float]]]]
         artctc_beta: float = 1.0,
         artctc_topk: int = 8,
         artctc_normalize: bool = True,
@@ -88,11 +86,14 @@ class CTC(torch.nn.Module):
                     "You should install K2 to use panphon/diacritic/manual distance CTC"
                 )
 
-            from src.model.powsm.vectorized_articulatory_ctc import VectorizedArticulatoryCTC
-
-            assert artctc_neighbors_by_lang is not None and "global" in artctc_neighbors_by_lang, (
-                "articulatory CTC requires artctc_neighbors_by_lang with at least 'global'"
+            from src.model.powsm.vectorized_articulatory_ctc import (
+                VectorizedArticulatoryCTC,
             )
+
+            assert (
+                artctc_neighbors_by_lang is not None
+                and "global" in artctc_neighbors_by_lang
+            ), "articulatory CTC requires artctc_neighbors_by_lang with at least 'global'"
             self.ctc_loss = VectorizedArticulatoryCTC(
                 neighbors_by_lang=artctc_neighbors_by_lang,
                 beta=artctc_beta,
@@ -241,9 +242,9 @@ class CTC(torch.nn.Module):
             "manual_distance",
             "manual_distance_per_lang",
         ]:
-            loss = self.loss_fn(
-                ys_hat, ys_pad, hlens, ys_lens, lang_sym=lang_sym
-            ).to(device=hs_pad.device, dtype=hs_pad.dtype)
+            loss = self.loss_fn(ys_hat, ys_pad, hlens, ys_lens, lang_sym=lang_sym).to(
+                device=hs_pad.device, dtype=hs_pad.dtype
+            )
             return loss
 
         elif self.ctc_type == "gtnctc":
