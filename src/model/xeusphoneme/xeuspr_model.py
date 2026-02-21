@@ -168,7 +168,9 @@ class XeusPRModel(torch.nn.Module):
         lengths = torch.clamp(lengths, max=max_length)
         return out, lengths
 
-    def _calc_ctc_loss(self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens, **kwargs):
+    def _calc_ctc_loss(
+        self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens, **kwargs
+    ):
         ys_pad = torch.where(ys_pad == -1, self.ignore_id, ys_pad)
         ys_pad = ys_pad[:, : ys_pad_lens.max()]
         loss_ctc = self.ctc(
@@ -177,6 +179,7 @@ class XeusPRModel(torch.nn.Module):
             ys_pad,
             ys_pad_lens,
             lang_sym=kwargs.get("lang_sym"),
+            accent_sym=kwargs.get("accent_sym"),
         )
         stats = {}
         assert self.error_calculator is not None, "ErrorCalculator not initialized"

@@ -13,6 +13,7 @@ from lightning.pytorch.utilities import CombinedLoader
 from typing import Optional, Dict, List, Union
 from tqdm import tqdm
 import panphon  # 0.22.2
+import json
 
 from src.utils import RankedLogger
 
@@ -33,6 +34,7 @@ class KaldiDataset(Dataset):
         read_asr_text=False,
         vocab_file: Optional[str] = None,
         task_set: Optional[List[str]] = None,
+        accent_file: Optional[Dict[str, str]] = None,
         max_duration_sec: Optional[int] = 20,
     ):
         self.sampling_rate = sampling_rate
@@ -40,6 +42,7 @@ class KaldiDataset(Dataset):
         self.wav_scp = self._load_wav_scp(wav_scp_file, limit_samples)
         self.text = self._load_text(text_file, limit_samples)
         self.key2lang = self._extract_language(lang_file, limit_samples)
+        self.key2accent = self._extract_accent(accent_file)
         self.ipa_segmenter = panphon.FeatureTable()
         if read_asr_text:
             # lang file also has asr text
@@ -91,6 +94,9 @@ class KaldiDataset(Dataset):
             f"Reduced samples from {original_sz} to {len(filtered_keys)}."
         )
         self.key2lang = {k: v for k, v in self.key2lang.items() if k in filtered_keys}
+        self.key2accent = {
+            k: v for k, v in self.key2accent.items() if k in filtered_keys
+        }
 
     def _keep_key(self, key: str) -> bool:
         """Check if a key should be kept based on task_set."""
@@ -166,6 +172,18 @@ class KaldiDataset(Dataset):
         log.info("Loaded ASR text for %d samples", len(asr_text_dict))
         return asr_text_dict
 
+    def _extract_accent(self, path):
+        key2accent = {}
+        if not path:
+            return key2accent
+        with open(path) as f:
+            for line in tqdm(f, desc="Reading accent"):
+                accent_jsonl = json.loads(line.strip())
+                utt_id = accent_jsonl["utt_id"]
+                accent = accent_jsonl["tag"]
+                key2accent[utt_id] = accent
+        return key2accent
+
     def _extract_language(self, path, limit_samples: Optional[int] = None):
         key2lang = {}
         with open(path) as f:
@@ -213,6 +231,8 @@ class KaldiDataset(Dataset):
         wav_path = self.wav_scp[key]
         transcription = self.text[key]
         asr_text = self.asr_text[key] if self.asr_text else None
+        lang = self.key2lang[key]
+        accent = self.key2accent.get(key, "<unk>")
 
         if ".ark" in wav_path:
             sr, wav = kaldiio.load_mat(wav_path)
@@ -243,7 +263,8 @@ class KaldiDataset(Dataset):
             "text_tokens": text_tokens,
             "wavpath": wav_path,
             # powsm lang sym. default is <unk> if missing in vocab
-            "lang_sym": self.key2lang[key],
+            "lang_sym": lang,
+            "accent_sym": accent,
             "split": self.split,
             "metadata_idx": idx,
             "target": transcription,
@@ -269,6 +290,7 @@ class KaldiDataModule(L.LightningDataModule):
         filter_langs: Optional[List[str]] = None,
         read_asr_text: bool = False,
         task_set: Dict[str, List[str]] = None,
+        accent_file: Dict[str, str] = None,
         vocab_file: Optional[str] = None,
     ):
         super().__init__()
@@ -287,6 +309,7 @@ class KaldiDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.vocab_file = vocab_file
         self.task_set = task_set
+        self.accent_file = accent_file
         self.splits = list(wav_scp_file.keys())
         self.ignore_id = -1
         log.info(f"Splits: {self.splits}")
@@ -304,6 +327,7 @@ class KaldiDataModule(L.LightningDataModule):
             task_set=self.task_set[split],
             read_asr_text=self.read_asr_text,
             max_duration_sec=self.max_duration_sec,
+            accent_file=self.accent_file[split] if self.accent_file else None,
         )
 
     def setup(self, stage=None):
@@ -348,6 +372,7 @@ class KaldiDataModule(L.LightningDataModule):
         asr_texts = [item["asr_text"] for item in batch]
         wavpaths = [item["wavpath"] for item in batch]
         languages = [item["lang_sym"] for item in batch]
+        accents = [item["accent_sym"] for item in batch]
 
         # Pad speeches to the max length in the batch
         max_speech_length = max(speech_lengths)
@@ -388,6 +413,7 @@ class KaldiDataModule(L.LightningDataModule):
             "text_length": text_data.get("text_length"),
             "wavpath": wavpaths,
             "lang_sym": languages,
+            "accent_sym": accents,
             "asr_text": asr_texts,
         }
 
@@ -408,7 +434,7 @@ def build_kaldi_datamodule(
         config = yaml.safe_load(f)
 
     all_splits = [train_split] + dev_splits + ([predict_split] if predict_split else [])
-    wav_scp_file, text_file, lang_file, task_set = {}, {}, {}, {}
+    wav_scp_file, text_file, lang_file, task_set, accent_file = {}, {}, {}, {}, {}
     for split_key in all_splits:
         if split_key not in config["datasets"]:
             raise ValueError(f"Split '{split_key}' not found in dataset config")
@@ -417,6 +443,7 @@ def build_kaldi_datamodule(
         text_file[split_key] = ds_config["text_phoneme"]
         lang_file[split_key] = ds_config["language"]
         task_set[split_key] = ds_config.get("task_set", None)
+        accent_file[split_key] = ds_config.get("accent", None)
 
     log.info(f"Loaded splits: {all_splits}")
 
@@ -434,6 +461,7 @@ def build_kaldi_datamodule(
         filter_langs=filter_langs,
         read_asr_text=read_asr_text,
         task_set=task_set,
+        accent_file=accent_file,
         vocab_file=vocab_file,
     )
 
@@ -441,7 +469,7 @@ def build_kaldi_datamodule(
 if __name__ == "__main__":
     # Test with: python -m src.data.kaldi_pretraining_dataset
     datamodule = build_kaldi_datamodule(
-        train_split="dev_1k",  # "train_accentmix_multi",
+        train_split="train_accentmix_multi",  # "train_accentmix_multi",
         dev_splits=[
             "dev_1k",
             "dev_gmuaccent",
@@ -455,24 +483,28 @@ if __name__ == "__main__":
         batch_size=1,
         num_workers=1,
         vocab_file="src/model/xeusphoneme/resources/ipa_vocab.json",
-        limit_samples=2,
+        # limit_samples=2,
     )
     datamodule.setup()
     print("Train dataloader:")
+    c = 0
     for i in datamodule.train_dataloader():
         print(i)
+        c += 1
+        if c > 10:
+            break
 
-    print("--" * 20)
-    print("Dev dataloader:")
-    for i in datamodule.val_dataloader():
-        print(i)
+    # print("--" * 20)
+    # print("Dev dataloader:")
+    # for i in datamodule.val_dataloader():
+    #     print(i)
 
-    print("--" * 20)
-    print("Test dataloader:")
-    for i in datamodule.test_dataloader():
-        print(i)
+    # print("--" * 20)
+    # print("Test dataloader:")
+    # for i in datamodule.test_dataloader():
+    #     print(i)
 
-    print("--" * 20)
-    print("Predict dataloader:")
-    for i in datamodule.predict_dataloader():
-        print(i)
+    # print("--" * 20)
+    # print("Predict dataloader:")
+    # for i in datamodule.predict_dataloader():
+    #     print(i)

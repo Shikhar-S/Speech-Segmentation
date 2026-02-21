@@ -1554,25 +1554,236 @@ ENGLISH_PHONEME_SUBSTITUTIONS = {
 }
 
 
-# Helper function to get all possible substitutions for a phoneme in a language
-def get_substitutions(lang_code, eng_phoneme):
+"""
+English Accent Phoneme Substitution Mappings
+
+Baseline: General American English (GA).
+Each accent maps GA phonemes to their most common realizations in that variety.
+Values are ordered by frequency (most common realization first).
+All symbols are constrained to the IPA vocabulary.
+"""
+
+ENGLISH_ACCENT_SUBSTITUTIONS = {
+    # US (General American) — baseline; only systematic allophonic processes
+    "us": {
+        "t": [
+            "ɾ",
+            "ʔ",
+        ],  # T-flapping intervocalically; glottalization before syllabic n
+    },
+    # England (RP / SSBE)
+    "england": {
+        "t": ["ʔ"],  # Glottal reinforcement / T-glottalization in codas
+        "ɑ": ["ɒ"],  # LOT rounding: GA [ɑ] → RP [ɒ]
+        "æ": ["a"],  # TRAP lowered in contemporary SSBE
+        "ʌ": ["ɐ"],  # STRUT centralized to near-open central
+        "ʊ": ["ɵ"],  # FOOT fronted in SSBE
+        "u": ["ʉ"],  # GOOSE fronted
+        "ɜː": ["əː"],  # NURSE: no r-coloring, long mid-central
+        "e": ["ɛ"],  # FACE onset lowered in SSBE [ɛɪ]
+        "o": ["ə"],  # GOAT onset centralized in SSBE [əʊ]
+    },
+    # Canada
+    "canada": {
+        "t": ["ɾ", "ʔ"],  # T-flapping as in GA; some glottalization
+        "ɑ": ["ɒ"],  # LOT-THOUGHT-PALM merger to slightly rounded [ɒ]
+        "ɔ": ["ɒ"],  # THOUGHT merges with LOT → [ɒ]
+        "æ": ["a"],  # Canadian Shift: TRAP retracts to open central
+        "u": ["ʉ"],  # GOOSE fronted
+    },
+    # Scotland
+    "scotland": {
+        "ʊ": ["ʉ"],  # FOOT-GOOSE merger to central rounded [ʉ]
+        "u": ["ʉ"],  # GOOSE = FOOT → [ʉ]
+        "ɑ": ["ɔ"],  # LOT-THOUGHT merger to [ɔ]
+        "æ": ["a"],  # TRAP-BATH-PALM merger to open [a]
+        "ɹ": ["ɾ", "ɹ"],  # Tap [ɾ] traditional; approximant [ɹ] increasing
+        "t": ["ʔ"],  # Urban Scots heavy T-glottalization
+    },
+    # Ireland (Hiberno-English)
+    "ireland": {
+        "θ": ["t̪"],  # TH-stopping: voiceless dental stop
+        "ð": ["d̪"],  # TH-stopping: voiced dental stop
+        "æ": ["a"],  # TRAP more open than GA
+        "ʌ": ["ə"],  # STRUT raised/centralized
+        "ɹ": ["ɹ", "ɾ", "ɻ"],  # Approximant, tap (traditional), retroflex (Dublin)
+        "l̴": ["l"],  # No dark L; clear [l] in all positions
+    },
+    # Wales
+    "wales": {
+        "z": ["s"],  # Voiced fricative devoicing (Welsh lacks /z/)
+        "ʒ": ["ʃ"],  # Voiced fricative devoicing
+        "d͡ʒ": ["t͡ʃ"],  # Affricate devoicing medially/finally
+        "ʌ": ["ə"],  # STRUT raised/centralized
+        "ɹ": ["ɾ", "r"],  # Tap or trill from Welsh substrate
+        "ɜː": ["øː"],  # NURSE front-rounded (Cardiff)
+    },
+    # Australia
+    "australia": {
+        "t": ["ɾ"],  # T-flapping intervocalically
+        "ɪ": ["i"],  # KIT raised toward [i]
+        "ɛ": ["e"],  # DRESS raised to close-mid
+        "ʌ": ["ɐ"],  # STRUT near-open central
+        "ɜː": ["ɘː"],  # NURSE close-mid central
+        "u": ["ʉ"],  # GOOSE fronted/centralized
+        "l̴": ["ʊ"],  # L-vocalization: dark L → [ʊ] in codas
+    },
+    # New Zealand
+    "newzealand": {
+        "ɪ": ["ə"],  # KIT centralized completely to schwa
+        "ɛ": ["e̝", "ɪ"],  # DRESS raised toward FLEECE territory
+        "æ": ["ɛ"],  # TRAP raised to [ɛ]
+        "ʌ": ["a"],  # STRUT open [a]
+        "ɜː": ["øː"],  # NURSE front-rounded
+        "ʊ": ["ɵ"],  # FOOT centralized
+        "u": ["ʉ"],  # GOOSE central
+        "θ": ["f", "θ"],  # TH-fronting emerging (variable)
+        "ð": ["v", "ð"],  # TH-fronting emerging (variable)
+        "t": ["ɾ", "ʔ"],  # T-flapping; increasing glottalization
+        "l̴": ["ʊ"],  # Widespread L-vocalization
+    },
+    # African (South African English)
+    "african": {
+        "ɪ": ["ɨ̞", "ɪ"],  # KIT split: centralized [ɨ̞] elsewhere, [ɪ] near velars/h
+        "ɜː": ["øː"],  # NURSE front-rounded
+        "t": ["t͡s"],  # Syllable-final /t/ affrication
+        "θ": ["f", "θ"],  # TH-fronting in Broad SAE
+        "u": ["ʉ"],  # GOOSE fronted
+        "o": ["œ"],  # GOAT front-rounded onset
+        "h": ["ɦ"],  # Voiced glottal fricative in Broad SAE
+    },
+    # Indian English
+    "indian": {
+        "θ": ["t̪"],  # Dental stop (aspirated in North, plain in South)
+        "ð": ["d̪"],  # Dental stop
+        "t": ["ʈ"],  # Retroflexion of alveolars
+        "d": ["ɖ"],  # Retroflexion
+        "n": ["ɳ", "n"],  # Retroflex nasal (variable)
+        "v": ["ʋ"],  # v/w merger to labiodental approximant
+        "w": ["ʋ"],  # v/w merger to labiodental approximant
+        "ɪ": ["i"],  # KIT-FLEECE merger
+        "ʊ": ["u"],  # FOOT-GOOSE merger
+        "ʌ": ["ə"],  # STRUT merges with schwa
+        "ɹ": ["ɾ", "ɽ", "r"],  # Tap (most common), retroflex flap, trill
+        "l̴": ["l"],  # No dark L; clear [l] throughout
+    },
+    # Singapore (Singlish)
+    "singapore": {
+        "θ": ["t"],  # TH-stopping
+        "ð": ["d"],  # TH-stopping
+        "ɪ": ["i"],  # KIT-FLEECE overlap
+        "ʊ": ["u"],  # FOOT-GOOSE overlap
+        "æ": ["ɛ"],  # DRESS-TRAP merger to [ɛ]
+        "ʌ": ["a"],  # STRUT → open [a]
+        "pʰ": ["p"],  # De-aspiration of voiceless stops
+        "tʰ": ["t"],  # De-aspiration of voiceless stops
+        "kʰ": ["k"],  # De-aspiration of voiceless stops
+        "b": ["p"],  # Final obstruent devoicing
+        "d": ["t"],  # Final obstruent devoicing
+        "ɡ": ["k"],  # Final obstruent devoicing
+        "t": ["ʔ"],  # Final stops → glottal stop
+        "l̴": ["ʊ"],  # L-vocalization in codas
+    },
+    # Malaysia
+    "malaysia": {
+        "θ": ["t"],  # TH-stopping
+        "ð": ["d"],  # TH-stopping
+        "ɪ": ["i"],  # KIT-FLEECE merger
+        "ʊ": ["u"],  # FOOT-GOOSE merger
+        "æ": ["ɛ"],  # DRESS-TRAP partial merger
+        "pʰ": ["p"],  # De-aspiration of voiceless stops
+        "tʰ": ["t"],  # De-aspiration of voiceless stops
+        "kʰ": ["k"],  # De-aspiration of voiceless stops
+        "ɹ": ["r", "ɹ"],  # Trill (Malay influence) or approximant
+        "t": ["ʔ"],  # Final stops → glottal
+        "l̴": ["l"],  # No dark L; clear [l] (Malay influence)
+        "f": ["p", "f"],  # f/p confusion in Malay speakers
+    },
+    # Hong Kong English
+    "hongkong": {
+        "θ": ["f"],  # TH-fronting (primary)
+        "ð": ["d"],  # TH-stopping for voiced
+        "ɪ": ["i"],  # KIT-FLEECE merger
+        "ʊ": ["u"],  # FOOT-GOOSE merger
+        "æ": ["ɛ"],  # DRESS-TRAP merger
+        "ə": ["ɛ", "ɑ"],  # Schwa replaced by full vowels
+        "b": ["p"],  # Voicing → aspiration: /b/ realized as [p]
+        "d": ["t"],  # Voicing → aspiration: /d/ realized as [t]
+        "ɡ": ["k"],  # Voicing → aspiration: /ɡ/ realized as [k]
+        "t͡ʃ": ["t͡sʰ"],  # Affricates fronted to alveolar
+        "d͡ʒ": ["t͡s"],  # Affricates fronted + devoiced
+        "ʃ": ["s"],  # Postalveolar → alveolar
+        "ʒ": ["s"],  # Postalveolar → alveolar + devoiced
+        "z": ["s"],  # z/s merger
+        "v": ["w", "f"],  # /v/ → [w] stressed, [f] unstressed
+        "n": ["l", "n"],  # n/l confusion (Cantonese merger)
+        "l̴": ["ʊ"],  # L-vocalization prominent
+    },
+    # Philippines
+    "philippines": {
+        "θ": ["t"],  # TH-stopping (mesolectal)
+        "ð": ["d"],  # TH-stopping
+        "ɪ": ["i"],  # KIT-FLEECE merger (5-vowel system)
+        "ʊ": ["u"],  # FOOT-GOOSE merger
+        "æ": ["ɛ"],  # DRESS-TRAP merger
+        "ʌ": ["a"],  # STRUT → open [a]
+        "ə": ["a", "ɛ", "o"],  # Schwa absent; replaced by full vowels
+        "pʰ": ["p"],  # De-aspiration of voiceless stops
+        "tʰ": ["t"],  # De-aspiration of voiceless stops
+        "kʰ": ["k"],  # De-aspiration of voiceless stops
+        "ɹ": ["ɾ", "ɹ"],  # Tap (Tagalog /r/) or approximant (acrolectal)
+        "f": ["p", "f"],  # f→p in basilectal (Spanish influence)
+        "v": ["b", "v"],  # v→b in basilectal
+        "z": ["s"],  # z/s merger
+    },
+    # Bermuda
+    "bermuda": {
+        "θ": ["f", "ʃ"],  # TH-fronting; [ʃ] word-initially
+        "ð": ["d", "v"],  # TH-stopping or TH-fronting
+        "v": ["β", "w"],  # v/w interchange via bilabial fricative
+        "w": ["β", "v"],  # v/w interchange
+        "t": ["ʔ"],  # Word-final T-glottalization
+        "æ": ["ɛ"],  # DRESS-TRAP merger (Black Bermudian)
+        "l̴": ["w"],  # L-vocalization → [w]
+    },
+    # South Atlantic (Falklands / St Helena / Tristan da Cunha)
+    "southatlandtic": {
+        "θ": ["t", "θ"],  # TH-stopping (St Helena); preserved (Falklands)
+        "ð": ["d", "ð"],  # TH-stopping (St Helena); preserved (Falklands)
+        "t": ["ɾ", "ʔ"],  # T-flapping (Falklands); T-glottalization (Tristan)
+        "z": ["s"],  # Medial voiced fricative devoicing (Tristan)
+        "ʒ": ["ʃ"],  # Medial voiced fricative devoicing (Tristan)
+        "v": ["w", "v"],  # w/v merger (St Helena)
+        "w": ["v", "w"],  # w/v merger (St Helena)
+        "æ": ["e", "æ"],  # TRAP raising (St Helena)
+    },
+}
+
+
+def get_substitutions(conditioning_tag, eng_phoneme):
     """
-    Get all possible substitutions for an English phoneme in a target language.
+    Backward compatible:
+      - Prefer ENGLISH_ACCENT_SUBSTITUTIONS[conditioning_tag]
+      - Fallback to ENGLISH_PHONEME_SUBSTITUTIONS[conditioning_tag]
+      - Otherwise return [eng_phoneme]
 
-    Args:
-        lang_code: ISO 639-3 language code
-        eng_phoneme: English IPA phoneme
+      conditioning_tag could be accent or language code
 
-    Returns:
-        list: Possible substitutions, or [eng_phoneme] if no mapping exists
+    Returns a deduped list (order preserved) that always includes eng_phoneme.
     """
-    if lang_code not in ENGLISH_PHONEME_SUBSTITUTIONS:
-        return [eng_phoneme]  # No data, return original
+    lang_map = ENGLISH_ACCENT_SUBSTITUTIONS.get(conditioning_tag)
+    if lang_map is None and "ENGLISH_PHONEME_SUBSTITUTIONS" in globals():
+        lang_map = ENGLISH_PHONEME_SUBSTITUTIONS.get(conditioning_tag)
 
-    lang_map = ENGLISH_PHONEME_SUBSTITUTIONS[lang_code]
-    substitution_set = lang_map.get(eng_phoneme, [eng_phoneme])
-    substitution_set = set(substitution_set).union({eng_phoneme})
-    return list(substitution_set)
+    if not lang_map:
+        return [eng_phoneme]
+
+    subs = lang_map.get(eng_phoneme, [])
+    out = []
+    for p in list(subs) + [eng_phoneme]:
+        if p not in out:
+            out.append(p)
+    return out
 
 
 if __name__ == "__main__":
@@ -1604,3 +1815,10 @@ if __name__ == "__main__":
         print(
             f"  {eng_phone} → {subs} (initial: {subs[0]}, final: {subs[1] if len(subs) > 1 else 'same'})"
         )
+
+    # Example 4: Indian accent
+    print("\n" + "=" * 60 + "\n")
+    print("Indian English mappings for key phonemes:")
+    for eng_phone in ["θ", "ð", "t", "d", "n", "v", "w"]:
+        subs = get_substitutions("indian", eng_phone)
+        print(f"  {eng_phone} → {subs} (primary: {subs[0]})")

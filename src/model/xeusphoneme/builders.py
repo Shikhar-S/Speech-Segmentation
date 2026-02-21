@@ -14,8 +14,10 @@ from src.model.xeusphoneme.xeuspr_model import XeusPRModel
 from src.model.xeusphoneme.xeuspr_inference import XeusPRInference
 from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger
+
+# TODO(shikhar): hacky for testing
 from src.model.xeusphoneme.resources.phonetic_substitutions import (
-    ENGLISH_PHONEME_SUBSTITUTIONS,
+    ENGLISH_ACCENT_SUBSTITUTIONS as ENGLISH_PHONEME_SUBSTITUTIONS,
     get_substitutions,
 )
 
@@ -93,7 +95,7 @@ def build_diacritic_distance_matrix(vocab: list[str]) -> torch.Tensor:
         return base_idx.get(sym[0], [])
 
     V = len(vocab)
-    dist_matrix = torch.ones((V, V), dtype=torch.float32)
+    dist_matrix = torch.full((V, V), float("inf"), dtype=torch.float32)
     dist_matrix.fill_diagonal_(0.0)
 
     # string -> id (assumes vocab[i] is token i)
@@ -129,7 +131,7 @@ def build_manual_distance_matrix(vocab: list[str]) -> torch.Tensor:
     sid = {s: i for i, s in enumerate(vocab)}
     langs = list(ENGLISH_PHONEME_SUBSTITUTIONS.keys())
 
-    dist_matrix = torch.ones((V, V), dtype=torch.float32)
+    dist_matrix = torch.full((V, V), float("inf"), dtype=torch.float32)
     dist_matrix.fill_diagonal_(0.0)
 
     # Build directed edges x -> y if y is a substitution of x in ANY language (union).
@@ -175,13 +177,17 @@ def matrix_to_neighbor_lists(
     for p in range(V):
         idx = torch.topk(dist[p], k=k_actual, largest=False).indices
         others = idx[idx != p][:k_others]
+        # Drop any neighbors with infinite distance (no real mapping)
+        others = others[torch.isfinite(dist[p, others])]
         n = others.size(0)
         neighbor_ids[p, :n] = others
         neighbor_dists[p, :n] = dist[p, others]
     return neighbor_ids, neighbor_dists
 
 
-def build_language_specific_distance_matrix(vocab: list[str], lang_code: str) -> torch.Tensor:
+def build_language_specific_distance_matrix(
+    vocab: list[str], lang_code: str
+) -> torch.Tensor:
     """
     Distance matrix for one language: 0 between phoneme pairs that are
     substitutions of each other for that language (from get_substitutions),
@@ -189,7 +195,7 @@ def build_language_specific_distance_matrix(vocab: list[str], lang_code: str) ->
     """
     V = len(vocab)
     sid = {s: i for i, s in enumerate(vocab)}
-    dist_matrix = torch.ones((V, V), dtype=torch.float32)
+    dist_matrix = torch.full((V, V), float("inf"), dtype=torch.float32)
     dist_matrix.fill_diagonal_(0.0)
     edges = [set() for _ in range(V)]
     for x in vocab:
@@ -209,6 +215,48 @@ def build_all_language_distance_matrices(vocab: list[str]) -> Dict[str, torch.Te
         lang: build_language_specific_distance_matrix(vocab, lang)
         for lang in ENGLISH_PHONEME_SUBSTITUTIONS.keys()
     }
+
+
+def build_oracle_distance_matrix(vocab: list[str], mapping_file: str) -> torch.Tensor:
+    """Distance matrix from an oracle epitran→ref substitution mapping JSON.
+
+    The mapping file has the format produced by align_and_map_phones.py:
+        {epitran_phone: [[ref_phone, ratio], ...], ...}
+    where ratio = substitution_count / total_occurrences_of_epitran_phone.
+
+    Distance is set to (1 - ratio).  High ratio → low distance → closer neighbor.
+    Symmetric closure is applied (min of both directions).
+    Unmapped pairs default to inf (excluded from neighbor lists).
+    """
+    with open(mapping_file, "r", encoding="utf-8") as f:
+        mapping = json.load(f)
+
+    V = len(vocab)
+    sid = {s: i for i, s in enumerate(vocab)}
+
+    dist_matrix = torch.full((V, V), float("inf"), dtype=torch.float32)
+    dist_matrix.fill_diagonal_(0.0)
+
+    matched = 0
+    for epi_ph, pairs in mapping.items():
+        if epi_ph not in sid:
+            continue
+        i = sid[epi_ph]
+        for ref_ph, ratio in pairs:
+            if ref_ph not in sid:
+                continue
+            j = sid[ref_ph]
+            dist = 1.0 - ratio
+            # Symmetric: keep the smaller distance if both directions exist
+            dist_matrix[i, j] = min(dist_matrix[i, j].item(), dist)
+            dist_matrix[j, i] = min(dist_matrix[j, i].item(), dist)
+            matched += 1
+
+    log.info(
+        f"Oracle distance matrix: {matched} mapping entries matched vocab "
+        f"(from {sum(len(v) for v in mapping.values())} total pairs)"
+    )
+    return dist_matrix
 
 
 def build_xeus_pr(
@@ -294,6 +342,15 @@ def build_xeus_pr(
             "global": (identity_ids, identity_dists),
             **per_lang,
         }
+    elif ctc_config.get("ctc_type", "builtin") == "oracle_branching":
+        mapping_file = ctc_config.pop("oracle_mapping")
+        if not mapping_file:
+            raise ValueError(
+                "oracle_mapping file must be specified in ctc_config for oracle_branching ctc_type"
+            )
+        dist_matrix = build_oracle_distance_matrix(token_list, mapping_file)
+        nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
+        ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
     # Build CTC
     ctc = CTC(
         odim=vocab_size,

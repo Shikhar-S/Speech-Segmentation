@@ -78,6 +78,7 @@ class CTC(torch.nn.Module):
             "diacritic_distance",
             "manual_distance",
             "manual_distance_per_lang",
+            "oracle_branching",
         ]:
             try:
                 import k2  # noqa
@@ -114,6 +115,7 @@ class CTC(torch.nn.Module):
         th_ilen,
         th_olen,
         lang_sym: Optional[Union[List[str], None]] = None,
+        accent_sym: Optional[Union[List[str], None]] = None,
     ) -> torch.Tensor:
         if self.ctc_type in [
             "builtin",
@@ -122,6 +124,7 @@ class CTC(torch.nn.Module):
             "diacritic_distance",
             "manual_distance",
             "manual_distance_per_lang",
+            "oracle_branching",
         ]:
             th_pred = th_pred.log_softmax(2).float()
             if self.ctc_type in [
@@ -129,11 +132,12 @@ class CTC(torch.nn.Module):
                 "diacritic_distance",
                 "manual_distance",
                 "manual_distance_per_lang",
+                "oracle_branching",
             ]:
                 lang_per_utt = None
-                if lang_sym is not None:
+                if accent_sym is not None:
                     lang_per_utt = (
-                        lang_sym if isinstance(lang_sym, list) else list(lang_sym)
+                        accent_sym if isinstance(accent_sym, list) else list(accent_sym)
                     )
                 loss = self.ctc_loss(
                     th_pred, th_target, th_ilen, th_olen, lang_per_utt=lang_per_utt
@@ -222,6 +226,7 @@ class CTC(torch.nn.Module):
         ys_pad,
         ys_lens,
         lang_sym: Optional[Union[List[str], None]] = None,
+        accent_sym: Optional[Union[List[str], None]] = None,
     ):
         """Calculate CTC loss.
 
@@ -231,6 +236,7 @@ class CTC(torch.nn.Module):
             ys_pad: batch of padded character id sequence tensor (B, Lmax)
             ys_lens: batch of lengths of character sequence (B)
             lang_sym: optional list of language codes per utterance (for manual_distance_per_lang)
+            accent_sym: optional list of accent codes per utterance
         """
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
@@ -241,10 +247,11 @@ class CTC(torch.nn.Module):
             "diacritic_distance",
             "manual_distance",
             "manual_distance_per_lang",
+            "oracle_branching",
         ]:
-            loss = self.loss_fn(ys_hat, ys_pad, hlens, ys_lens, lang_sym=lang_sym).to(
-                device=hs_pad.device, dtype=hs_pad.dtype
-            )
+            loss = self.loss_fn(
+                ys_hat, ys_pad, hlens, ys_lens, lang_sym=lang_sym, accent_sym=accent_sym
+            ).to(device=hs_pad.device, dtype=hs_pad.dtype)
             return loss
 
         elif self.ctc_type == "gtnctc":
@@ -256,9 +263,9 @@ class CTC(torch.nn.Module):
             # (B, L) -> (BxL,)
             ys_true = torch.cat([ys_pad[i, :l] for i, l in enumerate(ys_lens)])
 
-        loss = self.loss_fn(ys_hat, ys_true, hlens, ys_lens).to(
-            device=hs_pad.device, dtype=hs_pad.dtype
-        )
+        loss = self.loss_fn(
+            ys_hat, ys_true, hlens, ys_lens, lang_sym=lang_sym, accent_sym=accent_sym
+        ).to(device=hs_pad.device, dtype=hs_pad.dtype)
 
         return loss
 

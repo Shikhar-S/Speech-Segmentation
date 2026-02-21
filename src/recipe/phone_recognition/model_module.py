@@ -100,6 +100,7 @@ class PhoneRecognitionModel(LightningModule):
             text=batch["text"],
             text_lengths=batch["text_length"],
             lang_sym=batch.get("lang_sym"),
+            accent_sym=batch.get("accent_sym"),
         )
 
     def on_before_optimizer_step(self, optimizer) -> None:
