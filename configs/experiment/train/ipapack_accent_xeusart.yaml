@@ -49,6 +49,7 @@ model:
       artctc_topk: 5
       artctc_normalize: true
       artctc_label_smoothing: 0.2 # weight to be distributed over other neighbors
+      oracle_mapping: ""
   optimizer:
     lr: 0.00003
   scheduler:
