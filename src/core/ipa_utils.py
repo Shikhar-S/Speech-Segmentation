@@ -1,5 +1,7 @@
 # https://en.wikipedia.org/wiki/ARPABET
 
+from typing import List
+
 IPA_TO_ARPABET = {
     "aʊ": "AW",
     "aɪ": "AY",
@@ -70,6 +72,11 @@ IPA_TO_ARPABET = {
     # Silences (IPA does not have symbols; mapped for completeness)
 }
 ARPABET_TO_IPA = {v.lower(): k for k, v in IPA_TO_ARPABET.items()}
+
+
+def arpabet_to_ipa(phones: List[str]) -> List[str]:
+    """Map a sequence of ARPABET symbols to IPA. Unknown symbols use lowercase as fallback (same as timit/buckeye)."""
+    return [ARPABET_TO_IPA.get(p.lower(), p.lower()) for p in phones]
 
 
 class IPATokenizer:
