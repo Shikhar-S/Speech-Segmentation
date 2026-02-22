@@ -49,22 +49,22 @@ datasets:
 
   # TIMIT (run timit_data_prep then: python -m src.recipe.phone_recognition.local.timit_to_kaldi --timit_root ... --metadata_dir ... --out_dir ...)
   train_timit:
-    wav_scp: "exp/cache/timit/train_timit/wav.scp"
-    text_phoneme: "exp/cache/timit/train_timit/text.ctc"
-    language: "exp/cache/timit/train_timit/text"
-    task_set: ["pr"]
+    wav_scp: "exp/data/timit/train_timit/wav.scp"
+    text_phoneme: "exp/data/timit/train_timit/text.ctc"
+    language: "exp/data/timit/train_timit/text"
+    task_set: [] # donot add task set, else code skips this dataset
 
   dev_timit:
-    wav_scp: "exp/cache/timit/val_timit/wav.scp"
-    text_phoneme: "exp/cache/timit/val_timit/text.ctc"
-    language: "exp/cache/timit/val_timit/text"
-    task_set: ["pr"]
+    wav_scp: "exp/data/timit/val_timit/wav.scp"
+    text_phoneme: "exp/data/timit/val_timit/text.ctc"
+    language: "exp/data/timit/val_timit/text"
+    task_set: [] # donot add task set, else code skips this dataset
 
   test_timit:
-    wav_scp: "exp/cache/timit/test_timit/wav.scp"
-    text_phoneme: "exp/cache/timit/test_timit/text.ctc"
-    language: "exp/cache/timit/test_timit/text"
-    task_set: ["pr"]
+    wav_scp: "exp/data/timit/test_timit/wav.scp"
+    text_phoneme: "exp/data/timit/test_timit/text.ctc"
+    language: "exp/data/timit/test_timit/text"
+    task_set: [] # donot add task set, else code skips this dataset
 
 #############################################################################################################
 

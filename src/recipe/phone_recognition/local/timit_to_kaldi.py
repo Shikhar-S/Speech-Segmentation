@@ -5,9 +5,9 @@ maps ARPABET phones to IPA, and writes per-split Kaldi files under out_dir/<spli
 
 Usage:
     python -m src.recipe.phone_recognition.local.timit_to_kaldi \
-        --timit_root /path/to/TIMIT/timit_nltk \
-        --metadata_dir /path/to/exp/cache/timit \
-        --out_dir /path/to/exp/cache/timit
+        --timit_root /work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk \
+        --metadata_dir /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/timit \
+        --out_dir exp/data/timit
 
 Then use in config with dataset_config_path and train_split=train_timit, dev_splits=[val_timit].
 """
@@ -60,7 +60,7 @@ def convert_metadata_to_kaldi(
 
         ctc_str = "/" + "//".join(ipa_list) + "/"
         text_ctc_lines.append(f"{segment_id} {ctc_str}")
-        text_lang_lines.append(f"{segment_id} {lang_tag}")
+        text_lang_lines.append(f"{segment_id} {lang_tag} {ctc_str}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "wav.scp", "w") as f:
@@ -124,7 +124,9 @@ def main():
         print(f"ERROR: timit_root is not a directory: {timit_root}", file=sys.stderr)
         sys.exit(1)
     if not metadata_dir.is_dir():
-        print(f"ERROR: metadata_dir is not a directory: {metadata_dir}", file=sys.stderr)
+        print(
+            f"ERROR: metadata_dir is not a directory: {metadata_dir}", file=sys.stderr
+        )
         sys.exit(1)
 
     for split in SPLITS:
