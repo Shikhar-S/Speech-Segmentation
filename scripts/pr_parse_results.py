@@ -17,6 +17,7 @@ DATASET_ORDER = [
     "epadb",
     "speechoceannotth",
     "l2arctic_perceived",
+    "voxangeles",
 ]
 
 # Keep only these methods (by substring match), map to readable names.
@@ -35,6 +36,7 @@ METHOD_MAP = [
         "oracle_ls7",
     ),
     ("huper", "huper-model"),
+    ("koel", "koellabs-model"),
 ]
 
 EVAL_RE = re.compile(r"^(?P<method>.*?)-(?P<dataset>[^-]+?)(?:-(?P<ckpt>\d+))?$")

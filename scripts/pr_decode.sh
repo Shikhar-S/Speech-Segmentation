@@ -4,7 +4,8 @@
 #    # '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.schedule_panphon_4k_vanilla.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-4000.ckpt'
 # )
 
-DS=(speechoceannotth l2arctic_perceived epadb gmuaccent buckeye)
+# DS=(speechoceannotth l2arctic_perceived epadb gmuaccent buckeye)
+DS=(voxangeles)
 
 # in order
 # 1. panphon w/ ls point2 and then vanilla ctc
@@ -23,13 +24,12 @@ ckpts=( \
    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.manlang_ls2.bs240.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-4000.ckpt' \
    
    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.schedule_vanilla_4k_panphon.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-4000.ckpt' \
+   '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps/checkpoints/checkpoint-2500.ckpt' \
+   # huper data checkpoint
+   '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.oracle_ls7.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-8000.ckpt' \
    
 )
 
-# huper data checkpoint
-# ckpts=(/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps/checkpoints/checkpoint-2500.ckpt)
-
-ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.oracle_ls7.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-8000.ckpt')
 
 for ds in ${DS[@]}; do
    for ckpt in ${ckpts[@]}; do
