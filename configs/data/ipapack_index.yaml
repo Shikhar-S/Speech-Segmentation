@@ -41,12 +41,11 @@ datasets:
     accent: "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/tags/train_fixed_all.accent.shard0.jsonl"
     task_set: ["pr"]
 
-  # JSONL-converted (run scripts/jsonl_to_kaldi_format.py first, then set paths below)
   huper_librispeech:
-    wav_scp: "/path/to/dump/train_jsonl/wav.scp"
-    text_phoneme: "/path/to/dump/train_jsonl/text.ctc"
-    language: "/path/to/dump/train_jsonl/text"
-    task_set: ["pr"]
+    wav_scp: "exp/data/huper_librispeech/wav.scp"
+    text_phoneme: "exp/data/huper_librispeech/text.ctc"
+    language: "exp/data/huper_librispeech/text"
+    task_set: [] # donot add task set, else code skips this dataset
 
   # TIMIT (run timit_data_prep then: python -m src.recipe.phone_recognition.local.timit_to_kaldi --timit_root ... --metadata_dir ... --out_dir ...)
   train_timit:

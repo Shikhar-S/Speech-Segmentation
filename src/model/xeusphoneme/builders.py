@@ -351,6 +351,8 @@ def build_xeus_pr(
         dist_matrix = build_oracle_distance_matrix(token_list, mapping_file)
         nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
         ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
+    elif ctc_config.get("ctc_type", "builtin") == "builtin":
+        ctc_config = {}  # this allows using *art configs for vanilla ctc
     # Build CTC
     ctc = CTC(
         odim=vocab_size,

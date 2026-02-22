@@ -158,3 +158,4 @@ configs/local/default.yaml
 
 # Aim logging
 .aim
+src/recipe/phone_recognition/local/core
