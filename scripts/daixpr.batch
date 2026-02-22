@@ -21,7 +21,7 @@ conda deactivate
 source setup_uv.sh .venv_dai requirements-dai.txt
 echo "Environment setup complete."
 
-export HF_HOME="/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf"
+# export HF_HOME="/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf"
 export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
 export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/dai_dependencies/espeak-ng/espeak-ng-data"
 

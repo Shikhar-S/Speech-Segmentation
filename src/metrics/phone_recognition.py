@@ -474,6 +474,13 @@ def _load_predictions(
     with open(pred_file, "r") as f:
         data = json.load(f)
 
+    original_len = len(data)
+    data = {k: v for k, v in data.items() if k != "__error__"}
+    new_len = len(data)
+    print(
+        f"Loaded {new_len} entries from {pred_file} (removed {original_len - new_len} error entries)"
+    )
+
     all_languages = set()
     if language_field is not None:
         assert (
