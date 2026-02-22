@@ -48,6 +48,25 @@ datasets:
     language: "/path/to/dump/train_jsonl/text"
     task_set: ["pr"]
 
+  # TIMIT (run timit_data_prep then: python -m src.recipe.phone_recognition.local.timit_to_kaldi --timit_root ... --metadata_dir ... --out_dir ...)
+  train_timit:
+    wav_scp: "exp/cache/timit/train_timit/wav.scp"
+    text_phoneme: "exp/cache/timit/train_timit/text.ctc"
+    language: "exp/cache/timit/train_timit/text"
+    task_set: ["pr"]
+
+  dev_timit:
+    wav_scp: "exp/cache/timit/val_timit/wav.scp"
+    text_phoneme: "exp/cache/timit/val_timit/text.ctc"
+    language: "exp/cache/timit/val_timit/text"
+    task_set: ["pr"]
+
+  test_timit:
+    wav_scp: "exp/cache/timit/test_timit/wav.scp"
+    text_phoneme: "exp/cache/timit/test_timit/text.ctc"
+    language: "exp/cache/timit/test_timit/text"
+    task_set: ["pr"]
+
 #############################################################################################################
 
   dev_1k:
