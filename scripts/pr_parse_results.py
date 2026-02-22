@@ -30,6 +30,7 @@ METHOD_MAP = [
         "xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps",
         "huper-vanilla",
     ),
+    ("huper", "huper-model"),
 ]
 
 EVAL_RE = re.compile(r"^(?P<method>.*?)-(?P<dataset>[^-]+)-(?P<ckpt>\d+)$")

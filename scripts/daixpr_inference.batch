@@ -3,10 +3,10 @@
 #SBATCH -p ghx4-interactive
 #SBATCH -J main
 #SBATCH -N 1                       # Default to 1, override via CLI
-#SBATCH --ntasks-per-node=4        # Matches number of GPUs per node
-#SBATCH --gpus-per-node=4          
+#SBATCH --ntasks-per-node=1        # Matches number of GPUs per node
+#SBATCH --gpus-per-node=1          
 #SBATCH -c 72                      # 288 CPUs / 4 tasks = 72 CPUs per task
-#SBATCH --mem=480G                 # Slurm treats this as memory per node
+#SBATCH --mem=120G                 # Slurm treats this as memory per node
 #SBATCH -t 2:00:00
 #SBATCH -o exp/slurm_logs/%j.out
 #SBATCH -e exp/slurm_logs/%j.out
