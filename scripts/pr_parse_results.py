@@ -10,7 +10,7 @@ from rich.table import Table
 ROOT = Path("exp/runs/ipapack_ctc")
 GLOBS = ["results-*.csv"]
 
-METRIC_COL = "PER (%)"
+METRIC_COL = "FER (%)"
 DATASET_ORDER = [
     "gmuaccent",
     "buckeye",
@@ -29,6 +29,10 @@ METHOD_MAP = [
     (
         "xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps",
         "huper-vanilla",
+    ),
+    (
+        "xeus_multiaccent.oracle_ls7.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40kstep",
+        "oracle_ls7",
     ),
     ("huper", "huper-model"),
 ]
