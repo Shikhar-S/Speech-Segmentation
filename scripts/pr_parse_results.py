@@ -10,7 +10,7 @@ from rich.table import Table
 ROOT = Path("exp/runs/ipapack_ctc")
 GLOBS = ["results-*.csv"]
 
-METRIC_COL = "FER (%)"  # change if needed
+METRIC_COL = "PER (%)"
 DATASET_ORDER = [
     "gmuaccent",
     "buckeye",
@@ -33,14 +33,15 @@ METHOD_MAP = [
     ("huper", "huper-model"),
 ]
 
-EVAL_RE = re.compile(r"^(?P<method>.*?)-(?P<dataset>[^-]+)-(?P<ckpt>\d+)$")
+EVAL_RE = re.compile(r"^(?P<method>.*?)-(?P<dataset>[^-]+?)(?:-(?P<ckpt>\d+))?$")
 
 
 def parse_eval_name(s: str) -> tuple[str, str, int] | None:
     m = EVAL_RE.match(str(s))
     if not m:
         return None
-    return m.group("method"), m.group("dataset"), int(m.group("ckpt"))
+    ckpt = int(m.group("ckpt")) if m.group("ckpt") is not None else 0
+    return m.group("method"), m.group("dataset"), ckpt
 
 
 def match_method(method_raw: str) -> str | None:
