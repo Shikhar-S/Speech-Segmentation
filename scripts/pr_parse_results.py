@@ -10,7 +10,7 @@ from rich.table import Table
 ROOT = Path("exp/runs/ipapack_ctc")
 GLOBS = ["results-*.csv"]
 
-METRIC_COL = "DEL (%)"  # change if needed
+METRIC_COL = "FER (%)"  # change if needed
 DATASET_ORDER = [
     "gmuaccent",
     "buckeye",
@@ -26,6 +26,10 @@ METHOD_MAP = [
     ("xeus_multiaccent.panphon_ls2.", "panphon"),
     ("xeus_multiaccent.schedule_panphonlsp2_4k_vanilla.", "panphon then vanilla"),
     ("xeus_multiaccent.schedule_vanilla_4k_panphon", "vanilla then panphon"),
+    (
+        "xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps",
+        "huper-vanilla",
+    ),
 ]
 
 EVAL_RE = re.compile(r"^(?P<method>.*?)-(?P<dataset>[^-]+)-(?P<ckpt>\d+)$")
