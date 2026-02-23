@@ -42,6 +42,13 @@ Usage:
         --key_field utt_id \
         --language_field lang_sym \
         --noisy_pr # for noisy phone recognition
+
+    # Using a Kaldi-style ground truth file instead of the gt_field in the JSON:
+    python -m src.metrics.phone_recognition --evaluation_name xeuspr \
+        --prediction_file exp/runs/inf_doreco_xeuspr/8job/transcription.json \
+        --output_file exp/runs/inf_doreco_xeuspr/8job/inventory_results.csv \
+        --gt_file data/doreco/text \
+        --key_field utt_id
 """
 
 import argparse
@@ -64,6 +71,29 @@ from rich.table import Table
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
+
+
+def load_kaldi_text(path: str) -> Dict[str, str]:
+    """Load a Kaldi-style text file (utt_id <space> transcription per line).
+
+    Args:
+        path: Path to the Kaldi text file.
+
+    Returns:
+        Dictionary mapping utterance IDs to their transcriptions.
+    """
+    utt2text = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(maxsplit=1)
+            utt_id = parts[0]
+            text = parts[1] if len(parts) > 1 else ""
+            utt2text[utt_id] = text
+    print(f"Loaded {len(utt2text)} ground truth entries from {path}")
+    return utt2text
 
 
 @dataclass
@@ -463,13 +493,21 @@ class PhoneRecognitionEvaluator:
 
 
 def _load_predictions(
-    pred_file: str, language_field: str = None
+    pred_file: str,
+    language_field: str = None,
+    gt_file: str = None,
+    key_field: str = "utt_id",
+    gt_field: str = "masked_phones",
+    pred_field: str = "processed_transcript",
+    noisy_pr: bool = False,
 ) -> Dict[str, Dict[str, Dict[str, str]]]:
     """
     Loads prediction file from JSON format.
     The returned structure is:
     {'language': { utt_id: {"prediction": str, "transcription": str}, ... }}
     If language_field is None, 'language' is set to the string '"combined"'.
+    If gt_file is provided, ground truth labels are read from the Kaldi-style
+    file and override the gt_field values from the JSON.
     """
     with open(pred_file, "r") as f:
         data = json.load(f)
@@ -480,6 +518,9 @@ def _load_predictions(
     print(
         f"Loaded {new_len} entries from {pred_file} (removed {original_len - new_len} error entries)"
     )
+
+    # Optionally load ground truth from a Kaldi-style file
+    gt_lookup = load_kaldi_text(gt_file) if gt_file is not None else None
 
     all_languages = set()
     if language_field is not None:
@@ -494,25 +535,39 @@ def _load_predictions(
     print(f"Found {len(all_languages)} languages: {all_languages}")
     return_data = {}
     for lang in tqdm(all_languages, desc="Loading predictions"):
-        D = {
-            item["passthrough"][args.key_field]: {
-                "prediction": item["pred"][0][args.pred_field],
-                "transcription": (
-                    item["passthrough"][args.gt_field]
-                    if not args.noisy_pr
-                    else "".join(
-                        [
-                            n
-                            for n in item["passthrough"]["masked_phones"]
-                            if n != "[NOISE]"
-                        ]
-                    )
-                ),
+        D = {}
+        for _, item in data.items():
+            if item["passthrough"].get(language_field, "combined") != lang:
+                continue
+            utt_id = item["passthrough"][key_field]
+            prediction = item["pred"][0][pred_field]
+
+            # Determine ground truth: prefer gt_file if available
+            if gt_lookup is not None and utt_id in gt_lookup:
+                transcription = gt_lookup[utt_id]
+            elif not noisy_pr:
+                transcription = item["passthrough"][gt_field]
+            else:
+                transcription = "".join(
+                    [n for n in item["passthrough"]["masked_phones"] if n != "[NOISE]"]
+                )
+
+            D[utt_id] = {
+                "prediction": prediction,
+                "transcription": transcription,
             }
-            for _, item in data.items()
-            if item["passthrough"].get(language_field, "combined") == lang
-        }
         return_data[lang] = D
+
+    if gt_lookup is not None:
+        matched = sum(
+            1
+            for lang_data in return_data.values()
+            for uid in lang_data
+            if uid in gt_lookup
+        )
+        total = sum(len(lang_data) for lang_data in return_data.values())
+        print(f"Ground truth file matched {matched}/{total} utterances")
+
     return return_data
 
 
@@ -526,6 +581,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         type=str,
         default="masked_phones",
         help="Field name for ground truth transcription in the prediction file",
+    )
+    parser.add_argument(
+        "--gt_file",
+        type=str,
+        default=None,
+        help="Path to a Kaldi-style text file (utt_id <space> transcription) "
+        "to use as ground truth. Overrides --gt_field for matching utterance IDs.",
     )
     parser.add_argument(
         "--pred_field",
@@ -565,7 +627,15 @@ if __name__ == "__main__":
         assert args.evaluation_name is not None, "Please provide --evaluation_name"
 
     compute_inventory = args.language_field is not None
-    loaded_predictions = _load_predictions(args.prediction_file, args.language_field)
+    loaded_predictions = _load_predictions(
+        args.prediction_file,
+        args.language_field,
+        gt_file=args.gt_file,
+        key_field=args.key_field,
+        gt_field=args.gt_field,
+        pred_field=args.pred_field,
+        noisy_pr=args.noisy_pr,
+    )
     print(
         f"Loaded predictions for {len(loaded_predictions)} languages containing {sum(len(v) for v in loaded_predictions.values())} utterances."
     )
