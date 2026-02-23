@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
+
 import pandas as pd
 from rich.console import Console
 from rich.table import Table
@@ -11,37 +13,49 @@ from rich.table import Table
 ROOT = Path("exp/runs/ipapack_ctc")
 GLOBS = ["results-*.csv"]
 
-METRIC_COL = "FER (%)"
-
 DATASET_ORDER = [
     "gmuaccent",
     "buckeye",
     "epadb",
-    "speechoceannotth",
-    "l2arctic_perceived",
+    # "voxangeles",
+    # "speechoceannotth",
+    # "l2arctic_perceived",
 ]
+KNOWN_DATASETS = set(DATASET_ORDER)
 
 METHOD_MAP = [
     ("epitran", "epitran-g2p"),
-    ("xeus_multiaccent.accent_ls2.", "accent_mapping"),
-    ("xeus_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze", "vanilla"),
-    ("xeus_multiaccent.panphon_ls2.", "panphon"),
-    ("xeus_multiaccent.schedule_panphonlsp2_4k_vanilla.", "panphon then vanilla"),
-    ("xeus_multiaccent.schedule_vanilla_4k_panphon", "vanilla then panphon"),
+    # ("xeus_multiaccent.accent_ls2.", "accent_mapping"),
+    # ("xeus_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze", "vanilla"),
+    # ("xeus_multiaccent.panphon_ls2.", "panphon"),
+    # ("xeus_multiaccent.schedule_panphonlsp2_4k_vanilla.", "panphon then vanilla"),
+    # ("xeus_multiaccent.schedule_vanilla_4k_panphon", "vanilla then panphon"),
     (
         "xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps",
         "huper-vanilla",
     ),
-    (
-        "xeus_multiaccent.oracle_ls7.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40kstep",
-        "oracle_ls7",
-    ),
+    # (
+    #     "xeus_multiaccent.oracle_ls7.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40kstep",
+    #     "oracle_ls7",
+    # ),
     ("huper", "huper-model"),
     ("koel", "koellabs-model"),
 ]
 
-EVAL_RE = re.compile(r"^(?P<method>.*?)-(?P<dataset>[^-]+?)(?:-(?P<ckpt>\d+))?$")
+# All metrics to load.
+METRIC_COLS = ["FER (%)", "PER (%)", "SUB (%)", "INS (%)", "DEL (%)"]
 
+# Metrics that participate in bold/underline ranking (lower is better).
+RANK_METRICS = {"FER (%)", "PER (%)"}
+
+# Combined sub-line: which metrics, in order.
+COMBINED_METRICS = ["PER (%)", "SUB (%)", "INS (%)", "DEL (%)"]
+COMBINED_LABEL = "P|S|I|D"
+
+EVAL_RE = re.compile(r"^(?P<method>.*?)-(?P<dataset>[^-]+?)(?:-(?P<ckpt>\d+))?$")
+GT_STANDARD = "standard"
+BASELINE_METHOD = "epitran-g2p"
+EPS = 1e-9
 
 # -------------------- PARSING --------------------
 
@@ -50,24 +64,35 @@ def parse_eval_name(s: str):
     m = EVAL_RE.match(str(s))
     if not m:
         return None
-    ckpt = int(m.group("ckpt") or 0)
-    return m.group("method"), m.group("dataset"), ckpt
+    return m.group("method"), m.group("dataset"), int(m.group("ckpt") or 0)
 
 
-def match_method(method_raw: str):
+def match_method(method_raw: str) -> str | None:
     for needle, nice in METHOD_MAP:
         if needle in method_raw:
             return nice
     return None
 
 
+def detect_variant(dataset: str) -> tuple[str, str]:
+    """Map raw dataset name -> (base_dataset, gt_variant)."""
+    if dataset in KNOWN_DATASETS:
+        return dataset, GT_STANDARD
+    for known in sorted(KNOWN_DATASETS, key=len, reverse=True):
+        if dataset.startswith(known + "_"):
+            return known, dataset[len(known) + 1 :]
+    return dataset, GT_STANDARD
+
+
 # -------------------- LOADING --------------------
 
 
-def load_results() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (wide_standard, wide_epitran) pivot tables."""
-    rows_standard = []
-    rows_epitran = []
+def load_results() -> pd.DataFrame:
+    """Return long-form DataFrame:
+    Method | ckpt | dataset | gt_variant | FER (%) | PER (%) | …
+    """
+    chunks: list[pd.DataFrame] = []
+
     for pat in GLOBS:
         for p in ROOT.glob(pat):
             try:
@@ -82,7 +107,7 @@ def load_results() -> tuple[pd.DataFrame, pd.DataFrame]:
             if df.empty:
                 continue
 
-            df[["method_raw", "dataset", "ckpt"]] = pd.DataFrame(
+            df[["method_raw", "dataset_raw", "ckpt"]] = pd.DataFrame(
                 parsed.dropna().tolist(), index=df.index
             )
             df["Method"] = df["method_raw"].map(match_method)
@@ -90,145 +115,225 @@ def load_results() -> tuple[pd.DataFrame, pd.DataFrame]:
             if df.empty:
                 continue
 
-            df = df.sort_values(["Method", "ckpt", "dataset"]).drop_duplicates(
-                ["Method", "ckpt", "dataset"], keep="last"
-            )
+            variants = df["dataset_raw"].map(detect_variant)
+            df["dataset"] = variants.map(lambda x: x[0])
+            df["gt_variant"] = variants.map(lambda x: x[1])
+            df = df[df["dataset"].isin(KNOWN_DATASETS)].copy()
 
-            # Split into standard and _epitran ground-truth variants
-            is_epitran_gt = df["dataset"].str.endswith("_epitran")
-            df_std = df[~is_epitran_gt][
-                ["Method", "ckpt", "dataset", METRIC_COL]
-            ].copy()
-            df_epi = df[is_epitran_gt][["Method", "ckpt", "dataset", METRIC_COL]].copy()
+            df = df.sort_values(
+                ["Method", "ckpt", "dataset", "gt_variant"]
+            ).drop_duplicates(["Method", "ckpt", "dataset", "gt_variant"], keep="last")
 
-            # Map epitran-gt dataset names back to base names
-            if not df_epi.empty:
-                df_epi["dataset"] = df_epi["dataset"].str.replace(
-                    r"_epitran$", "", regex=True
-                )
+            keep = ["Method", "ckpt", "dataset", "gt_variant"] + [
+                c for c in METRIC_COLS if c in df.columns
+            ]
+            chunks.append(df[keep])
 
-            if not df_std.empty:
-                rows_standard.append(df_std)
-            if not df_epi.empty:
-                rows_epitran.append(df_epi)
-
-    if not rows_standard:
+    if not chunks:
         raise SystemExit("No usable CSV rows found.")
+    return pd.concat(chunks, ignore_index=True)
 
-    def _pivot(rows):
-        all_df = pd.concat(rows, ignore_index=True)
+
+# -------------------- PIVOTING --------------------
+
+
+def pivot_variant(df: pd.DataFrame, variant: str) -> dict[str, pd.DataFrame]:
+    """Pivot long df -> {metric_name: wide_df} for one GT variant."""
+    vdf = df[df["gt_variant"] == variant]
+    pivots: dict[str, pd.DataFrame] = {}
+    for metric in METRIC_COLS:
+        if metric not in vdf.columns:
+            continue
         wide = (
-            all_df.pivot_table(
+            vdf.pivot_table(
                 index=["Method", "ckpt"],
                 columns="dataset",
-                values=METRIC_COL,
+                values=metric,
                 aggfunc="last",
             )
             .reindex(columns=DATASET_ORDER)
             .sort_index()
         )
         wide["avg"] = wide.mean(axis=1, skipna=True)
-        return wide
-
-    wide_std = _pivot(rows_standard)
-    wide_epi = _pivot(rows_epitran) if rows_epitran else pd.DataFrame()
-
-    return wide_std, wide_epi
+        pivots[metric] = wide
+    return pivots
 
 
-# -------------------- BEST / SECOND --------------------
+# -------------------- RANKINGS --------------------
 
 
-def compute_best_second(wide: pd.DataFrame):
-    """Compute best/second-best excluding epitran."""
-    non_epi = wide[~wide.index.get_level_values("Method").str.contains("epitran")]
-
-    best_second = {}
-    for c in wide.columns:
-        vals = non_epi[c].dropna().astype(float)
-        if len(vals) == 0:
-            best_second[c] = (None, None)
+def compute_rankings(
+    pivots: dict[str, pd.DataFrame],
+) -> dict[tuple[str, str], tuple[float | None, float | None]]:
+    """Return {(col, metric): (best, second)} excluding the baseline."""
+    rankings: dict[tuple[str, str], tuple[float | None, float | None]] = {}
+    for metric in RANK_METRICS:
+        wide = pivots.get(metric)
+        if wide is None:
             continue
-        uniq = sorted(set(vals))
-        best = uniq[0]
-        second = uniq[1] if len(uniq) > 1 else None
-        best_second[c] = (best, second)
-    return best_second
+        non_base = wide[~wide.index.get_level_values("Method").str.contains("epitran")]
+        for col in wide.columns:
+            vals = sorted(set(non_base[col].dropna().astype(float)))
+            best = vals[0] if vals else None
+            second = vals[1] if len(vals) > 1 else None
+            rankings[(col, metric)] = (best, second)
+    return rankings
 
 
-# -------------------- PRINTING --------------------
+# -------------------- FORMATTING --------------------
 
 
-def _add_rows(table, wide, best_second, columns, section_label=None):
-    """Add rows from a wide DataFrame to a Rich table."""
-    EPS = 1e-9
+def _get_val(pivots: dict[str, pd.DataFrame], metric: str, idx, col):
+    wide = pivots.get(metric)
+    if wide is None or idx not in wide.index:
+        return pd.NA
+    return wide.loc[idx, col]
 
-    def fmt(v, c):
-        if pd.isna(v):
-            return ""
-        v = float(v)
-        s = f"{v:.2f}"
-        best, second = best_second[c]
-        if best is not None and abs(v - best) <= EPS:
-            return f"[bold]{s}[/bold]"
-        if second is not None and abs(v - second) <= EPS:
-            return f"[u]{s}[/u]"
-        return s
 
-    # Split epitran-g2p and others
-    epi_rows = wide[wide.index.get_level_values("Method") == "epitran-g2p"]
-    other_rows = wide[wide.index.get_level_values("Method") != "epitran-g2p"]
+def _fmt_ranked(v, best, second, decimals: int = 2) -> str:
+    if pd.isna(v):
+        return ""
+    v = float(v)
+    s = f"{v:.{decimals}f}"
+    if best is not None and abs(v - best) <= EPS:
+        return f"[bold]{s}[/bold]"
+    if second is not None and abs(v - second) <= EPS:
+        return f"[u]{s}[/u]"
+    return s
 
-    for (m, ckpt), r in other_rows.iterrows():
-        table.add_row(m, str(int(ckpt)), *[fmt(r[c], c) for c in columns])
 
-    if not epi_rows.empty:
+def _fmt_plain(v, decimals: int = 1) -> str:
+    if pd.isna(v):
+        return ""
+    return f"{float(v):.{decimals}f}"
+
+
+def fmt_cell(pivots, rankings, idx, ds, show_psid: bool = False) -> str:
+    """Format a single table cell: FER on top, optionally P|S|I|D below."""
+    # FER line
+    fer_v = _get_val(pivots, "FER (%)", idx, ds)
+    best, second = rankings.get((ds, "FER (%)"), (None, None))
+    fer_str = _fmt_ranked(fer_v, best, second, decimals=2)
+
+    if not show_psid:
+        return fer_str
+
+    # Combined line
+    parts: list[str] = []
+    any_present = False
+    for metric in COMBINED_METRICS:
+        v = _get_val(pivots, metric, idx, ds)
+        if not pd.isna(v):
+            any_present = True
+        if metric in RANK_METRICS:
+            b, s = rankings.get((ds, metric), (None, None))
+            parts.append(_fmt_ranked(v, b, s, decimals=1))
+        else:
+            parts.append(_fmt_plain(v, decimals=1))
+
+    if any_present:
+        combined_str = "|".join(parts)
+        return f"{fer_str}\n{combined_str}"
+    elif fer_str:
+        return fer_str
+    else:
+        return ""
+
+
+# -------------------- RENDERING --------------------
+
+
+def _add_rows(table, pivots, rankings, ds_cols, index_subset, show_psid: bool):
+    for method, ckpt in index_subset:
+        idx = (method, ckpt)
+        cells: list[str] = [method, str(int(ckpt))]
+        for ds in ds_cols:
+            cells.append(fmt_cell(pivots, rankings, idx, ds, show_psid))
+        table.add_row(*cells)
+
+
+def _render_variant(table, pivots, rankings, ds_cols, show_psid: bool):
+    fer_wide = pivots.get("FER (%)")
+    if fer_wide is None or fer_wide.empty:
+        return
+
+    all_idx = fer_wide.index
+    is_baseline = all_idx.get_level_values("Method") == BASELINE_METHOD
+
+    non_base = all_idx[~is_baseline]
+    if not non_base.empty:
+        _add_rows(table, pivots, rankings, ds_cols, non_base, show_psid)
+
+    base = all_idx[is_baseline]
+    if not base.empty:
         table.add_section()
-        for (m, ckpt), r in epi_rows.iterrows():
-            table.add_row(m, str(int(ckpt)), *[fmt(r[c], c) for c in columns])
+        _add_rows(table, pivots, rankings, ds_cols, base, show_psid)
 
 
-def render_table(wide_std: pd.DataFrame, wide_epi: pd.DataFrame):
+def render_table(df: pd.DataFrame, show_psid: bool = False):
     console = Console()
-    table = Table(title=f"{METRIC_COL} by dataset", show_lines=False)
+    table = Table(title="Results by dataset", show_lines=False)
 
     table.add_column("Method")
     table.add_column("ckpt", justify="right")
-    for c in wide_std.columns:
-        table.add_column(c, justify="right")
 
-    best_second_std = compute_best_second(wide_std)
+    ds_cols = DATASET_ORDER + ["avg"]
+    for ds in ds_cols:
+        header = f"{ds}\n{COMBINED_LABEL}" if show_psid else ds
+        table.add_column(header, justify="right")
 
-    _add_rows(table, wide_std, best_second_std, wide_std.columns)
+    variants = sorted(df["gt_variant"].unique(), key=lambda v: (v != GT_STANDARD, v))
 
-    # Add _epitran ground-truth rows as a separate section
-    if not wide_epi.empty:
-        best_second_epi = compute_best_second(wide_epi)
-        table.add_section()
-        # Header row to distinguish the epitran-gt section
-        table.add_row(
-            "[italic]epitran as ground-truth[/italic]",
-            "",
-            *["" for _ in wide_std.columns],
-        )
-        _add_rows(table, wide_epi, best_second_epi, wide_std.columns)
+    for i, variant in enumerate(variants):
+        pivots = pivot_variant(df, variant)
+        rankings = compute_rankings(pivots)
+
+        if i > 0:
+            table.add_section()
+            table.add_row(
+                f"[italic]{variant} ground-truth[/italic]",
+                "",
+                *[""] * len(ds_cols),
+            )
+
+        _render_variant(table, pivots, rankings, ds_cols, show_psid)
 
     console.print(table)
+
+
+# -------------------- CSV OUTPUT --------------------
+
+
+def print_csv(df: pd.DataFrame):
+    variants = sorted(df["gt_variant"].unique(), key=lambda v: (v != GT_STANDARD, v))
+    for variant in variants:
+        pivots = pivot_variant(df, variant)
+        label = variant if variant != GT_STANDARD else "standard"
+        for metric in METRIC_COLS:
+            wide = pivots.get(metric)
+            if wide is not None:
+                print(f"\n--- CSV: {metric} ({label} ground-truth) ---")
+                print(wide.reset_index().round(2).to_csv(index=False, na_rep=""))
 
 
 # -------------------- MAIN --------------------
 
 
 def main():
-    wide_std, wide_epi = load_results()
-    render_table(wide_std, wide_epi)
+    parser = argparse.ArgumentParser(description="Display evaluation results.")
+    parser.add_argument(
+        "--psid",
+        action="store_true",
+        default=False,
+        help="Show P|S|I|D (PER, SUB, INS, DEL) below FER in each cell",
+    )
+    args = parser.parse_args()
 
-    print("\n--- CSV (standard ground-truth) ---")
-    print(wide_std.reset_index().round(2).to_csv(index=False, na_rep=""))
-
-    if not wide_epi.empty:
-        print("\n--- CSV (epitran ground-truth) ---")
-        print(wide_epi.reset_index().round(2).to_csv(index=False, na_rep=""))
+    df = load_results()
+    mask = ~(df["Method"].str.contains("then")) & (df["ckpt"] == 4000)
+    df = df[~mask]
+    print_csv(df)
+    render_table(df, show_psid=args.psid)
 
 
 if __name__ == "__main__":

@@ -4,8 +4,7 @@
 #    # '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.schedule_panphon_4k_vanilla.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-4000.ckpt'
 # )
 
-# DS=(speechoceannotth l2arctic_perceived epadb gmuaccent buckeye)
-DS=(voxangeles)
+DS=(speechoceannotth l2arctic_perceived epadb gmuaccent buckeye voxangeles)
 
 # in order
 # 1. panphon w/ ls point2 and then vanilla ctc

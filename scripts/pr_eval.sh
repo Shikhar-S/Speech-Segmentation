@@ -58,6 +58,7 @@ for ckpt in ${ckpts[@]}; do
    stepnum=$(basename $ckpt | sed 's/checkpoint-\(.*\).ckpt/\1/')
    for ds in ${DS[@]}; do
       echo "Evaluating checkpoint: $ckpt on dataset: $ds with epitran"
+      python scripts/jsonl2json.py --dirname exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}
       python -m src.metrics.phone_recognition \
           --prediction_file exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/transcription.json \
           --output_file exp/runs/ipapack_ctc/results-${train_run_folder}.csv \
