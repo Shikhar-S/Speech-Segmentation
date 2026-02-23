@@ -64,8 +64,10 @@ def match_method(method_raw: str):
 # -------------------- LOADING --------------------
 
 
-def load_results() -> pd.DataFrame:
-    rows = []
+def load_results() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return (wide_standard, wide_epitran) pivot tables."""
+    rows_standard = []
+    rows_epitran = []
     for pat in GLOBS:
         for p in ROOT.glob(pat):
             try:
@@ -92,26 +94,46 @@ def load_results() -> pd.DataFrame:
                 ["Method", "ckpt", "dataset"], keep="last"
             )
 
-            rows.append(df[["Method", "ckpt", "dataset", METRIC_COL]])
+            # Split into standard and _epitran ground-truth variants
+            is_epitran_gt = df["dataset"].str.endswith("_epitran")
+            df_std = df[~is_epitran_gt][
+                ["Method", "ckpt", "dataset", METRIC_COL]
+            ].copy()
+            df_epi = df[is_epitran_gt][["Method", "ckpt", "dataset", METRIC_COL]].copy()
 
-    if not rows:
+            # Map epitran-gt dataset names back to base names
+            if not df_epi.empty:
+                df_epi["dataset"] = df_epi["dataset"].str.replace(
+                    r"_epitran$", "", regex=True
+                )
+
+            if not df_std.empty:
+                rows_standard.append(df_std)
+            if not df_epi.empty:
+                rows_epitran.append(df_epi)
+
+    if not rows_standard:
         raise SystemExit("No usable CSV rows found.")
 
-    all_df = pd.concat(rows, ignore_index=True)
-
-    wide = (
-        all_df.pivot_table(
-            index=["Method", "ckpt"],
-            columns="dataset",
-            values=METRIC_COL,
-            aggfunc="last",
+    def _pivot(rows):
+        all_df = pd.concat(rows, ignore_index=True)
+        wide = (
+            all_df.pivot_table(
+                index=["Method", "ckpt"],
+                columns="dataset",
+                values=METRIC_COL,
+                aggfunc="last",
+            )
+            .reindex(columns=DATASET_ORDER)
+            .sort_index()
         )
-        .reindex(columns=DATASET_ORDER)
-        .sort_index()
-    )
+        wide["avg"] = wide.mean(axis=1, skipna=True)
+        return wide
 
-    wide["avg"] = wide.mean(axis=1, skipna=True)
-    return wide
+    wide_std = _pivot(rows_standard)
+    wide_epi = _pivot(rows_epitran) if rows_epitran else pd.DataFrame()
+
+    return wide_std, wide_epi
 
 
 # -------------------- BEST / SECOND --------------------
@@ -137,16 +159,8 @@ def compute_best_second(wide: pd.DataFrame):
 # -------------------- PRINTING --------------------
 
 
-def render_table(wide: pd.DataFrame):
-    console = Console()
-    table = Table(title=f"{METRIC_COL} by dataset", show_lines=False)
-
-    table.add_column("Method")
-    table.add_column("ckpt", justify="right")
-    for c in wide.columns:
-        table.add_column(c, justify="right")
-
-    best_second = compute_best_second(wide)
+def _add_rows(table, wide, best_second, columns, section_label=None):
+    """Add rows from a wide DataFrame to a Rich table."""
     EPS = 1e-9
 
     def fmt(v, c):
@@ -161,17 +175,43 @@ def render_table(wide: pd.DataFrame):
             return f"[u]{s}[/u]"
         return s
 
-    # Split epitran and others
+    # Split epitran-g2p and others
     epi_rows = wide[wide.index.get_level_values("Method") == "epitran-g2p"]
     other_rows = wide[wide.index.get_level_values("Method") != "epitran-g2p"]
 
     for (m, ckpt), r in other_rows.iterrows():
-        table.add_row(m, str(int(ckpt)), *[fmt(r[c], c) for c in wide.columns])
+        table.add_row(m, str(int(ckpt)), *[fmt(r[c], c) for c in columns])
 
     if not epi_rows.empty:
         table.add_section()
         for (m, ckpt), r in epi_rows.iterrows():
-            table.add_row(m, str(int(ckpt)), *[fmt(r[c], c) for c in wide.columns])
+            table.add_row(m, str(int(ckpt)), *[fmt(r[c], c) for c in columns])
+
+
+def render_table(wide_std: pd.DataFrame, wide_epi: pd.DataFrame):
+    console = Console()
+    table = Table(title=f"{METRIC_COL} by dataset", show_lines=False)
+
+    table.add_column("Method")
+    table.add_column("ckpt", justify="right")
+    for c in wide_std.columns:
+        table.add_column(c, justify="right")
+
+    best_second_std = compute_best_second(wide_std)
+
+    _add_rows(table, wide_std, best_second_std, wide_std.columns)
+
+    # Add _epitran ground-truth rows as a separate section
+    if not wide_epi.empty:
+        best_second_epi = compute_best_second(wide_epi)
+        table.add_section()
+        # Header row to distinguish the epitran-gt section
+        table.add_row(
+            "[italic]epitran as ground-truth[/italic]",
+            "",
+            *["" for _ in wide_std.columns],
+        )
+        _add_rows(table, wide_epi, best_second_epi, wide_std.columns)
 
     console.print(table)
 
@@ -180,11 +220,15 @@ def render_table(wide: pd.DataFrame):
 
 
 def main():
-    wide = load_results()
-    render_table(wide)
+    wide_std, wide_epi = load_results()
+    render_table(wide_std, wide_epi)
 
-    print("\n--- CSV ---")
-    print(wide.reset_index().round(2).to_csv(index=False, na_rep=""))
+    print("\n--- CSV (standard ground-truth) ---")
+    print(wide_std.reset_index().round(2).to_csv(index=False, na_rep=""))
+
+    if not wide_epi.empty:
+        print("\n--- CSV (epitran ground-truth) ---")
+        print(wide_epi.reset_index().round(2).to_csv(index=False, na_rep=""))
 
 
 if __name__ == "__main__":
