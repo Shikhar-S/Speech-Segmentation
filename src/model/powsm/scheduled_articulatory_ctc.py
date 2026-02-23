@@ -55,10 +55,10 @@ class ScheduledArticulatoryCTC(torch.nn.Module):
         self,
         neighbors_by_lang: Dict[str, Tuple[torch.Tensor, torch.Tensor]],
         # --- Model hyperparameters (4 knobs) ---
-        beta: float = 50.0,
-        penalty_init: float = -8.0,
-        penalty_final: float = -0.5,
-        penalty_halflife: int = 8000,
+        beta: float = 15.0,
+        penalty_init: float = -12.0,
+        penalty_final: float = 0,
+        penalty_halflife: int = 2500,
         # --- k2 implementation details (not tuning knobs) ---
         modified_topo: bool = False,
         output_beam: float = 200.0,

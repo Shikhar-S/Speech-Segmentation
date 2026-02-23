@@ -39,6 +39,10 @@ class CTC(torch.nn.Module):
         artctc_topk: int = 8,
         artctc_normalize: bool = True,
         artctc_label_smoothing: float = 0.0,
+        # scheduling parameters for distance-based ctc types
+        penalty_init: Optional[float] = None,
+        penalty_final: Optional[float] = None,
+        penalty_halflife: Optional[int] = None,
     ):
         super().__init__()
         eprojs = encoder_output_size
@@ -86,22 +90,44 @@ class CTC(torch.nn.Module):
                 raise ImportError(
                     "You should install K2 to use panphon/diacritic/manual distance CTC"
                 )
-
-            from src.model.powsm.vectorized_articulatory_ctc import (
-                VectorizedArticulatoryCTC,
+            use_with_scheduling = (
+                penalty_init is not None
+                and penalty_final is not None
+                and penalty_halflife is not None
             )
-
             assert (
                 artctc_neighbors_by_lang is not None
                 and "global" in artctc_neighbors_by_lang
             ), "articulatory CTC requires artctc_neighbors_by_lang with at least 'global'"
-            self.ctc_loss = VectorizedArticulatoryCTC(
-                neighbors_by_lang=artctc_neighbors_by_lang,
-                beta=artctc_beta,
-                topk=artctc_topk,
-                normalize=artctc_normalize,
-                label_smoothing=artctc_label_smoothing,
-            )
+            if not use_with_scheduling:
+                from src.model.powsm.vectorized_articulatory_ctc import (
+                    VectorizedArticulatoryCTC,
+                )
+
+                self.ctc_loss = VectorizedArticulatoryCTC(
+                    neighbors_by_lang=artctc_neighbors_by_lang,
+                    beta=artctc_beta,
+                    topk=artctc_topk,
+                    normalize=artctc_normalize,
+                    label_smoothing=artctc_label_smoothing,
+                )
+                log.info(f"Using vectorized articulatory CTC without scheduling")
+            else:
+                # use the scheduling variant
+                from src.model.powsm.scheduled_articulatory_ctc import (
+                    ScheduledArticulatoryCTC,
+                )
+
+                self.ctc_loss = ScheduledArticulatoryCTC(
+                    neighbors_by_lang=artctc_neighbors_by_lang,
+                    beta=artctc_beta,
+                    penalty_init=penalty_init,
+                    penalty_final=penalty_final,
+                    penalty_halflife=penalty_halflife,
+                )
+                log.info(
+                    f"Using scheduled articulatory CTC with scheduling parameters: {penalty_init}, {penalty_final}, {penalty_halflife}"
+                )
 
         else:
             raise ValueError(f'ctc_type must be "builtin" or "gtnctc": {self.ctc_type}')
