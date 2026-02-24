@@ -55,7 +55,6 @@ IPA_TO_ARPABET = {
     "ɾ̃": "NX",
     "ɾ": "DX",
     "ʔ": "Q",
-    "ɝ": "ER",
     "ʉ": "UX",  # d<u>de
     # -------------------------------
     # TIMIT-SPECIFIC EXTRA SYMBOLS
