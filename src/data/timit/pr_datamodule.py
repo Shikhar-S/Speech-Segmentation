@@ -10,7 +10,9 @@ CTC-style batches with:
 
 import json
 from pathlib import Path
+import random
 from typing import Dict, List, Optional, Tuple
+from lightning.pytorch.utilities import CombinedLoader
 
 import epitran
 import panphon
@@ -31,23 +33,24 @@ def _load_waveform(
     """Load a TIMIT waveform, resample to target_sr and ensure mono."""
     wav_path = timit_root / f"{segment_id}.wav"
     waveform, sr = torchaudio.load(str(wav_path))
-
     if sr != target_sr:
         resampler = torchaudio.transforms.Resample(sr, target_sr)
         waveform = resampler(waveform)
         sr = target_sr
-
     if waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
-
     return waveform.squeeze(0), sr  # (T,), sr
 
 
-def build_timit_phone_sequence(item: Dict) -> List[str]:
+def build_timit_phone_sequence(
+    item: Dict, ipa_segmenter: panphon.FeatureTable
+) -> List[str]:
     """Convert ARPABET phone sequence in metadata item to IPA phones."""
     phones_ipa: List[str] = []
     for ph in item["phones"]:
         phones_ipa.append(ARPABET_TO_IPA.get(ph.lower(), ph.lower()))
+    phones_ipa = "".join(phones_ipa)
+    phones_ipa = [seg for seg in ipa_segmenter.ipa_segs(phones_ipa) if seg]
     return phones_ipa
 
 
@@ -67,13 +70,9 @@ def phones_to_token_ids(
     return [vocab.get(p, unk_id) for p in phones]
 
 
-def choose_label_type(
-    idx: int, epitran_mix_ratio: float, mix_mod_n: Optional[int]
-) -> str:
-    """Decide whether to use 'epitran' or 'timit' labels for a given index."""
-    if epitran_mix_ratio <= 0.0 or mix_mod_n is None or mix_mod_n <= 0:
-        return "timit"
-    return "epitran" if (idx % mix_mod_n == 0) else "timit"
+def choose_label_type(epitran_mix_ratio: float) -> str:
+    use_epitran = random.random() < epitran_mix_ratio  # in [0.0, 1.0)
+    return "epitran" if use_epitran else "timit"
 
 
 class TimitPRDataset(Dataset):
@@ -103,6 +102,7 @@ class TimitPRDataset(Dataset):
             epitran_lang: Epitran language code, e.g., "eng-Latn".
         """
         super().__init__()
+        random.seed(42)
         self.timit_root = Path(timit_root)
         self.metadata_path = Path(metadata_path)
         self.split = split
@@ -117,15 +117,9 @@ class TimitPRDataset(Dataset):
             self.vocab: Dict[str, int] = json.load(f)
         self.unk_id = self.vocab.get("<unk>", IGNORE_ID)
 
-        self.epi: Optional[epitran.Epitran] = None
-        self.ipa_segmenter: Optional[panphon.FeatureTable] = None
-        self.mix_mod_n: Optional[int] = None
-
-        if self.epitran_mix_ratio > 0.0 and self.split == "train":
-            # Approximate ratio via idx % N == 0
-            self.mix_mod_n = max(1, int(round(1.0 / self.epitran_mix_ratio)))
-            self.epi = epitran.Epitran(epitran_lang)
-            self.ipa_segmenter = panphon.FeatureTable()
+        self.mix_mod_n = None
+        self.epi = epitran.Epitran(epitran_lang)
+        self.ipa_segmenter = panphon.FeatureTable()
 
     def __len__(self) -> int:
         return len(self.metadata)
@@ -141,14 +135,17 @@ class TimitPRDataset(Dataset):
             if speech.shape[0] > max_samples:
                 speech = speech[:max_samples]
 
-        label_source = choose_label_type(idx, self.epitran_mix_ratio, self.mix_mod_n)
+        if self.split == "train" and self.epitran_mix_ratio > 0.0:
+            label_source = choose_label_type(self.epitran_mix_ratio)
+        else:
+            label_source = "timit"
 
-        if label_source == "epitran" and self.epi is not None and self.ipa_segmenter:
+        if label_source == "epitran":
             phones = build_epitran_phone_sequence(
                 self.epi, self.ipa_segmenter, item.get("text", "")
             )
         else:
-            phones = build_timit_phone_sequence(item)
+            phones = build_timit_phone_sequence(item, self.ipa_segmenter)
             label_source = "timit"
 
         token_ids = phones_to_token_ids(phones, self.vocab, self.unk_id)
@@ -164,9 +161,7 @@ class TimitPRDataset(Dataset):
             "utt_id": segment_id,
             "split": self.split,
             "label_source": label_source,
-            # For compatibility with PhoneRecognitionModel / XeusPR, we can
-            # optionally provide a language symbol.
-            "lang_sym": "eng",
+            "lang_sym": "<eng>",
         }
 
 
@@ -183,9 +178,7 @@ def timit_pr_collate(batch: List[Dict]) -> Dict:
 
     text_lengths = torch.tensor([b["text_length"] for b in batch], dtype=torch.long)
     max_L = int(text_lengths.max().item())
-    padded_text = torch.full(
-        (batch_size, max_L), IGNORE_ID, dtype=torch.long
-    )
+    padded_text = torch.full((batch_size, max_L), IGNORE_ID, dtype=torch.long)
     for i, b in enumerate(batch):
         L_i = b["text"].shape[0]
         padded_text[i, :L_i] = b["text"]
@@ -215,6 +208,7 @@ class TimitPRDataModule(L.LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         target_sr: int = 16000,
+        dev_splits: Optional[List[str]] = None,
         max_speech_length: Optional[float] = None,
         epitran_mix_ratio: float = 0.0,
         epitran_lang: str = "eng-Latn",
@@ -230,71 +224,75 @@ class TimitPRDataModule(L.LightningDataModule):
         self.max_speech_length = max_speech_length
         self.epitran_mix_ratio = float(epitran_mix_ratio)
         self.epitran_lang = epitran_lang
+        self.dev_splits = dev_splits if dev_splits is not None else ["val"]
 
         self.train_metadata = self.local_cache_path / "train_metadata.json"
         self.val_metadata = self.local_cache_path / "val_metadata.json"
         self.test_metadata = self.local_cache_path / "test_metadata.json"
 
+    def _ds(self, split: str):
+        return TimitPRDataset(
+            timit_root=self.timit_root,
+            metadata_path=str(getattr(self, f"{split}_metadata")),
+            vocab_file=self.vocab_file,
+            split=split,
+            target_sr=self.target_sr,
+            max_speech_length=self.max_speech_length,
+            epitran_mix_ratio=self.epitran_mix_ratio if split == "train" else 0.0,
+            epitran_lang=self.epitran_lang,
+        )
+
     def setup(self, stage: Optional[str] = None) -> None:
-        self.train_dataset = TimitPRDataset(
-            timit_root=self.timit_root,
-            metadata_path=str(self.train_metadata),
-            vocab_file=self.vocab_file,
-            split="train",
-            target_sr=self.target_sr,
-            max_speech_length=self.max_speech_length,
-            epitran_mix_ratio=self.epitran_mix_ratio,
-            epitran_lang=self.epitran_lang,
-        )
-        # For validation / test, use ground-truth phones only
-        self.val_dataset = TimitPRDataset(
-            timit_root=self.timit_root,
-            metadata_path=str(self.val_metadata),
-            vocab_file=self.vocab_file,
-            split="val",
-            target_sr=self.target_sr,
-            max_speech_length=self.max_speech_length,
-            epitran_mix_ratio=0.0,
-            epitran_lang=self.epitran_lang,
-        )
-        self.test_dataset = TimitPRDataset(
-            timit_root=self.timit_root,
-            metadata_path=str(self.test_metadata),
-            vocab_file=self.vocab_file,
-            split="test",
-            target_sr=self.target_sr,
-            max_speech_length=self.max_speech_length,
-            epitran_mix_ratio=0.0,
-            epitran_lang=self.epitran_lang,
+        self.train_dataset = self._ds("train")
+        self.val_dataset = self._ds("val")
+        self.test_dataset = self._ds("test")
+
+    def _dl(self, split: str):
+        return DataLoader(
+            getattr(self, f"{split}_dataset"),
+            batch_size=self.batch_size,
+            shuffle=split == "train",
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            collate_fn=timit_pr_collate,
         )
 
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            collate_fn=timit_pr_collate,
-        )
+        return self._dl("train")
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            collate_fn=timit_pr_collate,
-        )
+        loaders = [self._dl(split=s) for s in self.dev_splits]
+        assert len(loaders) > 0, "No validation splits found."
+        return CombinedLoader(loaders, mode="sequential")
 
     def test_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            collate_fn=timit_pr_collate,
-        )
+        return self._dl("test")
 
+
+if __name__ == "__main__":
+    # Example usage: python -m src.data.timit.pr_datamodule
+    timit_root = "/work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk"
+    local_cache_path = "exp/cache/timit"
+    vocab_file = "src/model/xeusphoneme/resources/ipa_vocab.json"
+
+    data_module = TimitPRDataModule(
+        timit_root=timit_root,
+        local_cache_path=local_cache_path,
+        vocab_file=vocab_file,
+        batch_size=10,
+        num_workers=0,
+        pin_memory=False,
+        target_sr=16000,
+        max_speech_length=10.0,
+        epitran_mix_ratio=0.4,
+        epitran_lang="eng-Latn",
+    )
+    data_module.setup()
+    train_loader = data_module.train_dataloader()
+    id2token = {v: k for k, v in data_module.train_dataset.vocab.items()}
+    for batch in train_loader:
+        print(batch)
+        # asr_text = batch["text"][0][: batch["text_length"][0]].tolist()
+        # asr_text = [id2token.get(tok_id, "<unk>") for tok_id in asr_text]
+        # print("Decoded ASR text :", asr_text)
+        break

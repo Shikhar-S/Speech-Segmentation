@@ -1,7 +1,7 @@
 # @package _global_
 
 # export HF_HOME="exp/cache/hf"
-# python src/main.py experiment=train/ipapack_accent_ctc model.net=xeuspr logger=csv trainer.max_steps=100 trainer.val_check_interval=10 run_folder=test
+# python src/main.py experiment=train/ipapack_accent_ctc logger=csv trainer.max_steps=100 trainer.val_check_interval=10 run_folder=test
 
 # sbatch -c 36 --ntasks-per-node=2 --gpus-per-node=2 --mem=240G scripts/daixpr.batch run_folder=CHANGE model.net=xeuspr experiment=train/ipapack_accent_ctc trainer.accumulate_grad_batches=8 model.optimizer.lr=0.0001
 
@@ -49,7 +49,6 @@ model:
       artctc_topk: 5
       artctc_normalize: true
       artctc_label_smoothing: 0.2 # weight to be distributed over other neighbors
-      oracle_mapping: ""
   optimizer:
     lr: 0.00003
   scheduler:
