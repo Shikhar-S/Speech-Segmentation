@@ -26,20 +26,32 @@ KNOWN_DATASETS = set(DATASET_ORDER)
 METHOD_MAP = [
     ("epitran", "epitran-g2p"),
     # ("xeus_multiaccent.accent_ls2.", "accent_mapping"),
-    # ("xeus_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze", "vanilla"),
-    # ("xeus_multiaccent.panphon_ls2.", "panphon"),
-    # ("xeus_multiaccent.schedule_panphonlsp2_4k_vanilla.", "panphon then vanilla"),
-    # ("xeus_multiaccent.schedule_vanilla_4k_panphon", "vanilla then panphon"),
+    ("xeus_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze", "vanilla"),
+    ("xeus_multiaccent.panphon_ls2.", "panphon"),
+    ("xeus_multiaccent.schedule_panphonlsp2_4k_vanilla.", "panphon then vanilla"),
+    ("xeus_multiaccent.schedule_vanilla_4k_panphon", "vanilla then panphon"),
     (
-        "xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps",
-        "huper-vanilla",
+        "xeus_multiaccent.sched_vanilla_oracle_ls2",
+        "vanilla then oracle",
     ),
+    # (
+    #     "xeus_multiaccent.losssched_half2.5k_m12to0.oracle.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps",
+    #     "oracle_w_losssched",
+    # ),
+    # (
+    #     "xeus_multiaccent.losssched_half30k_m12tomp5.panphonk8.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps",
+    #     "fulldata_panphon_losssched",
+    # ),
+    # (
+    #     "xeus_huper.vanilla.bs128.lr3em5.sched_p10warm_p90const_500unfreeze.8ksteps",
+    #     "huper-vanilla",
+    # ),
     # (
     #     "xeus_multiaccent.oracle_ls7.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40kstep",
     #     "oracle_ls7",
     # ),
-    ("huper", "huper-model"),
-    ("koel", "koellabs-model"),
+    # ("huper", "huper-model"),
+    # ("koel", "koellabs-model"),
 ]
 
 # All metrics to load.

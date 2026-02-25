@@ -66,9 +66,9 @@ model:
 
 callbacks:
   model_checkpoint:
-    monitor: null
+    monitor: "val/loss"
     auto_insert_metric_name: False
-    mode: "min" # dummy
+    mode: "min"
     save_top_k: 1
     filename: "checkpoint-{step}"
     save_last: True
