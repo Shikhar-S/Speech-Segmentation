@@ -1,0 +1,82 @@
+# @package _global_
+
+defaults:
+  - override /data: null # defined below
+  - override /model: phone_recognition
+  - override /model/net: xeuspr
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: timit_xeuspr_interctc
+tags: ["timit", "xeuspr", "phone_recognition", "epitran_mix", "interctc"]
+
+seed: 42
+
+trainer:
+  devices: -1  # use all available GPUs
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 0
+  max_epochs: -1
+  max_steps: 5000 # 125 steps per epoch with batch size 32, so ~ 40 epochs
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 125
+  check_val_every_n_epoch: null
+  log_every_n_steps: 100
+
+data:
+  _target_: src.data.timit.pr_datamodule.TimitPRDataModule
+  timit_root: /work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk
+  local_cache_path: ${paths.cache_dir}/timit
+  vocab_file: ${model.net.vocab_file}
+  batch_size: 32
+  num_workers: 6
+  dev_splits: ['val','test']
+  target_sr: 16000
+  max_speech_length: null
+  epitran_mix_ratio: 0.0   # ~x% of train examples use Epitran labels
+  epitran_lang: "eng-Latn"
+
+model:
+  dev_splits: ${data.dev_splits}
+  net:
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+    ctc_config:
+      ctc_type: panphon_distance
+      artctc_beta: 50.0
+      artctc_topk: 5
+      artctc_normalize: true
+      artctc_label_smoothing: 0.2
+    interctc_weight: 0.3   # 30% from intermediate layers, 70% from final
+    interctc_layer_idx: [9] # midpoint of 19-layer xeus encoder
+  optimizer:
+    lr: 0.00005
+  scheduler:
+    _target_: src.recipe.phone_recognition.model_module.get_w2v2ph_schedule
+    _partial_: true
+    num_training_steps: ${trainer.max_steps}
+    encoder_unfreeze_step: 0
+    warmup_fraction: 0.0
+    constant_fraction: 1.0
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/loss"
+    auto_insert_metric_name: False
+    mode: "min"
+    save_top_k: 1
+    filename: "checkpoint-{step}"
+    save_last: True
+    every_n_epochs: null
+    every_n_train_steps: ${trainer.val_check_interval}
+  early_stopping: null
+  learning_rate_monitor:
+    logging_interval: "step"
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}
+    project: "SSLPR"
+    name: ${run_folder}

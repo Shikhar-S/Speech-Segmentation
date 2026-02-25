@@ -41,6 +41,7 @@ class XeusPRModel(torch.nn.Module):
         sym_blank: str = "<blank>",
         freeze_frontend: bool = True,
         weighted_sum: bool = False,
+        interctc_weight: float = 0.0,
         **kwargs,
     ):
         super().__init__()
@@ -73,6 +74,7 @@ class XeusPRModel(torch.nn.Module):
                 n_layers is not None and n_layers > 0
             ), "Cannot infer number of encoder layers for weighted_sum"
             self.layer_weights = torch.nn.Parameter(torch.zeros(int(n_layers)))
+        self.interctc_weight = interctc_weight
 
     def collect_feats(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor, **kwargs
@@ -83,9 +85,36 @@ class XeusPRModel(torch.nn.Module):
 
     def forward(self, speech, speech_lengths, text, text_lengths, **kwargs):
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
+
+        intermediate_outs = None
+        if isinstance(encoder_out, tuple):
+            intermediate_outs = encoder_out[1]
+            encoder_out = encoder_out[0]
+
         loss_ctc, stats = self._calc_ctc_loss(
             encoder_out, encoder_out_lens, text, text_lengths, **kwargs
         )
+
+        if self.interctc_weight > 0.0 and intermediate_outs:
+            loss_interctc = 0.0
+            for layer_idx, intermediate_out in intermediate_outs:
+                loss_ic = self.ctc(
+                    intermediate_out,
+                    encoder_out_lens,
+                    torch.where(text == -1, self.ignore_id, text)[
+                        :, : text_lengths.max()
+                    ],
+                    text_lengths,
+                    lang_sym=kwargs.get("lang_sym"),
+                    accent_sym=kwargs.get("accent_sym"),
+                )
+                loss_interctc = loss_interctc + loss_ic
+                stats[f"loss_interctc_layer{layer_idx}"] = loss_ic.detach()
+            loss_interctc = loss_interctc / len(intermediate_outs)
+            loss_ctc = (
+                1 - self.interctc_weight
+            ) * loss_ctc + self.interctc_weight * loss_interctc
+
         loss, stats, weight = force_gatherable(
             (loss_ctc, stats, speech.shape[0]), loss_ctc.device
         )
@@ -122,22 +151,30 @@ class XeusPRModel(torch.nn.Module):
     def encode(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Encode speech to frame-level representations."""
+        """Encode speech to frame-level representations.
+
+        When weighted_sum=True, returns a weighted sum of all encoder layers.
+        Otherwise, calls the encoder without return_all_hs; if interctc_layer_idx
+        is configured on the encoder, returns (final_out, [(layer_idx, tensor), ...]).
+        """
         speech, speech_lengths = self._apply_preprocessing(speech, speech_lengths)
         pad_masks = make_pad_mask(speech_lengths).to(speech.device)
-        encoder_out, encoder_out_lens, _ = self.encoder(
-            speech, speech_lengths, masks=pad_masks, return_all_hs=True
-        )
-        if not self.weighted_sum:
-            return encoder_out[0], encoder_out_lens
-
-        hs_list = encoder_out[1]
-        assert len(hs_list) == self.layer_weights.numel()
-        w = torch.softmax(self.layer_weights, dim=0).to(
-            hs_list[0].device, hs_list[0].dtype
-        )
-        hs = torch.stack(hs_list, dim=0)  # (L, B, T, D)
-        return (w.view(-1, 1, 1, 1) * hs).sum(0), encoder_out_lens
+        if self.weighted_sum:
+            encoder_out, encoder_out_lens, _ = self.encoder(
+                speech, speech_lengths, masks=pad_masks, return_all_hs=True
+            )
+            hs_list = encoder_out[1]
+            assert len(hs_list) == self.layer_weights.numel()
+            w = torch.softmax(self.layer_weights, dim=0).to(
+                hs_list[0].device, hs_list[0].dtype
+            )
+            hs = torch.stack(hs_list, dim=0)  # (L, B, T, D)
+            return (w.view(-1, 1, 1, 1) * hs).sum(0), encoder_out_lens
+        else:
+            encoder_out, encoder_out_lens, _ = self.encoder(
+                speech, speech_lengths, masks=pad_masks
+            )
+            return encoder_out, encoder_out_lens
 
     def ctc_collapse_batch(self, x: torch.Tensor, max_length: int, pad: int = -1):
         B, T = x.shape
@@ -201,6 +238,8 @@ class XeusPRModel(torch.nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get CTC logits for inference."""
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
+        if isinstance(encoder_out, tuple):
+            encoder_out = encoder_out[0]
         return self.ctc.ctc_lo(encoder_out), encoder_out_lens
 
     def encoder_output_size(self) -> int:

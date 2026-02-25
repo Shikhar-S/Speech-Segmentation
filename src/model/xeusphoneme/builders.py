@@ -265,6 +265,8 @@ def build_xeus_pr(
     vocab_file: Optional[str] = None,
     ctc_config: Optional[dict] = None,
     weighted_sum: bool = False,
+    interctc_layer_idx: Optional[list] = None,
+    interctc_weight: float = 0.0,
 ) -> XeusPRModel:
     """Build Xeus PR model from config and optional checkpoint.
 
@@ -312,7 +314,10 @@ def build_xeus_pr(
     assert (
         args.encoder == "e_branchformer"
     ), f"Only e_branchformer supported, got {args.encoder}"
-    encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
+    encoder_conf = dict(args.encoder_conf)
+    if interctc_layer_idx:
+        encoder_conf["interctc_layer_idx"] = interctc_layer_idx
+    encoder = EBranchformerEncoder(input_size=input_size, **encoder_conf)
 
     ctc_config = ctc_config or getattr(args, "ctc_conf", {})
     topk = ctc_config.get("artctc_topk", 8)
@@ -373,6 +378,7 @@ def build_xeus_pr(
         sym_blank=getattr(args, "sym_blank", "<blank>"),
         freeze_frontend=checkpoint is not None,
         weighted_sum=weighted_sum,
+        interctc_weight=interctc_weight,
     )
 
     if checkpoint:
@@ -403,6 +409,8 @@ def build_xeus_pr_from_hf(
     ctc_config: Optional[dict] = None,
     load_ckpt: bool = True,
     weighted_sum: bool = False,
+    interctc_layer_idx: Optional[list] = None,
+    interctc_weight: float = 0.0,
 ) -> XeusPRModel:
     """Build Xeus PR model from local files or HuggingFace repo.
 
@@ -456,6 +464,8 @@ def build_xeus_pr_from_hf(
         vocab_file=vocab_file,
         ctc_config=ctc_config,
         weighted_sum=weighted_sum,
+        interctc_layer_idx=interctc_layer_idx,
+        interctc_weight=interctc_weight,
     )
 
 
