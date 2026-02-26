@@ -267,6 +267,7 @@ def build_xeus_pr(
     weighted_sum: bool = False,
     interctc_layer_idx: Optional[list] = None,
     interctc_weight: float = 0.0,
+    interctc_use_conditioning: bool = False,
 ) -> XeusPRModel:
     """Build Xeus PR model from config and optional checkpoint.
 
@@ -317,6 +318,8 @@ def build_xeus_pr(
     encoder_conf = dict(args.encoder_conf)
     if interctc_layer_idx:
         encoder_conf["interctc_layer_idx"] = interctc_layer_idx
+    if interctc_use_conditioning:
+        encoder_conf["interctc_use_conditioning"] = True
     encoder = EBranchformerEncoder(input_size=input_size, **encoder_conf)
 
     ctc_config = ctc_config or getattr(args, "ctc_conf", {})
@@ -379,6 +382,7 @@ def build_xeus_pr(
         freeze_frontend=checkpoint is not None,
         weighted_sum=weighted_sum,
         interctc_weight=interctc_weight,
+        interctc_use_conditioning=interctc_use_conditioning,
     )
 
     if checkpoint:
@@ -411,6 +415,7 @@ def build_xeus_pr_from_hf(
     weighted_sum: bool = False,
     interctc_layer_idx: Optional[list] = None,
     interctc_weight: float = 0.0,
+    interctc_use_conditioning: bool = False,
 ) -> XeusPRModel:
     """Build Xeus PR model from local files or HuggingFace repo.
 
@@ -466,6 +471,7 @@ def build_xeus_pr_from_hf(
         weighted_sum=weighted_sum,
         interctc_layer_idx=interctc_layer_idx,
         interctc_weight=interctc_weight,
+        interctc_use_conditioning=interctc_use_conditioning,
     )
 
 

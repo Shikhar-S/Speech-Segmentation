@@ -42,6 +42,7 @@ class XeusPRModel(torch.nn.Module):
         freeze_frontend: bool = True,
         weighted_sum: bool = False,
         interctc_weight: float = 0.0,
+        interctc_use_conditioning: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -51,6 +52,11 @@ class XeusPRModel(torch.nn.Module):
         self.preencoder = preencoder
         self.encoder = encoder
         self.ctc = ctc
+        if interctc_use_conditioning:
+            self.encoder.conditioning_layer = torch.nn.Linear(
+                len(token_list), encoder.output_size()
+            )
+            self.encoder.interctc_use_conditioning = True
         self.token_list = list(token_list)
         self.ignore_id = ignore_id
         self.blank_id = token_list.index(sym_blank) if sym_blank in token_list else 0
@@ -172,7 +178,7 @@ class XeusPRModel(torch.nn.Module):
             return (w.view(-1, 1, 1, 1) * hs).sum(0), encoder_out_lens
         else:
             encoder_out, encoder_out_lens, _ = self.encoder(
-                speech, speech_lengths, masks=pad_masks
+                speech, speech_lengths, masks=pad_masks, ctc=self.ctc
             )
             return encoder_out, encoder_out_lens
 
