@@ -15,6 +15,10 @@ import argparse
 import torch
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet_import.nets.pytorch_backend.nets_utils import make_pad_mask
+from espnet_import.nets.pytorch_backend.nets_utils import pad_list, th_accuracy
+from espnet_import.nets.pytorch_backend.transformer.label_smoothing_loss import (
+    LabelSmoothingLoss,
+)
 
 # from espnet_import.nets.e2e_asr_common import ErrorCalculator
 from src.recipe.phone_recognition.error_calculator import ErrorCalculator
@@ -43,6 +47,11 @@ class XeusPRModel(torch.nn.Module):
         weighted_sum: bool = False,
         interctc_weight: float = 0.0,
         interctc_use_conditioning: bool = False,
+        decoder: Optional[Any] = None,
+        ctc_weight: float = 1.0,
+        lsm_weight: float = 0.0,
+        sym_sos: str = "<sos>",
+        sym_eos: str = "<eos>",
         **kwargs,
     ):
         super().__init__()
@@ -72,6 +81,18 @@ class XeusPRModel(torch.nn.Module):
             ignore_id=ignore_id,
             log_phone_metrics=True,
         )
+
+        self.decoder = decoder
+        self.ctc_weight = ctc_weight
+        if decoder is not None:
+            self.sos = token_list.index(sym_sos)
+            self.eos = token_list.index(sym_eos)
+            self.criterion_att = LabelSmoothingLoss(
+                size=len(token_list),
+                padding_idx=ignore_id,
+                smoothing=lsm_weight,
+                normalize_length=False,
+            )
 
         self.weighted_sum = weighted_sum
         if self.weighted_sum:
@@ -121,8 +142,19 @@ class XeusPRModel(torch.nn.Module):
                 1 - self.interctc_weight
             ) * loss_ctc + self.interctc_weight * loss_interctc
 
+        # Attention branch
+        if self.ctc_weight < 1.0 and self.decoder is not None:
+            loss_att, acc_att = self._calc_att_loss(
+                encoder_out, encoder_out_lens, text, text_lengths
+            )
+            stats["loss_att"] = loss_att.detach()
+            stats["acc_att"] = acc_att
+            loss = self.ctc_weight * loss_ctc + (1 - self.ctc_weight) * loss_att
+        else:
+            loss = loss_ctc
+
         loss, stats, weight = force_gatherable(
-            (loss_ctc, stats, speech.shape[0]), loss_ctc.device
+            (loss, stats, speech.shape[0]), loss.device
         )
         return {"loss": loss, "stats": stats, "weight": weight}
 
@@ -211,6 +243,28 @@ class XeusPRModel(torch.nn.Module):
         lengths = torch.clamp(lengths, max=max_length)
         return out, lengths
 
+    def _calc_att_loss(self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens):
+        ys_pad = torch.where(ys_pad == -1, self.ignore_id, ys_pad)
+        ys = [y[y != self.ignore_id][:l] for y, l in zip(ys_pad, ys_pad_lens)]
+        _sos = ys_pad.new([self.sos])
+        _eos = ys_pad.new([self.eos])
+        ys_in = [torch.cat([_sos, y]) for y in ys]
+        ys_out = [torch.cat([y, _eos]) for y in ys]
+        ys_in_pad = pad_list(ys_in, self.eos)
+        ys_out_pad = pad_list(ys_out, self.ignore_id)
+        ys_in_lens = torch.tensor([len(y) for y in ys_in], device=ys_pad.device)
+
+        decoder_out, _ = self.decoder(
+            encoder_out, encoder_out_lens, ys_in_pad, ys_in_lens
+        )
+        loss_att = self.criterion_att(decoder_out, ys_out_pad)
+        acc_att = th_accuracy(
+            decoder_out.view(-1, len(self.token_list)),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+        return loss_att, acc_att
+
     def _calc_ctc_loss(
         self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens, **kwargs
     ):
@@ -260,7 +314,11 @@ class XeusPRModel(torch.nn.Module):
     def get_trainable_parameters(self):
         trainable_params = {"head": [], "encoder": []}
         for n, p in self.named_parameters():
-            if n.startswith("ctc"):
+            if (
+                n.startswith("ctc")
+                or n.startswith("decoder")
+                or n.startswith("criterion_att")
+            ):
                 trainable_params["head"].append(p)
             elif n.startswith("encoder"):
                 trainable_params["encoder"].append(p)

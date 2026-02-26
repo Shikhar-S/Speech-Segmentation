@@ -268,6 +268,8 @@ def build_xeus_pr(
     interctc_layer_idx: Optional[list] = None,
     interctc_weight: float = 0.0,
     interctc_use_conditioning: bool = False,
+    decoder_config: Optional[dict] = None,
+    ctc_weight: float = 1.0,
 ) -> XeusPRModel:
     """Build Xeus PR model from config and optional checkpoint.
 
@@ -368,6 +370,17 @@ def build_xeus_pr(
         **ctc_config,
     )
 
+    # Build optional attention decoder
+    decoder = None
+    if decoder_config:
+        from src.model.powsm.transformer_decoder import TransformerDecoder
+
+        decoder = TransformerDecoder(
+            vocab_size=vocab_size,
+            encoder_output_size=encoder.output_size(),
+            **decoder_config,
+        )
+
     # Build model
     model = XeusPRModel(
         encoder=encoder,
@@ -383,6 +396,8 @@ def build_xeus_pr(
         weighted_sum=weighted_sum,
         interctc_weight=interctc_weight,
         interctc_use_conditioning=interctc_use_conditioning,
+        decoder=decoder,
+        ctc_weight=ctc_weight,
     )
 
     if checkpoint:
@@ -416,6 +431,8 @@ def build_xeus_pr_from_hf(
     interctc_layer_idx: Optional[list] = None,
     interctc_weight: float = 0.0,
     interctc_use_conditioning: bool = False,
+    decoder_config: Optional[dict] = None,
+    ctc_weight: float = 1.0,
 ) -> XeusPRModel:
     """Build Xeus PR model from local files or HuggingFace repo.
 
@@ -472,6 +489,8 @@ def build_xeus_pr_from_hf(
         interctc_layer_idx=interctc_layer_idx,
         interctc_weight=interctc_weight,
         interctc_use_conditioning=interctc_use_conditioning,
+        decoder_config=decoder_config,
+        ctc_weight=ctc_weight,
     )
 
 

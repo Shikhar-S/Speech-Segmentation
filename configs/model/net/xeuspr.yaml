@@ -11,3 +11,5 @@ load_ckpt: true
 interctc_weight: 0.0
 interctc_layer_idx: null
 interctc_use_conditioning: false
+ctc_weight: 1.0
+decoder_config: null
