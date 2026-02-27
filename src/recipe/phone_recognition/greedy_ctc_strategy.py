@@ -33,6 +33,8 @@ class GreedyCTCInference:
         # 1. Standardized Forward pass
         # Works as long as model has .encode() and .ctc
         encoder_out, _ = model.encode(speech, speech_lengths)
+        if isinstance(encoder_out, tuple):
+            encoder_out = encoder_out[0]
         logits = model.ctc.ctc_lo(encoder_out)
 
         # 2. Greedy search

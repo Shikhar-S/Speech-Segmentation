@@ -164,6 +164,83 @@ class Wav2Vec2Model(nn.Module):
         )
         return logits, logit_lengths
 
+    def encode_with_interctc(
+        self,
+        speech,
+        speech_lengths,
+        interctc_layer_idx: list,
+        ctc,
+        conditioning_layer=None,
+    ):
+        """Layer-by-layer encoder forward with intermediate CTC and optional self-conditioning.
+
+        Replicates HF Wav2Vec2EncoderStableLayerNorm.forward() manually so conditioning
+        can be injected between specific layers.
+
+        Args:
+            speech: raw waveform tensor
+            speech_lengths: lengths tensor
+            interctc_layer_idx: list of 1-based layer indices at which to capture intermediates
+            ctc: CTC module with a .softmax() method
+            conditioning_layer: optional nn.Linear to project CTC softmax back to hidden dim
+
+        Returns:
+            ((hidden_states, intermediate_outs), encoder_out_lens) if intermediates collected,
+            else (hidden_states, encoder_out_lens)
+        """
+        inputs = self._extract_feats(speech, speech_lengths)
+        input_values = inputs["input_values"]
+        attention_mask = inputs["attention_mask"]
+        wav2vec2 = self.model.wav2vec2
+
+        extract_features = wav2vec2.feature_extractor(input_values).transpose(1, 2)
+
+        feat_attn_mask = None
+        if attention_mask is not None:
+            feat_attn_mask = wav2vec2._get_feature_vector_attention_mask(
+                extract_features.shape[1], attention_mask
+            )
+
+        hidden_states, _ = wav2vec2.feature_projection(extract_features)
+        hidden_states = wav2vec2._mask_hidden_states(
+            hidden_states, mask_time_indices=None, attention_mask=feat_attn_mask
+        )
+
+        encoder = wav2vec2.encoder
+        if feat_attn_mask is not None:
+            expand_mask = feat_attn_mask.unsqueeze(-1).expand_as(hidden_states)
+            hidden_states = hidden_states.masked_fill(~expand_mask.bool(), 0.0)
+        hidden_states = hidden_states + encoder.pos_conv_embed(hidden_states)
+        hidden_states = encoder.dropout(hidden_states)
+
+        # Convert boolean [B, T] mask to 4D additive float mask [B, 1, T, T] for attention
+        # layers, matching what HF's Wav2Vec2EncoderStableLayerNorm.forward() does.
+        layer_attn_mask = None
+        if feat_attn_mask is not None:
+            layer_attn_mask = 1.0 - feat_attn_mask[:, None, None, :].to(dtype=hidden_states.dtype)
+            layer_attn_mask = layer_attn_mask * torch.finfo(hidden_states.dtype).min
+            layer_attn_mask = layer_attn_mask.expand(
+                layer_attn_mask.shape[0], 1, feat_attn_mask.shape[-1], feat_attn_mask.shape[-1]
+            )
+
+        intermediate_outs = []
+        for layer_idx, layer in enumerate(encoder.layers):
+            hidden_states = layer(hidden_states, layer_attn_mask, output_attentions=False)[0]
+            if layer_idx + 1 in interctc_layer_idx:
+                intermediate_outs.append((layer_idx + 1, hidden_states))
+                if conditioning_layer is not None:
+                    ctc_out = ctc.softmax(hidden_states)
+                    hidden_states = hidden_states + conditioning_layer(ctc_out)
+
+        hidden_states = encoder.layer_norm(hidden_states)
+        encoder_out_lens = self.model._get_feat_extract_output_lengths(
+            attention_mask.sum(-1)
+        )
+
+        if intermediate_outs:
+            return (hidden_states, intermediate_outs), encoder_out_lens
+        return hidden_states, encoder_out_lens
+
     def encoder_output_size(self) -> int:
         """Get output dimension"""
         return self.encoder_dim

@@ -93,6 +93,9 @@ def build_wav2vec2pr(
     freeze_frontend: bool = True,
     checkpoint: Optional[str] = None,
     weighted_sum: bool = True,
+    interctc_weight: float = 0.0,
+    interctc_layer_idx: Optional[list] = None,
+    interctc_use_conditioning: bool = False,
 ) -> Wav2Vec2PRModel:
     """Build Wav2Vec2 Phone Recognition model.
 
@@ -154,6 +157,9 @@ def build_wav2vec2pr(
         ctc=ctc,
         token_list=token_list,
         freeze_frontend=freeze_frontend,
+        interctc_weight=interctc_weight,
+        interctc_layer_idx=interctc_layer_idx,
+        interctc_use_conditioning=interctc_use_conditioning,
     )
     log.info("Wav2Vec2PRModel built successfully")
     if checkpoint:
