@@ -103,6 +103,11 @@ class PhoneRecognitionModel(LightningModule):
             accent_sym=batch.get("accent_sym"),
         )
 
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        net_config = getattr(self.net, "_net_config", None)
+        if net_config is not None:
+            checkpoint["net_config"] = net_config
+
     def on_before_optimizer_step(self, optimizer) -> None:
         self.log_dict(grad_norm(self, norm_type=2))
 

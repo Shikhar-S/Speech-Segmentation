@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 import argparse
@@ -325,6 +326,7 @@ def build_xeus_pr(
     encoder = EBranchformerEncoder(input_size=input_size, **encoder_conf)
 
     ctc_config = ctc_config or getattr(args, "ctc_conf", {})
+    ctc_config_orig = copy.deepcopy(ctc_config)  # deep copy before neighbor-list injection
     topk = ctc_config.get("artctc_topk", 8)
     if ctc_config.get("ctc_type", "builtin") == "panphon_distance":
         dist_matrix = build_panphon_distance_matrix(token_list)
@@ -414,6 +416,15 @@ def build_xeus_pr(
         log.info(f"Loaded checkpoint: {checkpoint} with load info: {load_info}")
 
     model.training_args = args
+    model._net_config = {
+        "ctc_config": ctc_config_orig,
+        "weighted_sum": weighted_sum,
+        "interctc_layer_idx": interctc_layer_idx,
+        "interctc_weight": interctc_weight,
+        "interctc_use_conditioning": interctc_use_conditioning,
+        "decoder_config": decoder_config,
+        "ctc_weight": ctc_weight,
+    }
     return model
 
 
