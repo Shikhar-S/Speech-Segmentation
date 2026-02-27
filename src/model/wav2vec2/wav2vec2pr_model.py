@@ -4,7 +4,7 @@ from typing import Tuple, Union
 
 import torch
 from espnet2.torch_utils.device_funcs import force_gatherable
-from espnet_import.nets.e2e_asr_common import ErrorCalculator
+from src.recipe.phone_recognition.error_calculator import ErrorCalculator
 
 from src.model.powsm.ctc import CTC
 from src.model.wav2vec2.wav2vec2_model import Wav2Vec2Model
@@ -33,10 +33,10 @@ class Wav2Vec2PRModel(torch.nn.Module):
         self.freeze_frontend = freeze_frontend
         self.error_calculator = ErrorCalculator(
             token_list,
-            kwargs.get("sym_space", "<space>"),
-            sym_blank,
-            report_cer=True,
-            report_wer=False,
+            blank_id=self.blank_id,
+            sym_space=kwargs.get("sym_space", "<space>"),
+            ignore_id=ignore_id,
+            log_phone_metrics=True,
         )
 
     def forward(self, speech, speech_lengths, text, text_lengths, **kwargs):
@@ -62,9 +62,11 @@ class Wav2Vec2PRModel(torch.nn.Module):
         if not self.training:
             with torch.no_grad():
                 ys_hat = self.ctc.argmax(encoder_out).data
-                stats["cer_ctc"] = self.error_calculator(
-                    ys_hat.cpu(), ys_pad.cpu(), is_ctc=True
+                metrics = self.error_calculator(
+                    ys_hat.cpu(), ys_pad.cpu(), ys_pad_lens.cpu()
                 )
+                for k, v in metrics.items():
+                    stats[k + "_ctc"] = v
         return loss_ctc, stats
 
     def ctc_logits(
