@@ -16,13 +16,12 @@ IPA_TO_ARPABET = {
     "æ": "AE",
     "ʌ": "AH",  # unstressed “uh”; schwa is AX
     "ɔ": "AO",
-    "ə˞": "ER",
+    "ə˞": "AXR",  # r-colored schwa (alternate)
+    "ɜ˞": "ER",   # stressed r-colored vowel (alternate)
     "b": "B",
     "d": "D",
     "ð": "DH",
     "ɛ": "EH",
-    "ɚ": "AXR",  # r-colored schwa
-    "ɝ": "ER",  # stressed r-colored vowel
     "f": "F",
     "ɡ": "G",
     "h": "HH",
@@ -51,7 +50,6 @@ IPA_TO_ARPABET = {
     "l̩": "EL",  # syllabic consonants
     "m̩": "EM",
     "n̩": "EN",
-    "ŋ̩": "NX",
     "ɾ̃": "NX",
     "ɾ": "DX",
     "ʔ": "Q",
@@ -70,7 +68,7 @@ IPA_TO_ARPABET = {
     "ŋ̍": "ENG",
     "ʔ̞": "EPI",  #  Glottal or epenthetic event
     "ɦ": "HV",  # voiced /h/
-    # Silences (IPA does not have symbols; mapped for completeness)
+    "ʍ": "WH",
 }
 ARPABET_TO_IPA = {v.lower(): k for k, v in IPA_TO_ARPABET.items()}
 panphon_segmenter = panphon.distance.Distance().fm.ipa_segs
