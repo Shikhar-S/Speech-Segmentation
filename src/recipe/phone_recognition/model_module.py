@@ -101,6 +101,8 @@ class PhoneRecognitionModel(LightningModule):
             text_lengths=batch["text_length"],
             lang_sym=batch.get("lang_sym"),
             accent_sym=batch.get("accent_sym"),
+            asr_text_tokens=batch.get("asr_text_tokens"),
+            asr_text_length=batch.get("asr_text_length"),
         )
 
     def on_save_checkpoint(self, checkpoint: dict) -> None:

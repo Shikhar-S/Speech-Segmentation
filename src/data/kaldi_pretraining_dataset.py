@@ -15,6 +15,7 @@ from tqdm import tqdm
 import panphon  # 0.22.2
 import json
 
+from src.data.text_tokenizer import build_text_tokenizer
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
@@ -36,6 +37,7 @@ class KaldiDataset(Dataset):
         task_set: Optional[List[str]] = None,
         accent_file: Optional[Dict[str, str]] = None,
         max_duration_sec: Optional[int] = 20,
+        aux_tokenizer=None,
     ):
         self.sampling_rate = sampling_rate
         self.task_set = task_set  # set of tasks to filter on, e.g., ['pr', 'asr']
@@ -44,7 +46,8 @@ class KaldiDataset(Dataset):
         self.key2lang = self._extract_language(lang_file, limit_samples)
         self.key2accent = self._extract_accent(accent_file)
         self.ipa_segmenter = panphon.FeatureTable()
-        if read_asr_text:
+        self.aux_tokenizer = aux_tokenizer
+        if read_asr_text or aux_tokenizer is not None:
             # lang file also has asr text
             self.asr_text = self._load_asr_text(lang_file, limit_samples)
         else:
@@ -254,6 +257,13 @@ class KaldiDataset(Dataset):
         # Tokenize text if vocabulary is loaded
         text_tokens = self._tokenize_text(transcription) if self.vocab else None
 
+        # Tokenize ASR text with aux tokenizer if available
+        asr_text_tokens = None
+        if self.aux_tokenizer is not None and self.asr_text:
+            raw = self.asr_text.get(key)
+            if raw:
+                asr_text_tokens = self.aux_tokenizer.tokenize(raw)
+
         return {
             "key": key,
             "utt_id": key,
@@ -270,6 +280,7 @@ class KaldiDataset(Dataset):
             "target": transcription,
             "text": transcription,
             "asr_text": asr_text,
+            "asr_text_tokens": asr_text_tokens,
         }
 
 
@@ -292,6 +303,8 @@ class KaldiDataModule(L.LightningDataModule):
         task_set: Dict[str, List[str]] = None,
         accent_file: Dict[str, str] = None,
         vocab_file: Optional[str] = None,
+        aux_vocab_file: Optional[str] = None,
+        aux_tokenizer_type: str = "sentencepiece",
     ):
         super().__init__()
         self.wav_scp_file = wav_scp_file
@@ -312,6 +325,11 @@ class KaldiDataModule(L.LightningDataModule):
         self.accent_file = accent_file
         self.splits = list(wav_scp_file.keys())
         self.ignore_id = -1
+        self.aux_tokenizer = (
+            build_text_tokenizer(aux_vocab_file, aux_tokenizer_type)
+            if aux_vocab_file is not None
+            else None
+        )
         log.info(f"Splits: {self.splits}")
 
     def _ds(self, split):
@@ -328,6 +346,7 @@ class KaldiDataModule(L.LightningDataModule):
             read_asr_text=self.read_asr_text,
             max_duration_sec=self.max_duration_sec,
             accent_file=self.accent_file[split] if self.accent_file else None,
+            aux_tokenizer=self.aux_tokenizer,
         )
 
     def setup(self, stage=None):
@@ -405,7 +424,7 @@ class KaldiDataModule(L.LightningDataModule):
             text_data["text"] = padded_texts
             text_data["text_length"] = text_lengths
 
-        return {
+        result = {
             "keys": keys,
             "speech": padded_speeches,
             "speech_length": speech_lengths,
@@ -416,6 +435,21 @@ class KaldiDataModule(L.LightningDataModule):
             "accent_sym": accents,
             "asr_text": asr_texts,
         }
+
+        # Pad tokenized ASR text (aux vocabulary) if present
+        if any(item.get("asr_text_tokens") is not None for item in batch):
+            tokens_list = [item.get("asr_text_tokens") or [] for item in batch]
+            max_len = max(len(t) for t in tokens_list) or 1
+            padded_asr = torch.full((len(batch), max_len), self.ignore_id, dtype=torch.long)
+            asr_lengths = torch.zeros(len(batch), dtype=torch.long)
+            for i, t in enumerate(tokens_list):
+                if t:
+                    padded_asr[i, : len(t)] = torch.tensor(t, dtype=torch.long)
+                    asr_lengths[i] = len(t)
+            result["asr_text_tokens"] = padded_asr      # (B, T_asr)
+            result["asr_text_length"] = asr_lengths     # (B,)
+
+        return result
 
 
 def build_kaldi_datamodule(
@@ -429,6 +463,8 @@ def build_kaldi_datamodule(
     filter_langs: Optional[List[str]] = None,
     read_asr_text: bool = False,
     vocab_file: Optional[str] = None,
+    aux_vocab_file: Optional[str] = None,
+    aux_tokenizer_type: str = "sentencepiece",
 ):
     with open(dataset_config_path) as f:
         config = yaml.safe_load(f)
@@ -463,6 +499,8 @@ def build_kaldi_datamodule(
         task_set=task_set,
         accent_file=accent_file,
         vocab_file=vocab_file,
+        aux_vocab_file=aux_vocab_file,
+        aux_tokenizer_type=aux_tokenizer_type,
     )
 
 

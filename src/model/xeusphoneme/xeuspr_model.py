@@ -47,6 +47,8 @@ class XeusPRModel(torch.nn.Module):
         weighted_sum: bool = False,
         interctc_weight: float = 0.0,
         interctc_use_conditioning: bool = False,
+        interctc_ctc_type: str = "phone",
+        ctc_aux: Optional[Any] = None,
         decoder: Optional[Any] = None,
         ctc_weight: float = 1.0,
         lsm_weight: float = 0.0,
@@ -61,9 +63,16 @@ class XeusPRModel(torch.nn.Module):
         self.preencoder = preencoder
         self.encoder = encoder
         self.ctc = ctc
+        self.ctc_aux = ctc_aux
+        self.interctc_ctc_type = interctc_ctc_type
         if interctc_use_conditioning:
+            vocab_size_cond = (
+                ctc_aux.ctc_lo.out_features
+                if interctc_ctc_type == "ortho" and ctc_aux is not None
+                else len(token_list)
+            )
             self.encoder.conditioning_layer = torch.nn.Linear(
-                len(token_list), encoder.output_size()
+                vocab_size_cond, encoder.output_size()
             )
             self.encoder.interctc_use_conditioning = True
         self.token_list = list(token_list)
@@ -123,24 +132,32 @@ class XeusPRModel(torch.nn.Module):
         )
 
         if self.interctc_weight > 0.0 and intermediate_outs:
-            loss_interctc = 0.0
-            for layer_idx, intermediate_out in intermediate_outs:
-                loss_ic = self.ctc(
-                    intermediate_out,
-                    encoder_out_lens,
-                    torch.where(text == -1, self.ignore_id, text)[
-                        :, : text_lengths.max()
-                    ],
-                    text_lengths,
-                    lang_sym=kwargs.get("lang_sym"),
-                    accent_sym=kwargs.get("accent_sym"),
-                )
-                loss_interctc = loss_interctc + loss_ic
-                stats[f"loss_interctc_layer{layer_idx}"] = loss_ic.detach()
-            loss_interctc = loss_interctc / len(intermediate_outs)
-            loss_ctc = (
-                1 - self.interctc_weight
-            ) * loss_ctc + self.interctc_weight * loss_interctc
+            if self.interctc_ctc_type == "ortho" and self.ctc_aux is not None:
+                ctc_inter = self.ctc_aux
+                ys_inter = kwargs.get("asr_text_tokens")
+                ys_inter_lens = kwargs.get("asr_text_length")
+            else:
+                ctc_inter = self.ctc
+                ys_inter = torch.where(text == -1, self.ignore_id, text)[
+                    :, : text_lengths.max()
+                ]
+                ys_inter_lens = text_lengths
+
+            if ys_inter is not None and ys_inter_lens is not None:
+                loss_interctc = 0.0
+                for layer_idx, intermediate_out in intermediate_outs:
+                    loss_ic = ctc_inter(
+                        intermediate_out,
+                        encoder_out_lens,
+                        ys_inter,
+                        ys_inter_lens,
+                    )
+                    loss_interctc = loss_interctc + loss_ic
+                    stats[f"loss_interctc_layer{layer_idx}"] = loss_ic.detach()
+                loss_interctc = loss_interctc / len(intermediate_outs)
+                loss_ctc = (
+                    1 - self.interctc_weight
+                ) * loss_ctc + self.interctc_weight * loss_interctc
 
         # Attention branch
         if self.ctc_weight < 1.0 and self.decoder is not None:
@@ -209,8 +226,13 @@ class XeusPRModel(torch.nn.Module):
             hs = torch.stack(hs_list, dim=0)  # (L, B, T, D)
             return (w.view(-1, 1, 1, 1) * hs).sum(0), encoder_out_lens
         else:
+            ctc_for_encoder = (
+                self.ctc_aux
+                if self.interctc_ctc_type == "ortho" and self.ctc_aux is not None
+                else self.ctc
+            )
             encoder_out, encoder_out_lens, _ = self.encoder(
-                speech, speech_lengths, masks=pad_masks, ctc=self.ctc
+                speech, speech_lengths, masks=pad_masks, ctc=ctc_for_encoder
             )
             return encoder_out, encoder_out_lens
 

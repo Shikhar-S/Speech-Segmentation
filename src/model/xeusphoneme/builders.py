@@ -269,6 +269,8 @@ def build_xeus_pr(
     interctc_layer_idx: Optional[list] = None,
     interctc_weight: float = 0.0,
     interctc_use_conditioning: bool = False,
+    interctc_ctc_type: str = "phone",
+    ctc_aux_config: Optional[dict] = None,
     decoder_config: Optional[dict] = None,
     ctc_weight: float = 1.0,
 ) -> XeusPRModel:
@@ -372,6 +374,23 @@ def build_xeus_pr(
         **ctc_config,
     )
 
+    # Build optional aux CTC (orthographic vocabulary)
+    ctc_aux = None
+    if ctc_aux_config is not None:
+        import sentencepiece as spm
+
+        ctc_aux_config = dict(ctc_aux_config)  # copy to avoid mutating caller's dict
+        sp = spm.SentencePieceProcessor()
+        sp.load(ctc_aux_config.pop("vocab_file"))
+        aux_vocab_size = sp.get_piece_size()
+        ctc_aux = CTC(
+            odim=aux_vocab_size,
+            encoder_output_size=encoder.output_size(),
+            ctc_type="builtin",
+            **ctc_aux_config,
+        )
+        log.info(f"Built aux CTC with vocab size {aux_vocab_size}")
+
     # Build optional attention decoder
     decoder = None
     if decoder_config:
@@ -398,6 +417,8 @@ def build_xeus_pr(
         weighted_sum=weighted_sum,
         interctc_weight=interctc_weight,
         interctc_use_conditioning=interctc_use_conditioning,
+        interctc_ctc_type=interctc_ctc_type,
+        ctc_aux=ctc_aux,
         decoder=decoder,
         ctc_weight=ctc_weight,
     )
@@ -422,6 +443,8 @@ def build_xeus_pr(
         "interctc_layer_idx": interctc_layer_idx,
         "interctc_weight": interctc_weight,
         "interctc_use_conditioning": interctc_use_conditioning,
+        "interctc_ctc_type": interctc_ctc_type,
+        "ctc_aux_config": ctc_aux_config,
         "decoder_config": decoder_config,
         "ctc_weight": ctc_weight,
     }
@@ -442,6 +465,8 @@ def build_xeus_pr_from_hf(
     interctc_layer_idx: Optional[list] = None,
     interctc_weight: float = 0.0,
     interctc_use_conditioning: bool = False,
+    interctc_ctc_type: str = "phone",
+    ctc_aux_config: Optional[dict] = None,
     decoder_config: Optional[dict] = None,
     ctc_weight: float = 1.0,
 ) -> XeusPRModel:
@@ -500,6 +525,8 @@ def build_xeus_pr_from_hf(
         interctc_layer_idx=interctc_layer_idx,
         interctc_weight=interctc_weight,
         interctc_use_conditioning=interctc_use_conditioning,
+        interctc_ctc_type=interctc_ctc_type,
+        ctc_aux_config=ctc_aux_config,
         decoder_config=decoder_config,
         ctc_weight=ctc_weight,
     )
