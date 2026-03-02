@@ -45,7 +45,7 @@ data:
 model:
   dev_splits: ${data.dev_splits}
   optimizer:
-    lr: 0.00003
+    lr: 0.000005 # 5e-6
   scheduler:
     _target_: src.recipe.phone_recognition.model_module.get_w2v2ph_schedule
     _partial_: true

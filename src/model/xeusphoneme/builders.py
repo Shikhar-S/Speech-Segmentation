@@ -435,6 +435,7 @@ def build_xeus_pr(
             }
         load_info = model.load_state_dict(state_dict, strict=False)
         log.info(f"Loaded checkpoint: {checkpoint} with load info: {load_info}")
+        print(f"Loaded checkpoint: {checkpoint} with load info: {load_info}")
 
     model.training_args = args
     model._net_config = {
@@ -542,6 +543,13 @@ def build_xeus_pr_inference(
     force_download: bool = False,
     dtype: str = "float32",
     ctc_config: Optional[dict] = None,
+    weighted_sum: bool = False,
+    interctc_layer_idx: Optional[list] = None,
+    interctc_weight: float = 0.0,
+    interctc_use_conditioning: bool = False,
+    interctc_ctc_type: str = "phone",
+    ctc_aux_config: Optional[dict] = None,
+    decoder_config: Optional[dict] = None,
 ) -> XeusPRInference:
     model = build_xeus_pr_from_hf(
         work_dir=work_dir,
@@ -551,6 +559,13 @@ def build_xeus_pr_inference(
         checkpoint=checkpoint,
         vocab_file=vocab_file,
         ctc_config=ctc_config,
+        weighted_sum=weighted_sum,
+        interctc_layer_idx=interctc_layer_idx,
+        interctc_weight=interctc_weight,
+        interctc_use_conditioning=interctc_use_conditioning,
+        interctc_ctc_type=interctc_ctc_type,
+        ctc_aux_config=ctc_aux_config,
+        decoder_config=decoder_config,
     )
     inference_obj = XeusPRInference(model, device=device, dtype=dtype)
     return inference_obj
