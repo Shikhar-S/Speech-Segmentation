@@ -116,7 +116,12 @@ inference:
 
 ### Metrics (`src/metrics/`)
 
-- `phone_recognition.py` – CER / PER
+- `phone_recognition.py` – CER / PER. Key class: `PhoneRecognitionEvaluator(normalize_ipa=True)`.
+  - `evaluator.evaluate(utt_data, compute_inventory=False, tqdm_enabled=False)` → `(PhoneRecognitionSummary, instance_metrics)`
+  - `utt_data` format: `{utt_id: {"prediction": str, "transcription": str}}`
+  - `instance_metrics` format: `{utt_id: {"pfer": float, "fer": float, "fed": float, "per": float}}`
+  - `PhoneRecognitionSummary` fields: `N`, `phones`, `PER`, `FER`, `FED`, `PFER`, `SUB`, `INS`, `DEL`
+  - Reference phone count: `len(evaluator.dst.fm.ipa_segs(evaluator._prepare(ref)))`
 - `forced_alignment.py` – Alignment-based metrics
 - `zeroshot_eval.py` – Zero-shot phonetic evaluation
 
@@ -131,3 +136,48 @@ inference:
 ## Cluster / Job Submission
 
 SLURM batch scripts: `scripts/daixpr.batch`, `scripts/deltaxpr.batch`
+
+## Analysis Notebooks & Error Analysis Utils
+
+### `src/recipe/phone_recognition/local/error_analysis_utils.py`
+
+Pure-function utility module for phonetic error analysis. **Always update `tests/recipe/phone_recognition/test_error_analysis_utils.py` when modifying this file.**
+
+Run tests with:
+```bash
+pytest tests/recipe/phone_recognition/test_error_analysis_utils.py -v
+```
+
+**Seven sections (all public, no main/argparse):**
+
+| Section | Key functions / constants |
+|---|---|
+| 1 — IPA/Phonetics | `is_diacritic_char`, `strip_diacritics`, `count_diacritics`, `segment_ipa`, `parse_predicted_transcript`, `lang_name`, `clean_ipa` |
+| 2 — Data Loading | `load_jsonl`, `load_jsonl_shards`, `load_dataset_predictions`, `load_train_langs`; constants `IPAPACK_YAML`, `RUNS_DIR`, `DATASETS`, `VA_AUDIO_PATTERN`, `TUSOM_AUDIO_PATTERN`, `DEFAULT_TRAIN_SPLITS`, `LANG_FN` |
+| 3 — Alignment | `align_phones(ref_segs, hyp_segs) → [(op, ref, hyp)]` ops: C/S/D/I, pure-Python DP; `normalized_edit_distance`; `phone_confusion_matrix(df, evaluator, ...)` — evaluator is explicit |
+| 4 — Metrics | `compute_metrics(dataset_name, preds) → pd.DataFrame` — creates own evaluator internally |
+| 5 — Per-utt DataFrame | `audio_duration(utt_id, pattern)`, `build_utt_dataframe(preds, evaluator, audio_fn)`, `df_to_entries(df)` |
+| 6 — Error Analysis | `analyze_accent_deafness`, `analyze_diacritic_gap`, `analyze_substitutions`, `analyze_feature_errors`, `analyze_annotation_consistency` |
+| 7 — Report | `format_report(entries, accent, diacritics, substitutions, features, consistency) → str` |
+
+**`entries` format** (used by all Section 6 functions):
+```python
+{"utt_id": str, "lang": str, "split": str, "ref_str": str, "pred_str": str,
+ "ref_phones": list[str], "pred_phones": list[str]}
+```
+Use `df_to_entries(df)` to convert a `build_utt_dataframe` result to this format.
+
+### `src/recipe/phone_recognition/local/rq4.ipynb`
+
+Per-utterance analysis notebook for VoxAngeles, DoReCo, and TUSOM datasets. Imports everything from `error_analysis_utils` via `from ... import *`. Session-specific constants (MODEL, PLOT_LANG, K, N_TOP, etc.) and `evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)` are defined in Cell 1.
+
+**Audio paths (read-only — never write to these locations):**
+- VoxAngeles: `/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/test_voxangeles/recording/{langcode}/{utt_id}.wav`
+- TUSOM: `/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/test_tusom2021/data/wav/{utt_id}.wav`
+
+**Decode outputs:** `exp/runs/decodedv3.<dataset>/<model>/transcription.*.jsonl`
+- JSONL format (one object per line): `{idx: {"pred": [{"processed_transcript": str, ...}], "passthrough": {"utt_id": str, "target": str, "lang_sym": str, ...}}}`
+- VoxAngeles language key: `utt_id.split("-")[0]` (ISO 639-3 code)
+- DoReCo language key: `passthrough["lang_sym"]`
+
+**iso639-lang usage:** `from iso639 import Lang; Lang("hrv").name` → `"Croatian"`
