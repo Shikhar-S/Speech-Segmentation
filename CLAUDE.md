@@ -141,12 +141,7 @@ SLURM batch scripts: `scripts/daixpr.batch`, `scripts/deltaxpr.batch`
 
 ### `src/recipe/phone_recognition/local/error_analysis_utils.py`
 
-Pure-function utility module for phonetic error analysis. **Always update `tests/recipe/phone_recognition/test_error_analysis_utils.py` when modifying this file.**
-
-Run tests with:
-```bash
-pytest tests/recipe/phone_recognition/test_error_analysis_utils.py -v
-```
+Pure-function utility module for phonetic error analysis.
 
 **Seven sections (all public, no main/argparse):**
 

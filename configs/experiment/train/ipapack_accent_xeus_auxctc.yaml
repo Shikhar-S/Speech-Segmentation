@@ -3,11 +3,11 @@
 # while the final CTC head remains on IPA phones.
 #
 # Step 1 — build vocab (once):
-#   python scripts/build_aux_vocab.py \
-#       --dataset_config configs/data/ipapack_index.yaml \
-#       --splits train_accentmix_multi \
-#       --vocab_size 4000 \
-#       --out exp/aux_vocab/bpe4k
+  # python scripts/build_aux_vocab.py \
+  #     --dataset_config configs/data/ipapack_index.yaml \
+  #     --splits train_accentmix_multi \
+  #     --vocab_size 4000 \
+  #     --out exp/aux_vocab/bpe4k
 #
 # Step 2 — train:
 #   python src/main.py experiment=train/ipapack_accent_xeus_auxctc logger=csv \
@@ -45,7 +45,7 @@ data:
   vocab_file: ${model.net.vocab_file}
   batch_size: 16
   num_workers: 6
-  aux_vocab_file: exp/aux_vocab/bpe4k.model
+  aux_vocab_file: ???
   aux_tokenizer_type: sentencepiece
 
 model:
@@ -59,7 +59,7 @@ model:
     interctc_use_conditioning: true
     interctc_ctc_type: ortho          # use BPE ortho head at intermediate layers
     ctc_aux_config:
-      vocab_file: ??? # path to exp/aux_vocab/bpe4k.model genrated from Step 1 above
+      vocab_file: ${data.aux_vocab_file}
       dropout_rate: 0.1
   optimizer:
     lr: 0.00003

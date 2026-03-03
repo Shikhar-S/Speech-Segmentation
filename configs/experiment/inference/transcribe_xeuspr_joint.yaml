@@ -5,11 +5,11 @@
 # (e.g. experiment=train/timit_xeuspr_joint).
 #
 # Example:
-#   python src/main.py \
-#     experiment=inference/transcribe_xeuspr_joint \
-#     data=powsmeval data.dataset_name=buckeye \
-#     task_name=joint_buckeye \
-#     inference.inference_runner.checkpoint=<path/to/joint.ckpt>
+# python src/main.py \
+#   experiment=inference/transcribe_xeuspr_joint \
+#   data=powsmeval data.dataset_name=buckeye \
+#   task_name=test run_folder=test \
+#   inference.inference_runner.checkpoint=/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/cjli/ctcattn/checkpoint-22000.ckpt +inference.limit_samples=10
 
 defaults:
   - override /logger: csv
@@ -42,5 +42,16 @@ inference:
     maxlenratio: 0.0
     minlenratio: 0.0
     normalize_length: false
+    decoder_config:
+      attention_heads: 16 # xeus feat = 4096
+      linear_units: 4096 # follow owsm 1B
+      num_blocks: 2
+      dropout_rate: 0.1
+      positional_dropout_rate: 0.1
+      self_attention_dropout_rate: 0.1
+      src_attention_dropout_rate: 0.1
+      input_layer: embed
+      use_output_layer: true
+      normalize_before: true
     # Net architecture params (decoder_config, ctc_config, interctc_*, weighted_sum)
     # are auto-loaded from the checkpoint's net_config. Override here if needed.

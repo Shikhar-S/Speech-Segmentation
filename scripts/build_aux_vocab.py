@@ -13,6 +13,7 @@ Outputs: <out>.model and <out>.vocab
 import argparse
 import tempfile
 from pathlib import Path
+from tqdm import tqdm
 
 import yaml
 
@@ -28,7 +29,7 @@ def extract_asr_text(lang_file: str, out_f) -> int:
     """
     count = 0
     with open(lang_file, encoding="utf-8") as f:
-        for line in f:
+        for line in tqdm(f):
             parts = line.strip().split()
             if len(parts) < 3:
                 continue
@@ -74,6 +75,8 @@ def main():
         default=0.9995,
         help="Character coverage for SentencePiece training (default 0.9995 for multilingual).",
     )
+    parser.add_argument('--sample_size', type=int, default=1_000_000, help='Maximum number of sentences to sample for SentencePiece training (default 1M).')
+    parser.add_argument('--model_type', type=str, default='unigram', help='SentencePiece model type (default "unigram").')
     args = parser.parse_args()
 
     with open(args.dataset_config) as f:
@@ -87,6 +90,7 @@ def main():
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
     ) as tmp:
         tmp_path = tmp.name
+        print(f"Extracting ASR text to temporary file: {tmp_path}")
         total_lines = 0
         for split in args.splits:
             if split not in config["datasets"]:
@@ -96,12 +100,12 @@ def main():
                 )
             lang_file = config["datasets"][split]["language"]
             print(f"Extracting ASR text from split '{split}': {lang_file}")
-            n = extract_asr_text(lang_file, tmp)
+            n = extract_asr_text(lang_file, out_f=tmp)
             print(f"  {n} sentences written")
             total_lines += n
 
     print(f"\nTotal sentences: {total_lines}")
-    print(f"Training SentencePiece model (vocab_size={args.vocab_size}, model_type=unigram)...")
+    print(f"Training SentencePiece model (vocab_size={args.vocab_size}, model_type={args.model_type})...")
 
     import sentencepiece as spm
 
@@ -109,8 +113,9 @@ def main():
         input=tmp_path,
         model_prefix=str(out_prefix),
         vocab_size=args.vocab_size,
-        model_type="unigram",
+        model_type=args.model_type,
         character_coverage=args.character_coverage,
+        input_sentence_size=args.sample_size,
         pad_id=0,
         unk_id=1,
         bos_id=2,
