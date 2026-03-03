@@ -13,10 +13,12 @@ import pandas as pd
 import pytest
 
 from src.recipe.phone_recognition.local.error_analysis_utils import (
+    DATASETS,
     DEL_SYM,
     INS_SYM,
+    LANG_FN,
     align_phones,
-    analyze_accent_deafness,
+    analyze_accent_variance,
     analyze_annotation_consistency,
     analyze_diacritic_gap,
     analyze_substitutions,
@@ -31,6 +33,7 @@ from src.recipe.phone_recognition.local.error_analysis_utils import (
     normalized_edit_distance,
     parse_predicted_transcript,
     phone_confusion_matrix,
+    phone_inventory_jaccard,
     segment_ipa,
     strip_diacritics,
 )
@@ -602,16 +605,16 @@ _ENTRIES = [
 ]
 
 
-class TestAnalyzeAccentDeafness:
+class TestAnalyzeAccentVariance:
     def test_returns_expected_keys(self):
-        result = analyze_accent_deafness(_ENTRIES)
+        result = analyze_accent_variance(_ENTRIES)
         assert "avg_ref_distance" in result
         assert "avg_pred_distance" in result
-        assert "accent_deafness_ratio" in result
+        assert "accent_variance_ratio" in result
         assert "within_language" in result
 
     def test_insufficient_data(self):
-        result = analyze_accent_deafness([_ENTRIES[0]])
+        result = analyze_accent_variance([_ENTRIES[0]])
         assert "error" in result
 
     def test_identical_seqs_give_zero_distance(self):
@@ -619,11 +622,11 @@ class TestAnalyzeAccentDeafness:
             {**_ENTRIES[0], "lang": "eng"},
             {**_ENTRIES[1], "lang": "eng"},
         ]
-        result = analyze_accent_deafness(entries)
+        result = analyze_accent_variance(entries)
         assert isinstance(result["avg_ref_distance"], float)
 
     def test_within_language_populated(self):
-        result = analyze_accent_deafness(_ENTRIES)
+        result = analyze_accent_variance(_ENTRIES)
         wl = result["within_language"]
         assert "eng" in wl  # eng has 2 entries
 
@@ -720,7 +723,7 @@ class TestAnalyzeAnnotationConsistency:
 
 class TestFormatReport:
     def _run_all_analyses(self):
-        accent = analyze_accent_deafness(_ENTRIES)
+        accent = analyze_accent_variance(_ENTRIES)
         diacritics = analyze_diacritic_gap(_ENTRIES)
         substitutions = analyze_substitutions(_ENTRIES)
         consistency = analyze_annotation_consistency(_ENTRIES)
@@ -751,6 +754,69 @@ class TestFormatReport:
         accent, diacritics, substitutions, features, consistency = self._run_all_analyses()
         report = format_report(_ENTRIES, accent, diacritics, substitutions, features, consistency)
         assert str(len(_ENTRIES)) in report
+
+
+class TestPhoneInventoryJaccard:
+    """Section 3 — phone_inventory_jaccard."""
+
+    @pytest.fixture(scope="class")
+    def evaluator(self):
+        from src.metrics.phone_recognition import PhoneRecognitionEvaluator
+
+        return PhoneRecognitionEvaluator(normalize_ipa=True)
+
+    def _df(self, pairs):
+        return pd.DataFrame(
+            [
+                {"utt_id": f"u{i}", "langcode": "eng", "langname": "English",
+                 "reference": ref, "predicted": hyp}
+                for i, (ref, hyp) in enumerate(pairs)
+            ]
+        )
+
+    def test_returns_dataframe(self, evaluator):
+        df = phone_inventory_jaccard(self._df([("ab", "ab")]), evaluator)
+        assert isinstance(df, pd.DataFrame)
+
+    def test_expected_columns(self, evaluator):
+        df = phone_inventory_jaccard(self._df([("ab", "ab")]), evaluator)
+        for col in ("utt_id", "langcode", "langname", "ref_n", "pred_n", "shared", "jaccard"):
+            assert col in df.columns
+
+    def test_perfect_match_jaccard_one(self, evaluator):
+        df = phone_inventory_jaccard(self._df([("a", "a")]), evaluator)
+        assert df["jaccard"].iloc[0] == pytest.approx(1.0)
+
+    def test_no_overlap_jaccard_zero(self, evaluator):
+        # "a" vs "b" — disjoint inventories → Jaccard = 0
+        df = phone_inventory_jaccard(self._df([("a", "b")]), evaluator)
+        assert df["jaccard"].iloc[0] == pytest.approx(0.0)
+
+    def test_partial_overlap(self, evaluator):
+        # ref={a,b}, hyp={a,c} → shared=1, union=3 → Jaccard=1/3
+        df = phone_inventory_jaccard(self._df([("ab", "ac")]), evaluator)
+        j = df["jaccard"].iloc[0]
+        assert 0.0 < j < 1.0
+
+    def test_empty_prediction_jaccard_zero(self, evaluator):
+        df = phone_inventory_jaccard(self._df([("ab", "")]), evaluator)
+        assert df["jaccard"].iloc[0] == pytest.approx(0.0)
+
+    def test_both_empty_jaccard_one(self, evaluator):
+        # No phones on either side → Jaccard defined as 1 (nothing to miss)
+        df = phone_inventory_jaccard(self._df([("", "")]), evaluator)
+        assert df["jaccard"].iloc[0] == pytest.approx(1.0)
+
+    def test_row_count_matches_input(self, evaluator):
+        pairs = [("a", "a"), ("ab", "b"), ("abc", "ac")]
+        df = phone_inventory_jaccard(self._df(pairs), evaluator)
+        assert len(df) == len(pairs)
+
+    def test_sorted_ascending(self, evaluator):
+        # Provide pairs with known ordering: perfect match > partial > no overlap
+        pairs = [("a", "b"), ("ab", "a"), ("a", "a")]
+        df = phone_inventory_jaccard(self._df(pairs), evaluator)
+        assert list(df["jaccard"]) == sorted(df["jaccard"])
 
 
 # ---------------------------------------------------------------------------
@@ -793,3 +859,54 @@ class TestRegressions:
     def test_del_sym_and_ins_sym_defined(self):
         assert DEL_SYM == "<DEL>"
         assert INS_SYM == "<INS>"
+
+
+# ---------------------------------------------------------------------------
+# Section 2 — DATASETS / LANG_FN constants (including gmuaccent)
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetsConstant:
+    def test_known_datasets_present(self):
+        for name in ("voxangeles", "doreco", "tusom", "buckeye", "gmuaccent"):
+            assert name in DATASETS
+
+    def test_gmuaccent_maps_to_correct_dir(self):
+        assert DATASETS["gmuaccent"] == "decodedv3.gmuaccent"
+
+    def test_all_datasets_have_lang_fn(self):
+        for name in DATASETS:
+            assert name in LANG_FN, f"LANG_FN missing entry for dataset '{name}'"
+
+
+class TestGmuaccentLangFn:
+    """Tests for the _gmuaccent_lang helper via LANG_FN['gmuaccent']."""
+
+    def _fn(self):
+        return LANG_FN["gmuaccent"]
+
+    def test_simple_accent_stripped(self):
+        fn = self._fn()
+        assert fn({"utt_id": "arabic42"}) == "arabic"
+
+    def test_multiword_accent_stripped(self):
+        fn = self._fn()
+        assert fn({"utt_id": "jamaican_creole_english7"}) == "jamaican_creole_english"
+
+    def test_no_trailing_digits(self):
+        # utt_id with no trailing digits → full string returned
+        fn = self._fn()
+        assert fn({"utt_id": "english"}) == "english"
+
+    def test_large_number_suffix(self):
+        fn = self._fn()
+        assert fn({"utt_id": "mandarin_chinese1234"}) == "mandarin_chinese"
+
+    def test_single_digit_suffix(self):
+        fn = self._fn()
+        assert fn({"utt_id": "hindi1"}) == "hindi"
+
+    def test_all_digits_returns_empty(self):
+        # Edge case: utt_id is entirely digits → empty string
+        fn = self._fn()
+        assert fn({"utt_id": "123"}) == ""
