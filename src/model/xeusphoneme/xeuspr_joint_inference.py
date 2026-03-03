@@ -10,7 +10,6 @@ import numpy as np
 import torch
 
 from espnet_import.nets.batch_beam_search import BatchBeamSearch
-from espnet_import.nets.beam_search import Hypothesis
 from espnet_import.nets.scorers.ctc import CTCPrefixScorer
 from espnet_import.nets.scorers.length_bonus import LengthBonus
 
@@ -127,8 +126,6 @@ class XeusPRJointInference:
 
         results = []
         for hyp in nbest_hyps:
-            assert isinstance(hyp, Hypothesis), type(hyp)
-
             token_int = (
                 hyp.yseq.tolist() if not isinstance(hyp.yseq, list) else hyp.yseq
             )

@@ -559,6 +559,7 @@ def build_xeus_pr_inference(
         checkpoint=checkpoint,
         vocab_file=vocab_file,
         ctc_config=ctc_config,
+        load_ckpt=True,
         weighted_sum=weighted_sum,
         interctc_layer_idx=interctc_layer_idx,
         interctc_weight=interctc_weight,

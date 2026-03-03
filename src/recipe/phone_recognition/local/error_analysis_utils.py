@@ -223,7 +223,6 @@ DEFAULT_TRAIN_SPLITS = {
     "train",
     "train_accentmix_multi",
     "train_accentmix_en",
-    "huper_librispeech",
 }
 
 DATASETS = {
@@ -231,6 +230,7 @@ DATASETS = {
     "doreco": "decodedv3.doreco",
     "tusom": "decodedv3.tusom2021",
     "buckeye": "decodedv3.buckeye",
+    "gmuaccent": "decodedv3.gmuaccent",
 }
 
 # Audio path patterns (read-only locations)
@@ -241,6 +241,11 @@ VA_AUDIO_PATTERN = (
 TUSOM_AUDIO_PATTERN = (
     "/work/hdd/bbjs/shared/powsm/s2t1/dump/raw/test_tusom2021/data/wav/{utt_id}.wav"
 )
+
+# VoxAngeles language metadata (family + macroarea)
+VA_METADATA_DIR = _PROJECT_ROOT / "exp/data/metadata/voxangeles"
+VA_GLOTTLOG_CSV = VA_METADATA_DIR / "ucla_glottlog.csv"
+VA_LANG_FAMILIES_CSV = VA_METADATA_DIR / "lang_families.csv"
 
 _TASK_TOKENS = {"pr", "asr", "g2p", "p2g", "notimestamps"}
 
@@ -258,11 +263,20 @@ def _buckeye_lang(p: dict) -> str:
     return p.get("lang_sym", "eng")
 
 
+def _gmuaccent_lang(p: dict) -> str:
+    """Extract accent name from gmuaccent utt_id by stripping trailing digits.
+
+    utt_id format: {accent_name}{integer}  e.g. 'arabic42', 'jamaican_creole_english7'
+    """
+    return p["utt_id"].rstrip("0123456789")
+
+
 LANG_FN: dict = {
     "voxangeles": _va_lang,
     "doreco": _sym_lang,
     "tusom": _sym_lang,
     "buckeye": _buckeye_lang,
+    "gmuaccent": _gmuaccent_lang,
 }
 
 
@@ -395,6 +409,53 @@ def load_dataset_predictions(
     return result
 
 
+def load_voxangeles_lang_meta() -> pd.DataFrame:
+    """Load VoxAngeles language family and macroarea metadata.
+
+    Reads ucla_glottlog.csv (iso_6393 → macroarea + family_id) and
+    lang_families.csv (family_id → family name) from VA_METADATA_DIR and
+    joins them.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: langcode (ISO 639-3), family, macroarea. One row per language.
+    """
+    families = pd.read_csv(VA_LANG_FAMILIES_CSV, header=None, names=["family_id", "family"])
+    glottlog = pd.read_csv(VA_GLOTTLOG_CSV, usecols=["iso_6393", "family_id", "macroarea"])
+    merged = glottlog.merge(families, on="family_id", how="left")
+    return (
+        merged[["iso_6393", "family", "macroarea"]]
+        .rename(columns={"iso_6393": "langcode"})
+        .drop_duplicates("langcode")
+        .reset_index(drop=True)
+    )
+
+
+def annotate_lang_meta(
+    df: pd.DataFrame,
+    lang_meta: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Add 'family' and 'macroarea' columns to a per-utterance DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must have a 'langcode' column with ISO 639-3 codes.
+    lang_meta : pd.DataFrame or None
+        Output of load_voxangeles_lang_meta(). Loaded automatically if None.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input df with 'family' and 'macroarea' columns appended (left-join;
+        unrecognised language codes produce NaN in those columns).
+    """
+    if lang_meta is None:
+        lang_meta = load_voxangeles_lang_meta()
+    return df.merge(lang_meta, on="langcode", how="left")
+
+
 # ===========================================================================
 # Section 3 — Alignment & Confusion
 # ===========================================================================
@@ -503,6 +564,50 @@ def phone_confusion_matrix(
 
     rows = [{"ref": r, "hyp": h, "count": c} for (r, h), c in counter.most_common()]
     return pd.DataFrame(rows)
+
+
+def phone_inventory_jaccard(
+    df: pd.DataFrame,
+    evaluator,
+    ref_col: str = "reference",
+    hyp_col: str = "predicted",
+) -> pd.DataFrame:
+    """Compute per-utterance Jaccard similarity between reference and predicted phone inventories.
+
+    Jaccard = |ref_set ∩ pred_set| / |ref_set ∪ pred_set|
+
+    Uses the evaluator's panphon segmenter for consistent IPA segmentation.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must have columns ref_col, hyp_col, and optionally utt_id / langcode / langname.
+    evaluator : PhoneRecognitionEvaluator
+        Used for text normalization and panphon segmentation.
+
+    Returns
+    -------
+    pd.DataFrame  columns: utt_id, langcode, langname, ref_n, pred_n, shared, jaccard
+        One row per utterance, sorted by jaccard ascending.
+    """
+    rows = []
+    for _, row in df.iterrows():
+        ref_segs = set(evaluator.dst.fm.ipa_segs(evaluator._prepare(row[ref_col])))
+        hyp_segs = set(evaluator.dst.fm.ipa_segs(evaluator._prepare(row[hyp_col])))
+        union = len(ref_segs | hyp_segs)
+        shared = len(ref_segs & hyp_segs)
+        rows.append(
+            {
+                "utt_id": row.get("utt_id", ""),
+                "langcode": row.get("langcode", ""),
+                "langname": row.get("langname", ""),
+                "ref_n": len(ref_segs),
+                "pred_n": len(hyp_segs),
+                "shared": shared,
+                "jaccard": shared / union if union > 0 else 1.0,
+            }
+        )
+    return pd.DataFrame(rows).sort_values("jaccard")
 
 
 # ===========================================================================
@@ -687,7 +792,7 @@ def df_to_entries(df: pd.DataFrame) -> list:
 # ===========================================================================
 
 
-def analyze_accent_deafness(entries: list) -> dict:
+def analyze_accent_variance(entries: list) -> dict:
     """Measure how much the model collapses accent variation relative to reference."""
     if len(entries) < 2:
         return {"error": "Need at least 2 utterances"}
@@ -733,7 +838,7 @@ def analyze_accent_deafness(entries: list) -> dict:
     return {
         "avg_ref_distance": round(avg_ref, 3),
         "avg_pred_distance": round(avg_pred, 3),
-        "accent_deafness_ratio": round(ratio, 1),
+        "accent_variance_ratio": round(ratio, 1),
         "n_pairs": len(ref_dists),
         "within_language": within_lang,
     }
@@ -867,9 +972,9 @@ def analyze_feature_errors(entries: list) -> dict:
     feature_totals = {f: 0 for f in feature_names}
     n_aligned, n_skipped = 0, 0
 
-    for entry in entries:
+    for entry in tqdm(entries):
         for op, ref_p, hyp_p in align_phones(entry["ref_phones"], entry["pred_phones"]):
-            if op == "S":
+            if op == "S": # substituted
                 try:
                     rf = ft.fts(ref_p)
                     hf = ft.fts(hyp_p)
@@ -886,7 +991,7 @@ def analyze_feature_errors(entries: list) -> dict:
                         feature_totals[fn] += 1
                         if rv[i] != hv[i]:
                             feature_errors[fn] += 1
-            elif op == "C":
+            elif op == "C": # correct
                 try:
                     rf = ft.fts(ref_p)
                     if rf is None:
@@ -998,7 +1103,7 @@ def format_report(entries, accent, diacritics, substitutions, features, consiste
             f"| Avg normalized **reference** distance | {accent['avg_ref_distance']} |"
         )
         L.append(
-            f"| **Accent deafness ratio** | **{accent['accent_deafness_ratio']}×** |\n"
+            f"| **Accent variance ratio** | **{accent['accent_variance_ratio']}×** |\n"
         )
         w = accent.get("within_language", {})
         if w:
