@@ -317,6 +317,42 @@ def load_train_langs(
     return result
 
 
+def _count_langs_from_text_file(path: str) -> Counter:
+    counts = Counter()
+    with open(path) as f:
+        for line in f:
+            parts = line.split(maxsplit=1)
+            if len(parts) < 2:
+                continue
+            tags = re.findall(r"<([a-z0-9]+)>", parts[1])
+            for tag in tags:
+                if tag not in _TASK_TOKENS:
+                    counts[tag] += 1
+                    break
+    return counts
+
+
+def load_train_counts(
+    ipapack_yaml: Path = IPAPACK_YAML,
+    train_splits: set = DEFAULT_TRAIN_SPLITS,
+) -> dict:
+    """Return {iso_639_3_code: utterance_count} aggregated across training splits."""
+    with open(ipapack_yaml) as f:
+        ipapack = yaml.safe_load(f)
+    counts: Counter = Counter()
+    for split_name, split_cfg in ipapack["datasets"].items():
+        if split_name not in train_splits:
+            continue
+        lang_file = split_cfg.get("language")
+        if lang_file is None:
+            continue
+        print(f"  Counting {split_name}: {lang_file}")
+        counts += _count_langs_from_text_file(lang_file)
+    result = dict(counts)
+    print(f"\nTotal: {len(result)} languages, {sum(result.values())} utterances")
+    return result
+
+
 def load_jsonl(filepath: str) -> list:
     """Load entries from a single JSONL file in the standard decode output format."""
     entries = []
@@ -1229,5 +1265,553 @@ def format_report(entries, accent, diacritics, substitutions, features, consiste
                     f" {info.get('top_confusion', '-')} | {info['total']} |"
                 )
             L.append("")
+
+    return "\n".join(L)
+
+
+# ===========================================================================
+# Section 8 — Training Coverage & PFER Correlation Analysis
+#
+# Pipeline:
+#   build_phonological_similarity_matrix(eval_langs, train_langs)
+#     └─► compute_coverage_scores(sim_matrix, train_counts)
+#           └─► build_coverage_pfer_dataframe(coverage, pfer_map, train_langs)
+#                 └─► correlate_coverage_pfer(df)
+#                       └─► stratified_coverage_correlation(df)
+#
+# Top-level orchestrator:
+#   run_coverage_analysis(eval_pfer_map, train_counts) -> (df, results)
+#
+# Usage:
+#   from error_analysis_utils import run_coverage_analysis, format_coverage_report
+#
+#   eval_pfer_map = {"eng": 0.12, "deu": 0.15, ...} 
+#   train_counts  = {"eng": 50000, "fra": 30000, ...}
+#
+#   df, results = run_coverage_analysis(eval_pfer_map, train_counts)
+#   print(format_coverage_report(df, results))
+# ===========================================================================
+
+
+import lang2vec.lang2vec as l2v
+from scipy.stats import spearmanr, pearsonr, bootstrap
+
+# Phonological feature sets available in lang2vec.
+# phonology_average (WALS-based, 28-dim) is most predictive for phone-level
+# tasks; inventory_average provides a useful alternative.
+PHONOLOGICAL_FEATURE_SETS = [
+    "phonology_average",
+    "inventory_average",
+]
+
+
+def _query_lang2vec(langs: list, feature_set: str) -> dict:
+    """Fetch lang2vec vectors for *langs* under *feature_set*.
+
+    Returns
+    -------
+    dict
+        {iso_code -> np.ndarray} for languages that succeeded.
+        Languages unknown to lang2vec are collected under the key
+        ``"__missing__"`` as a list.
+    """
+
+    result = {}
+    missing = []
+
+    for code in langs:
+        try:
+            vec_map = l2v.get_features([code], feature_set)
+            vec = np.array(vec_map[code], dtype=float)
+            # lang2vec fills unknown dimensions with '--'; treat fully
+            # non-finite vectors as missing.
+            if np.all(~np.isfinite(vec)):
+                missing.append(code)
+            else:
+                result[code] = vec
+        except (ValueError, KeyError):
+            missing.append(code)
+
+    result["__missing__"] = missing
+    return result
+
+
+def build_phonological_similarity_matrix(
+    eval_langs: list,
+    train_langs: list,
+    feature_set: str = "phonology_average",
+) -> tuple:
+    """Compute pairwise cosine similarity between eval and train languages.
+
+    Uses lang2vec phonological feature vectors.  Languages for which lang2vec
+    has no vector are dropped and returned explicitly so callers can handle them.
+
+    Parameters
+    ----------
+    eval_langs : list[str]
+        ISO 639-3 codes for evaluation languages (rows of the output matrix).
+    train_langs : list[str]
+        ISO 639-3 codes for training languages (columns of the output matrix).
+    feature_set : str
+        lang2vec feature set name.  Defaults to ``"phonology_average"``.
+
+    Returns
+    -------
+    sim_df : pd.DataFrame
+        Shape (|eval_langs|, |train_langs|).  Entry (i, j) is cosine
+        similarity in [-1, 1].
+    missing_eval : list[str]
+        Eval language codes absent from lang2vec.
+    missing_train : list[str]
+        Train language codes absent from lang2vec.
+    """
+    all_langs = list(set(eval_langs) | set(train_langs))
+    vec_map = _query_lang2vec(all_langs, feature_set)
+    missing_all = vec_map.pop("__missing__")
+    missing_eval = [l for l in eval_langs if l in missing_all]
+    missing_train = [l for l in train_langs if l in missing_all]
+
+    present_eval = [l for l in eval_langs if l not in missing_all]
+    present_train = [l for l in train_langs if l not in missing_all]
+
+    if not present_eval or not present_train:
+        raise ValueError(
+            f"No lang2vec coverage overlap. "
+            f"missing_eval={missing_eval}, missing_train={missing_train}"
+        )
+
+    # Stack feature matrices: rows=eval, cols=train
+    E = np.stack([vec_map[l] for l in present_eval])   # (|E|, d)
+    T = np.stack([vec_map[l] for l in present_train])  # (|T|, d)
+
+    # Replace non-finite values (lang2vec '--' entries) with 0 before norms
+    E = np.where(np.isfinite(E), E, 0.0)
+    T = np.where(np.isfinite(T), T, 0.0)
+
+    # Cosine similarity: (E / ||E||) @ (T / ||T||).T
+    E_norm = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-12)
+    T_norm = T / (np.linalg.norm(T, axis=1, keepdims=True) + 1e-12)
+    sim_matrix = E_norm @ T_norm.T  # (|E|, |T|)
+
+    sim_df = pd.DataFrame(sim_matrix, index=present_eval, columns=present_train)
+
+    if missing_eval or missing_train:
+        print(
+            f"[coverage] lang2vec missing — eval: {missing_eval}, train: {missing_train}"
+        )
+
+    return sim_df, missing_eval, missing_train
+
+
+def compute_coverage_scores(
+    sim_df: pd.DataFrame,
+    train_counts: dict,
+    clip_negative: bool = True,
+) -> pd.Series:
+    """Compute similarity-weighted training coverage for each eval language.
+
+    For eval language l_e:
+
+        C(l_e) = sum_{l_t in T} max(0, sim(l_e, l_t)) * n(l_t)
+
+    where n(l_t) is the number of training utterances for l_t.
+
+    Parameters
+    ----------
+    sim_df : pd.DataFrame
+        Output of ``build_phonological_similarity_matrix``.
+        Index = eval langs, columns = train langs.
+    train_counts : dict[str, int]
+        {iso_code -> utterance_count} for training languages.  Keys need not
+        cover every column of sim_df; unmatched columns are treated as 0.
+    clip_negative : bool
+        If True (default), negative similarities are clipped to 0 so
+        phonologically dissimilar training languages do not reduce coverage.
+
+    Returns
+    -------
+    pd.Series
+        Index = eval lang codes, values = coverage score C(l_e).
+    """
+    counts_vec = np.array(
+        [train_counts.get(col, 0) for col in sim_df.columns], dtype=float
+    )
+
+    sim_values = sim_df.values.copy()
+    if clip_negative:
+        sim_values = np.clip(sim_values, 0.0, None)
+
+    coverage = sim_values @ counts_vec  # (|eval_langs|,)
+    return pd.Series(coverage, index=sim_df.index, name="coverage")
+
+
+def build_coverage_pfer_dataframe(
+    coverage: pd.Series,
+    pfer_map: dict,
+    train_langs: list,
+    sim_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Assemble per-language analysis DataFrame with coverage and PFER columns.
+
+    Parameters
+    ----------
+    coverage : pd.Series
+        Output of ``compute_coverage_scores``.  Index = eval lang codes.
+    pfer_map : dict[str, float]
+        {iso_code -> PFER_score} for evaluation languages.
+    train_langs : list[str]
+        Full list of training language codes (used to tag seen/unseen).
+    sim_df : pd.DataFrame or None
+        If provided, adds ``max_sim`` (max cosine sim to any training language)
+        and ``nearest_train_lang`` columns.  Required for stratification.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: lang, coverage, log_coverage, pfer, is_seen,
+        [max_sim, nearest_train_lang — if sim_df provided].
+        Sorted by coverage descending.
+    """
+    train_set = set(train_langs)
+    common_langs = [l for l in coverage.index if l in pfer_map]
+
+    df = pd.DataFrame(
+        {
+            "lang": common_langs,
+            "coverage": coverage[common_langs].values,
+            "pfer": [pfer_map[l] for l in common_langs],
+        }
+    )
+
+    # log1p handles zero coverage for unseen languages gracefully
+    df["log_coverage"] = np.log1p(df["coverage"])
+    df["is_seen"] = df["lang"].isin(train_set)
+
+    if sim_df is not None:
+        sub = sim_df.loc[sim_df.index.isin(common_langs)]
+        df = df.set_index("lang")
+        df["max_sim"] = sub.max(axis=1)
+        df["nearest_train_lang"] = sub.idxmax(axis=1)
+        df = df.reset_index().rename(columns={"index": "lang"})
+
+    return df.sort_values("coverage", ascending=False).reset_index(drop=True)
+
+
+def correlate_coverage_pfer(df: pd.DataFrame) -> dict:
+    """Compute Spearman (primary) and Pearson correlation between log_coverage and PFER.
+
+    Also runs a permutation test to verify the observed Spearman rho exceeds
+    chance, and computes 95% bootstrap confidence intervals by resampling
+    languages with replacement.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain ``log_coverage`` and ``pfer`` columns.
+
+    Returns
+    -------
+    dict
+        spearman_rho, spearman_p,
+        pearson_r,   pearson_p,
+        bootstrap_ci_95  (tuple),
+        permutation_p,
+        n,
+        direction_correct (bool: rho < 0 means more coverage -> lower PFER).
+    """
+
+    x = df["log_coverage"].values
+    y = df["pfer"].values
+
+    rho, sp = spearmanr(x, y)
+    r, pp = pearsonr(x, y)
+
+    # Bootstrap 95% CI on Spearman rho (paired resampling of languages)
+    def _spearman_stat(x_s, y_s):
+        return spearmanr(x_s, y_s).statistic
+
+    bs_result = bootstrap(
+        (x, y),
+        _spearman_stat,
+        n_resamples=10_000,
+        paired=True,
+        confidence_level=0.95,
+        random_state=42,
+        method="percentile",
+    )
+    ci = (bs_result.confidence_interval.low, bs_result.confidence_interval.high)
+
+    # Permutation test: shuffle coverage labels, check how often |rho| >= observed
+    rng = np.random.default_rng(42)
+    null_rhos = np.array(
+        [spearmanr(rng.permutation(x), y).statistic for _ in range(10_000)]
+    )
+    perm_p = float(np.mean(np.abs(null_rhos) >= abs(rho)))
+
+    return {
+        "n": len(x),
+        "spearman_rho": round(float(rho), 4),
+        "spearman_p": float(sp),
+        "pearson_r": round(float(r), 4),
+        "pearson_p": float(pp),
+        "bootstrap_ci_95": (round(ci[0], 4), round(ci[1], 4)),
+        "permutation_p": round(perm_p, 4),
+        "direction_correct": bool(rho < 0),  # expected: more coverage -> lower PFER
+    }
+
+
+def stratify_languages(
+    df: pd.DataFrame,
+    near_threshold: Optional[float] = None,
+) -> pd.DataFrame:
+    """Add a ``stratum`` column: 'seen', 'near_unseen', or 'far_unseen'.
+
+    Seen languages appeared in training.  Unseen languages are split at
+    ``near_threshold`` on their maximum cosine similarity to any training
+    language: above = near_unseen (likely to benefit from transfer),
+    below = far_unseen (no close training analog).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain ``is_seen`` (bool) and ``max_sim`` (float).
+        ``max_sim`` is added by ``build_coverage_pfer_dataframe`` when
+        sim_df is provided.
+    near_threshold : float or None
+        Cosine similarity cutoff.  Defaults to the median ``max_sim`` across
+        unseen languages (balanced split by linguistic proximity).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input df with ``stratum`` column appended.
+    """
+    if "max_sim" not in df.columns:
+        raise ValueError(
+            "'max_sim' column required. Pass sim_df to build_coverage_pfer_dataframe."
+        )
+
+    unseen_mask = ~df["is_seen"]
+    if near_threshold is None:
+        near_threshold = float(df.loc[unseen_mask, "max_sim"].median())
+
+    def _assign(row):
+        if row["is_seen"]:
+            return "seen"
+        return "near_unseen" if row["max_sim"] >= near_threshold else "far_unseen"
+
+    df = df.copy()
+    df["stratum"] = df.apply(_assign, axis=1)
+    return df
+
+
+def stratified_coverage_correlation(df: pd.DataFrame) -> dict:
+    """Run ``correlate_coverage_pfer`` independently for each stratum.
+
+    Also computes a direct ``log_n_train`` vs PFER Spearman for the 'seen'
+    stratum as a sanity check — bypasses similarity weighting and tests
+    whether raw data volume alone explains PFER for seen languages.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Output of ``stratify_languages``.  Must have ``stratum``,
+        ``log_coverage``, ``pfer`` columns.  The ``"seen_direct"`` check
+        additionally requires ``log_n_train``, added by ``run_coverage_analysis``.
+
+    Returns
+    -------
+    dict
+        {stratum_name -> correlation_result_dict} for each stratum.
+        Includes ``"seen_direct"`` key with raw-count Spearman for seen langs.
+    """
+    results = {}
+    for stratum, group in df.groupby("stratum"):
+        if len(group) < 5:
+            results[stratum] = {"skipped": True, "n": len(group), "reason": "n < 5"}
+            continue
+        results[stratum] = correlate_coverage_pfer(group)
+
+    # Sanity check: raw training count vs PFER (seen languages only)
+    seen = df[df["stratum"] == "seen"].copy()
+    if "log_n_train" in seen.columns and len(seen) >= 5:
+        rho, p = spearmanr(seen["log_n_train"].values, seen["pfer"].values)
+        results["seen_direct"] = {
+            "n": len(seen),
+            "spearman_rho": round(float(rho), 4),
+            "spearman_p": float(p),
+            "note": "raw log(n_train) vs PFER — no similarity weighting",
+        }
+
+    return results
+
+
+def run_coverage_analysis(
+    eval_pfer_map: dict,
+    train_counts: dict,
+    feature_set: str = "phonology_average",
+    near_threshold: Optional[float] = None,
+) -> tuple:
+    """Full pipeline: phonological similarity -> coverage -> PFER correlation.
+
+    Parameters
+    ----------
+    eval_pfer_map : dict[str, float]
+        {iso_639_3_code -> PFER_score} for all evaluation languages.
+        Extract from compute_metrics() output:
+            metrics_df.set_index("language")["PFER"].to_dict()
+    train_counts : dict[str, int]
+        {iso_639_3_code -> n_utterances} for all training languages.
+    feature_set : str
+        lang2vec feature set.  ``"phonology_average"`` for phonological
+        proximity; ``"inventory_average"`` as an alternative.
+    near_threshold : float or None
+        Cosine similarity cutoff for near/far-unseen split.
+        None = auto (median max_sim across unseen languages).
+
+    Returns
+    -------
+    df : pd.DataFrame
+        Per-language DataFrame with columns:
+        lang, coverage, log_coverage, log_n_train (seen only),
+        pfer, is_seen, max_sim, nearest_train_lang, stratum.
+    results : dict
+        {
+          "overall":             correlate_coverage_pfer output (all langs),
+          "by_stratum":          stratified_coverage_correlation output,
+          "feature_set":         str,
+          "near_threshold_used": float,
+          "n_eval": int, "n_train": int, "n_seen": int,
+          "missing_eval": list, "missing_train": list,
+        }
+    """
+    eval_langs = list(eval_pfer_map.keys())
+    train_langs = list(train_counts.keys())
+
+    # 1. Phonological similarity matrix [|eval| x |train|]
+    sim_df, missing_eval, missing_train = build_phonological_similarity_matrix(
+        eval_langs, train_langs, feature_set=feature_set
+    )
+
+    # 2. Similarity-weighted coverage C(l_e) for each eval language
+    coverage = compute_coverage_scores(sim_df, train_counts)
+
+    # 3. Assemble per-language DataFrame
+    df = build_coverage_pfer_dataframe(
+        coverage, eval_pfer_map, train_langs, sim_df=sim_df
+    )
+
+    # 4. Add raw log(n_train) for seen languages (sanity-check column)
+    df["log_n_train"] = df.apply(
+        lambda row: np.log1p(train_counts.get(row["lang"], 0))
+        if row["is_seen"]
+        else np.nan,
+        axis=1,
+    )
+
+    # 5. Stratify: seen / near_unseen / far_unseen
+    df = stratify_languages(df, near_threshold=near_threshold)
+    used_threshold = (
+        float(df.loc[~df["is_seen"], "max_sim"].median())
+        if near_threshold is None
+        else near_threshold
+    )
+
+    # 6. Correlations: overall + per-stratum
+    overall = correlate_coverage_pfer(df)
+    by_stratum = stratified_coverage_correlation(df)
+
+    results = {
+        "overall": overall,
+        "by_stratum": by_stratum,
+        "feature_set": feature_set,
+        "near_threshold_used": round(used_threshold, 4),
+        "n_eval": len(df),
+        "n_train": len(train_langs),
+        "n_seen": int(df["is_seen"].sum()),
+        "missing_eval": missing_eval,
+        "missing_train": missing_train,
+    }
+
+    return df, results
+
+
+def format_coverage_report(df: pd.DataFrame, results: dict) -> str:
+    """Format coverage-PFER correlation analysis as a Markdown report string.
+
+    Designed to be appended to the output of ``format_report``.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Output of ``run_coverage_analysis``.
+    results : dict
+        Output of ``run_coverage_analysis``.
+    """
+    L = []
+    L.append("---\n## 8. Training Coverage vs. PFER Correlation\n")
+
+    meta = (
+        f"- **Feature set**: `{results['feature_set']}`\n"
+        f"- **Eval languages**: {results['n_eval']} "
+        f"(seen: {results['n_seen']}, "
+        f"unseen: {results['n_eval'] - results['n_seen']})\n"
+        f"- **Training languages**: {results['n_train']}\n"
+        f"- **Near-unseen threshold** (max cosine sim): "
+        f"{results['near_threshold_used']}\n"
+    )
+    if results.get("missing_eval"):
+        meta += f"- **Eval langs missing from lang2vec**: {results['missing_eval']}\n"
+    L.append(meta)
+
+    # Overall correlation
+    ov = results["overall"]
+    direction = (
+        "yes — more coverage -> lower PFER"
+        if ov["direction_correct"]
+        else "no — unexpected direction"
+    )
+    L.append("### Overall (all eval languages)\n")
+    L.append("| Metric | Value |")
+    L.append("|--------|-------|")
+    L.append(f"| N | {ov['n']} |")
+    L.append(f"| Spearman rho | **{ov['spearman_rho']}** |")
+    L.append(f"| Spearman p | {ov['spearman_p']:.4f} |")
+    L.append(f"| Pearson r | {ov['pearson_r']} |")
+    L.append(f"| Bootstrap 95% CI (rho) | {ov['bootstrap_ci_95']} |")
+    L.append(f"| Permutation p | {ov['permutation_p']} |")
+    L.append(f"| Direction correct | {direction} |\n")
+
+    # Stratified correlations
+    L.append("### By stratum\n")
+    L.append("| Stratum | N | Spearman rho | p | Bootstrap CI | Perm. p |")
+    L.append("|---------|---|--------------|---|--------------|---------|")
+    for stratum in ["seen", "near_unseen", "far_unseen", "seen_direct"]:
+        info = results["by_stratum"].get(stratum)
+        if info is None:
+            continue
+        if info.get("skipped"):
+            L.append(f"| {stratum} | {info['n']} | — | — | — | skipped (n<5) |")
+            continue
+        ci = info.get("bootstrap_ci_95", ("?", "?"))
+        note = f" _{info['note']}_" if "note" in info else ""
+        L.append(
+            f"| {stratum}{note} | {info['n']} | **{info['spearman_rho']}** |"
+            f" {info['spearman_p']:.4f} | {ci} | {info.get('permutation_p', '—')} |"
+        )
+    L.append("")
+
+    # Top / bottom 10 by coverage
+    for label, rows in [("Highest", df.head(10)), ("Lowest", df.tail(10))]:
+        L.append(f"### {label}-coverage eval languages\n")
+        L.append("| Lang | Coverage | log_coverage | PFER | Stratum | Nearest Train |")
+        L.append("|------|----------|--------------|------|---------|---------------|")
+        for _, row in rows.iterrows():
+            L.append(
+                f"| {row['lang']} | {row['coverage']:.0f} | {row['log_coverage']:.2f}"
+                f" | {row['pfer']:.3f} | {row.get('stratum', '?')}"
+                f" | {row.get('nearest_train_lang', '?')} |"
+            )
+        L.append("")
 
     return "\n".join(L)
