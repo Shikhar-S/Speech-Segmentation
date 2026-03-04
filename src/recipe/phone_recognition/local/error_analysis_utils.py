@@ -20,6 +20,7 @@ import string
 import unicodedata
 import yaml
 from collections import Counter, defaultdict
+from functools import lru_cache
 from itertools import combinations
 from pathlib import Path
 from typing import Callable, Optional
@@ -49,6 +50,43 @@ try:
     HAS_ISO639 = True
 except ImportError:
     HAS_ISO639 = False
+
+
+# ---------------------------------------------------------------------------
+# Panphon singletons — instantiated once per process (panphon init is ~slow)
+# ---------------------------------------------------------------------------
+
+_FT = None   # panphon.FeatureTable singleton
+_DIST = None  # panphon.Distance singleton
+
+
+def _get_ft():
+    """Return the module-level panphon.FeatureTable, creating it on first call."""
+    global _FT
+    if _FT is None and HAS_PANPHON:
+        import panphon as _panphon
+        _FT = _panphon.FeatureTable()
+    return _FT
+
+
+def _get_dist():
+    """Return the module-level panphon.distance.Distance, creating it on first call."""
+    global _DIST
+    if _DIST is None and HAS_PANPHON:
+        from panphon.distance import Distance as _Distance
+        _DIST = _Distance()
+    return _DIST
+
+
+_FTS_CACHE: dict = {}
+
+
+def _fts_cached(phone: str):
+    """Return panphon feature set for *phone*, caching results across calls."""
+    if phone not in _FTS_CACHE:
+        ft = _get_ft()
+        _FTS_CACHE[phone] = ft.fts(phone) if ft is not None else None
+    return _FTS_CACHE[phone]
 
 
 # ===========================================================================
@@ -163,7 +201,7 @@ def segment_ipa(text: str) -> list:
     if not text:
         return []
     if HAS_PANPHON:
-        ft = panphon.FeatureTable()
+        ft = _get_ft()
         try:
             segs = ft.ipa_segs(text)
             if segs:
@@ -221,8 +259,6 @@ RUNS_DIR = _PROJECT_ROOT / "exp/runs"
 
 DEFAULT_TRAIN_SPLITS = {
     "train",
-    "train_accentmix_multi",
-    "train_accentmix_en",
 }
 
 DATASETS = {
@@ -500,6 +536,24 @@ DEL_SYM = "<DEL>"
 INS_SYM = "<INS>"
 
 
+def _levenshtein_distance(seq1: list, seq2: list) -> int:
+    """O(min(n,m)) space edit distance without backtrace."""
+    n, m = len(seq1), len(seq2)
+    if n == 0:
+        return m
+    if m == 0:
+        return n
+    prev = list(range(m + 1))
+    curr = [0] * (m + 1)
+    for i in range(1, n + 1):
+        curr[0] = i
+        for j in range(1, m + 1):
+            cost = 0 if seq1[i - 1] == seq2[j - 1] else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev, curr = curr, prev
+    return prev[m]
+
+
 def align_phones(ref_segs: list, hyp_segs: list) -> list:
     """Levenshtein alignment with backtrace.
 
@@ -543,14 +597,19 @@ def align_phones(ref_segs: list, hyp_segs: list) -> list:
     return alignment
 
 
+@lru_cache(maxsize=32768)
+def _align_phones_cached(ref: tuple, hyp: tuple) -> tuple:
+    """Cached wrapper for align_phones; accepts/returns tuples for hashability."""
+    return tuple(align_phones(list(ref), list(hyp)))
+
+
 def normalized_edit_distance(seq1: list, seq2: list) -> float:
     """Normalized edit distance between two phone sequences (∈ [0, 1])."""
     if not seq1 and not seq2:
         return 0.0
-    alignment = align_phones(seq1, seq2)
-    errors = sum(1 for op, _, _ in alignment if op != "C")
+    dist = _levenshtein_distance(seq1, seq2)
     total = max(len(seq1), len(seq2))
-    return errors / total if total > 0 else 0.0
+    return dist / total if total > 0 else 0.0
 
 
 def phone_confusion_matrix(
@@ -828,24 +887,39 @@ def df_to_entries(df: pd.DataFrame) -> list:
 # ===========================================================================
 
 
-def analyze_accent_variance(entries: list) -> dict:
-    """Measure how much the model collapses accent variation relative to reference."""
+def analyze_accent_variance(entries: list, *, compute_global: bool = True) -> dict:
+    """Measure how much the model collapses accent variation relative to reference.
+
+    Parameters
+    ----------
+    compute_global:
+        When False, skip the O(n²) global pairwise loop and return None for
+        avg_ref_distance / avg_pred_distance / accent_variance_ratio / n_pairs.
+        Set False whenever only within_language results are needed (e.g. the
+        notebook chart), for a 200× speedup on datasets with long utterances.
+    """
     if len(entries) < 2:
         return {"error": "Need at least 2 utterances"}
     n = len(entries)
-    ref_dists, pred_dists = [], []
-    for i, j in combinations(range(n), 2):
-        ref_dists.append(
-            normalized_edit_distance(entries[i]["ref_phones"], entries[j]["ref_phones"])
-        )
-        pred_dists.append(
-            normalized_edit_distance(
-                entries[i]["pred_phones"], entries[j]["pred_phones"]
+
+    if compute_global:
+        ref_dists, pred_dists = [], []
+        for i, j in combinations(range(n), 2):
+            ref_dists.append(
+                normalized_edit_distance(entries[i]["ref_phones"], entries[j]["ref_phones"])
             )
-        )
-    avg_ref = float(np.mean(ref_dists))
-    avg_pred = float(np.mean(pred_dists))
-    ratio = avg_ref / avg_pred if avg_pred > 0 else float("inf")
+            pred_dists.append(
+                normalized_edit_distance(
+                    entries[i]["pred_phones"], entries[j]["pred_phones"]
+                )
+            )
+        avg_ref = float(np.mean(ref_dists))
+        avg_pred = float(np.mean(pred_dists))
+        ratio = avg_ref / avg_pred if avg_pred > 0 else float("inf")
+        n_pairs = len(ref_dists)
+    else:
+        avg_ref = avg_pred = ratio = None
+        n_pairs = None
 
     lang_groups = defaultdict(list)
     for e in entries:
@@ -872,10 +946,10 @@ def analyze_accent_variance(entries: list) -> dict:
             "ratio": round(ar / ap, 1) if ap > 0 else float("inf"),
         }
     return {
-        "avg_ref_distance": round(avg_ref, 3),
-        "avg_pred_distance": round(avg_pred, 3),
-        "accent_variance_ratio": round(ratio, 1),
-        "n_pairs": len(ref_dists),
+        "avg_ref_distance": round(avg_ref, 3) if avg_ref is not None else None,
+        "avg_pred_distance": round(avg_pred, 3) if avg_pred is not None else None,
+        "accent_variance_ratio": round(ratio, 1) if ratio is not None else None,
+        "n_pairs": n_pairs,
         "within_language": within_lang,
     }
 
@@ -916,7 +990,9 @@ def analyze_substitutions(entries: list) -> dict:
     correct_counts, total_ref_counts, total_ops = Counter(), Counter(), Counter()
 
     for entry in entries:
-        for op, ref_p, hyp_p in align_phones(entry["ref_phones"], entry["pred_phones"]):
+        for op, ref_p, hyp_p in _align_phones_cached(
+            tuple(entry["ref_phones"]), tuple(entry["pred_phones"])
+        ):
             total_ops[op] += 1
             if op == "C":
                 correct_counts[ref_p] += 1
@@ -930,7 +1006,7 @@ def analyze_substitutions(entries: list) -> dict:
             elif op == "I":
                 ins_counts[hyp_p] += 1
 
-    dst = Distance() if HAS_PANPHON else None
+    dst = _get_dist()
     classified_subs = []
     for (ref_p, hyp_p), count in sub_counts.most_common():
         dist = -1
@@ -1002,18 +1078,20 @@ def analyze_feature_errors(entries: list) -> dict:
     """Compute articulatory feature error rates (FER) per feature and feature group."""
     if not HAS_PANPHON:
         return {"error": "panphon not available"}
-    ft = panphon.FeatureTable()
+    ft = _get_ft()
     feature_names = ft.names
     feature_errors = {f: 0 for f in feature_names}
     feature_totals = {f: 0 for f in feature_names}
     n_aligned, n_skipped = 0, 0
 
     for entry in tqdm(entries):
-        for op, ref_p, hyp_p in align_phones(entry["ref_phones"], entry["pred_phones"]):
+        for op, ref_p, hyp_p in _align_phones_cached(
+            tuple(entry["ref_phones"]), tuple(entry["pred_phones"])
+        ):
             if op == "S": # substituted
                 try:
-                    rf = ft.fts(ref_p)
-                    hf = ft.fts(hyp_p)
+                    rf = _fts_cached(ref_p)
+                    hf = _fts_cached(hyp_p)
                     if rf is None or hf is None:
                         n_skipped += 1
                         continue
@@ -1029,7 +1107,7 @@ def analyze_feature_errors(entries: list) -> dict:
                             feature_errors[fn] += 1
             elif op == "C": # correct
                 try:
-                    rf = ft.fts(ref_p)
+                    rf = _fts_cached(ref_p)
                     if rf is None:
                         continue
                     rv = rf.numeric()
@@ -1319,18 +1397,35 @@ def _query_lang2vec(langs: list, feature_set: str) -> dict:
     result = {}
     missing = []
 
-    for code in langs:
-        try:
-            vec_map = l2v.get_features([code], feature_set)
-            vec = np.array(vec_map[code], dtype=float)
-            # lang2vec fills unknown dimensions with '--'; treat fully
-            # non-finite vectors as missing.
-            if np.all(~np.isfinite(vec)):
+    def _vec_to_arr(vec):
+        """Convert a lang2vec value (list with possible '--') to float ndarray."""
+        return np.array([np.nan if str(x) == "--" else float(x) for x in vec])
+
+    try:
+        vec_map_raw = l2v.get_features(langs, feature_set)  # batch query
+        for code, vec in vec_map_raw.items():
+            try:
+                arr = _vec_to_arr(vec)
+                # lang2vec fills unknown dimensions with '--' (→ nan); treat
+                # fully non-finite vectors as missing.
+                if np.all(~np.isfinite(arr)):
+                    missing.append(code)
+                else:
+                    result[code] = arr
+            except (ValueError, TypeError):
                 missing.append(code)
-            else:
-                result[code] = vec
-        except (ValueError, KeyError):
-            missing.append(code)
+    except Exception:
+        # fallback: per-language (original behavior)
+        for code in langs:
+            try:
+                vec_map = l2v.get_features([code], feature_set)
+                arr = _vec_to_arr(vec_map[code])
+                if np.all(~np.isfinite(arr)):
+                    missing.append(code)
+                else:
+                    result[code] = arr
+            except (ValueError, KeyError):
+                missing.append(code)
 
     result["__missing__"] = missing
     return result

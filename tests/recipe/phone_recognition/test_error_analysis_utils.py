@@ -630,6 +630,17 @@ class TestAnalyzeAccentVariance:
         wl = result["within_language"]
         assert "eng" in wl  # eng has 2 entries
 
+    def test_compute_global_false_skips_global_stats(self):
+        result = analyze_accent_variance(_ENTRIES, compute_global=False)
+        # Global keys are None
+        assert result["avg_ref_distance"] is None
+        assert result["avg_pred_distance"] is None
+        assert result["accent_variance_ratio"] is None
+        assert result["n_pairs"] is None
+        # within_language is still populated
+        assert "within_language" in result
+        assert len(result["within_language"]) >= 1
+
 
 class TestAnalyzeDiacriticGap:
     def test_returns_expected_keys(self):
