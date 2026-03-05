@@ -1,4 +1,4 @@
-DS=(gmuaccent timit l2arctic_perceived voxangeles doreco tusom2021) # prism intrinsic
+DS=(timit l2arctic_perceived gmuaccent doreco voxangeles tusom2021) # prism intrinsic
 # DS=(epadb buckeye speechoceannotth) # ood
 # DS=(aishell cv fleurs fleurs_indv kazakh librispeech mls_dutch mls_french mls_german mls_italian mls_polish mls_portuguese mls_spanish southengland tamil) # indomain
 # DS=(timit)
@@ -10,21 +10,37 @@ DS=(gmuaccent timit l2arctic_perceived voxangeles doreco tusom2021) # prism intr
 #    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.losssched_half30k_m12tomp5.panphonk8.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt' \
 #    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.interctc_l4_8_12.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt' \
 # )
+# joint-ctc-attn
+# ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/cjli/ctcattn/checkpoint-22000.ckpt')
 
+# # orthographic auxiliary loss with interctc
+# ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_auxctc/xeus_multiaccent.ortho_ch8k_ctc_l4_8_12.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt')
+###########################################################################
 # # ssl variants
 # # ebranchformer - none
 # ckpts=(
-#    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/ebranch12l_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-24000.ckpt'
+#    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/ebranch12l_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-18000.ckpt'
+# )
+# # mms 1b full data
+# ckpts=(
+#    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/mms1b_multiaccent.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt' \
 # )
 
-# # mms 300m, 1b - vanilla ctc
-# '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/mms1b_multiaccent.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt' \
-ckpts=(
-   '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/mms_multiaccent.bs320.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-8000.ckpt' \
-)
+# # mms-300m on same data as other ssl variants
+# ckpts=(
+#    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/mms_multiaccent.bs320.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-6000-v3.ckpt' \
+# )
+# # mms-1b on same data as other ssl variants
+# ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/mms1b_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-18000.ckpt')
+# # xeus on same data as other ssl variants
+# ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-18000.ckpt')
 
-# xeus on same data as other ssl variants
-ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-18000.ckpt')
+# ebranchformer - 700M
+# ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/ebranch.selfctc_l4_8_12.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt')
+
+# mms1-b w/ selfctc inference w/o conditioning
+ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/mms1b_multiaccent.selfctc_l4_8_12_16.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt')
+###########################################################################
 
 
 for ckpt in ${ckpts[@]}; do
@@ -33,17 +49,17 @@ for ckpt in ${ckpts[@]}; do
    for ds in ${DS[@]}; do
       echo "Evaluating checkpoint: $ckpt on dataset: $ds"
       # if there are no ouptuts skip this evaluation and tell user
-      if [ ! -f exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/*.jsonl ]; then
+      if [ ! -f exp/runs/decodedv3.${ds}/${train_run_folder}.woselfctc.ck${stepnum}/*.jsonl ]; then
          echo "No transcription found for checkpoint ${ckpt} on dataset ${ds}. Skipping evaluation for this dataset."
          continue
       fi
-      python scripts/jsonl2json.py --dirname exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}
+      python scripts/jsonl2json.py --dirname exp/runs/decodedv3.${ds}/${train_run_folder}.woselfctc.ck${stepnum}
       echo "merged entries, now computing metrics..."
       python -m src.metrics.phone_recognition \
-          --prediction_file exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/transcription.json \
+          --prediction_file exp/runs/decodedv3.${ds}/${train_run_folder}.woselfctc.ck${stepnum}/transcription.json \
           --output_file exp/runs/ipapack_ctc/paperresults-${train_run_folder}.csv \
           --gt_field target \
-          --evaluation_name ${train_run_folder}-${ds}-${stepnum} \
+          --evaluation_name ${train_run_folder}-woselfctc-${ds}-${stepnum} \
           --key_field utt_id &
    done
    wait

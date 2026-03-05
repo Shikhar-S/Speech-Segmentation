@@ -5,8 +5,9 @@
 #    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.schedule_panphon_4k_vanilla.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-4000.ckpt'
 # )
 
-DS=(epadb gmuaccent buckeye speechoceannotth l2arctic_perceived voxangeles)
-# DS=(voxangeles  l2arctic_perceived)
+# DS=(epadb gmuaccent buckeye speechoceannotth l2arctic_perceived voxangeles timit)
+# DS=(aishell cv fleurs fleurs_indv kazakh librispeech mls_dutch mls_french mls_german mls_italian mls_polish mls_portuguese mls_spanish southengland tamil)
+DS=(timit)
 
 # in order
 # 1. panphon w/ ls point2 and then vanilla ctc
@@ -30,55 +31,30 @@ DS=(epadb gmuaccent buckeye speechoceannotth l2arctic_perceived voxangeles)
 #    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.oracle_ls7.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-8000.ckpt' \
 # )
 
-# vanilla then oracle
-# oracle with scheduling -- 1 run
-# full run on ipapack with panphon
-ckpts=( \
-   '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.sched_vanilla_oracle_ls2.bs256.lr3em5.sched_p0warm_p100const_1unfreeze.40ksteps/checkpoints/checkpoint-4000.ckpt' \
-   '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.losssched_half2.5k_m12to0.oracle.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-8000.ckpt' \
-   '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.losssched_half30k_m12tomp5.panphonk8.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt' \
-)
+# # vanilla then oracle
+# # oracle with scheduling -- 1 run
+# # full run on ipapack with panphon
+# ckpts=( \
+#    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.sched_vanilla_oracle_ls2.bs256.lr3em5.sched_p0warm_p100const_1unfreeze.40ksteps/checkpoints/checkpoint-4000.ckpt' \
+#    '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.losssched_half2.5k_m12to0.oracle.bs256.lr3em5.sched_p15warm_p85const_3kunfreeze.40ksteps/checkpoints/checkpoint-8000.ckpt' \
+# )
 
-# for ckpt in ${ckpts[@]}; do
-#    train_run_folder=$(basename "${ckpt%/checkpoints/*}")
-#    stepnum=$(basename $ckpt | sed 's/checkpoint-\(.*\).ckpt/\1/')
-#    for ds in ${DS[@]}; do
-#       echo "Evaluating checkpoint: $ckpt on dataset: $ds"
-#       python scripts/jsonl2json.py --dirname exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}
-#       echo "merged entries, now evaluating metrics..."
-#       python -m src.metrics.phone_recognition \
-#           --prediction_file exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/transcription.json \
-#           --output_file exp/runs/ipapack_ctc/results-${train_run_folder}.csv \
-#           --gt_field target \
-#           --evaluation_name ${train_run_folder}-${ds}-${stepnum} \
-#           --key_field utt_id &
-#    done
-#    wait
-#    echo "=========================="
-#    cut -d',' -f1-11 exp/runs/ipapack_ctc/results-${train_run_folder}.csv
-#    echo "=========================="
-# done
+# inter-ctc
+ckpts=('/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/ipaaccent_ctc/xeus_multiaccent.losssched_half30k_m12tomp5.panphonk8.bs256.lr3em5.sched_p05warm_p75const_3kunfreeze.100ksteps/checkpoints/checkpoint-22000.ckpt')
 
-
-EPITRAN_BASE="exp/data/epitran_outputs"
 
 for ckpt in ${ckpts[@]}; do
    train_run_folder=$(basename "${ckpt%/checkpoints/*}")
    stepnum=$(basename $ckpt | sed 's/checkpoint-\(.*\).ckpt/\1/')
    for ds in ${DS[@]}; do
-      echo "Evaluating checkpoint: $ckpt on dataset: $ds with epitran"
-      if [ ! -f ${EPITRAN_BASE}/${ds}.epitran ]; then
-         echo "Epitran output for dataset ${ds} not found at ${EPITRAN_BASE}/${ds}.epitran. Skipping evaluation for this dataset."
-         continue
-      fi
-      if [ ! -f exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/transcription.json ]; then
-         python scripts/jsonl2json.py --dirname exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}
-      fi
+      echo "Evaluating checkpoint: $ckpt on dataset: $ds"
+      python scripts/jsonl2json.py --dirname exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}
+      echo "merged entries, now evaluating metrics..."
       python -m src.metrics.phone_recognition \
           --prediction_file exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/transcription.json \
           --output_file exp/runs/ipapack_ctc/results-${train_run_folder}.csv \
-          --gt_file ${EPITRAN_BASE}/${ds}.epitran \
-          --evaluation_name ${train_run_folder}-${ds}_epitran-${stepnum} \
+          --gt_field target \
+          --evaluation_name ${train_run_folder}-${ds}-${stepnum} \
           --key_field utt_id &
    done
    wait
@@ -86,3 +62,31 @@ for ckpt in ${ckpts[@]}; do
    cut -d',' -f1-11 exp/runs/ipapack_ctc/results-${train_run_folder}.csv
    echo "=========================="
 done
+
+
+# EPITRAN_BASE="exp/data/epitran_outputs"
+
+# for ckpt in ${ckpts[@]}; do
+#    train_run_folder=$(basename "${ckpt%/checkpoints/*}")
+#    stepnum=$(basename $ckpt | sed 's/checkpoint-\(.*\).ckpt/\1/')
+#    for ds in ${DS[@]}; do
+#       echo "Evaluating checkpoint: $ckpt on dataset: $ds with epitran"
+#       if [ ! -f ${EPITRAN_BASE}/${ds}.epitran ]; then
+#          echo "Epitran output for dataset ${ds} not found at ${EPITRAN_BASE}/${ds}.epitran. Skipping evaluation for this dataset."
+#          continue
+#       fi
+#       if [ ! -f exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/transcription.json ]; then
+#          python scripts/jsonl2json.py --dirname exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}
+#       fi
+#       python -m src.metrics.phone_recognition \
+#           --prediction_file exp/runs/decodedv3.${ds}/${train_run_folder}.ck${stepnum}/transcription.json \
+#           --output_file exp/runs/ipapack_ctc/results-${train_run_folder}.csv \
+#           --gt_file ${EPITRAN_BASE}/${ds}.epitran \
+#           --evaluation_name ${train_run_folder}-${ds}_epitran-${stepnum} \
+#           --key_field utt_id &
+#    done
+#    wait
+#    echo "=========================="
+#    cut -d',' -f1-11 exp/runs/ipapack_ctc/results-${train_run_folder}.csv
+#    echo "=========================="
+# done
