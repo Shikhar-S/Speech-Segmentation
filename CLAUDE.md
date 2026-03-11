@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**PhoneBench** is a phonetic model benchmarking framework built on PyTorch Lightning + Hydra. It evaluates phone recognition across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). The main model family is **PowSM** (Phoneme-oriented Weighted Speech Model), a CTC-Attention hybrid encoder-decoder.
+**PhoneBench** is a phonetic model benchmarking framework built on PyTorch Lightning + Hydra. It evaluates phone recognition and forced alignment across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). The main model family is **PowSM** (Phoneme-oriented Weighted Speech Model), a CTC-Attention hybrid encoder-decoder.
 
 ## Environment Setup
 
@@ -36,9 +36,7 @@ python scripts/parse_wandb.py       # extract WandB metrics
 
 All config lives in `configs/`. The entry point is `configs/main.yaml`, which is composed with experiment overrides. Experiment configs in `configs/experiment/` are organized as:
 - `train/` – training runs
-- `probing/` – probing experiments (format: `task_dataset_model`)
 - `inference/` – inference-only runs
-- `cascade/` – cascade pipeline experiments
 
 ### Execution Flow
 
@@ -70,7 +68,9 @@ Datasets load from Kaldi-style ark/scp files (`kaldi_dataset.py`) or JSON. Key d
 
 ### Recipe Modules (`src/recipe/`)
 
-Task-specific Lightning modules (model + data glue) organized by task: `phone_recognition/`, `forced_alignment/`, `geolocation/`, `l1_classification/`, `l2_assessment/`, `langid/`, `tonal_phone_recognition/`.
+Task-specific Lightning modules (model + data glue):
+- `phone_recognition/` – Phone recognition models and error analysis
+- `forced_alignment/` – Forced alignment models, loss, inference, and evaluation
 
 ### Distributed Inference (`src/core/distributed_inference.py`)
 
@@ -123,7 +123,6 @@ inference:
   - `PhoneRecognitionSummary` fields: `N`, `phones`, `PER`, `FER`, `FED`, `PFER`, `SUB`, `INS`, `DEL`
   - Reference phone count: `len(evaluator.dst.fm.ipa_segs(evaluator._prepare(ref)))`
 - `forced_alignment.py` – Alignment-based metrics
-- `zeroshot_eval.py` – Zero-shot phonetic evaluation
 
 ## Code Conventions
 
@@ -131,7 +130,6 @@ inference:
 - **Imports:** isort-sorted
 - **Docstring coverage:** 80% minimum (interrogate)
 - Config files use YAML with `_target_` for Hydra `instantiate()` calls
-- Tags follow `[dataset, model, task]` convention for probing experiments
 
 ## Cluster / Job Submission
 

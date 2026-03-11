@@ -2,29 +2,25 @@ ______________________________________________________________________
 
 <div align="center">
 
-# PhoneBench
-
 <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
 <a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/-Lightning-792ee5?logo=pytorchlightning&logoColor=white"></a>
 <a href="https://hydra.cc/"><img alt="Config: Hydra" src="https://img.shields.io/badge/Config-Hydra-89b8cd"></a>
 <a href="https://github.com/ashleve/lightning-hydra-template"><img alt="Template" src="https://img.shields.io/badge/-Lightning--Hydra--Template-017F2F?style=flat&logo=github&labelColor=gray"></a><br>
-<!-- [![Paper](http://img.shields.io/badge/paper-arxiv.1001.2234-B31B1B.svg)](https://www.nature.com/articles/nature14539)
-[![Conference](http://img.shields.io/badge/AnyConference-year-4b44ce.svg)](https://papers.nips.cc/paper/2020) -->
 
 </div>
 
 ## Description
 
-A benchmark for evaluating phonetic models.
+A codebase for building phone segmentation and recognition models.
 
 ## 🚀 Quickstart
 
 ```bash
 # clone project
-git clone git@github.com:changelinglab/PhoneBench.git
-cd PhoneBench
+git clone git@github.com:Shikhar-S/Speech-Segmentation.git
+cd Speech-Segmentation
 
-# create environment with your favourite package manager 
+# create environment with your favourite package manager
 # and install dependencies from requirements.txt
 # We provide "setup_uv.sh" for doing these and activating environment
 . ./setup_uv.sh
@@ -46,11 +42,11 @@ python src/main.py trainer=gpu
 Train model with chosen experiment configuration from [configs/experiment/](configs/experiment/)
 
 ```bash
-# For probing experiments using hidden representations
-python src/main.py experiment=probing/geolocation_vaani_powsm
+# For phone recognition training
+python src/main.py experiment=train/timit_powsmpr
 
 # For inference experiments
-python src/main.py experiment=inference/vaani_powsmpr
+python src/main.py experiment=inference/timit_powsmpr
 ```
 
 You can override any parameter from command line like this
@@ -59,12 +55,15 @@ You can override any parameter from command line like this
 python src/main.py trainer.max_epochs=20 data.batch_size=64
 ```
 
-## Tonal Recognition
-Currently, the repository provide the dataloader for tusom dataset. The tusom dataset can be found and downloaded here: https://github.com/dmort27/tusom2021
-The aishell dataset can be found and downloaded here: 
-https://www.openslr.org/33/
+## Phone Recognition Pipeline
 
-And we also include the code to separate the IPA from the tone of the original dataset. The file location is here: PhoneBench/src/recipe/tonal_phone_recognition/local
+```bash
+bash scripts/pr_timit_train.sh      # train on TIMIT with Epitran mixing
+bash scripts/pr_decode.sh           # decode/inference on datasets
+bash scripts/pr_eval.sh             # evaluate decoded outputs
+python scripts/pr_parse_results.py  # aggregate results
+python scripts/parse_wandb.py       # extract WandB metrics
+```
 
 ## More Documentation
 

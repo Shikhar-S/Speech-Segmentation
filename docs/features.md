@@ -84,17 +84,16 @@ python src/main.py logger=wandb
 <summary><b>Train model with chosen experiment config</b></summary>
 
 ```bash
-# For probing experiments (task_dataset_model format)
-python src/main.py experiment=probing/geolocation_vaani_powsm
+# For phone recognition training
+python src/main.py experiment=train/timit_powsmpr
 
 # For inference experiments
-python src/main.py experiment=inference/vaani_powsmpr
+python src/main.py experiment=inference/timit_powsmpr
 ```
 
 > **Note**: Experiment configs are organized in [configs/experiment/](../configs/experiment/) with subdirectories:
-> - `probing/` - Probing experiment configs (format: `task_dataset_model`)
+> - `train/` - Training experiment configs
 > - `inference/` - Inference experiment configs
-> - `cascade/` - Cascade experiment configs
 
 </details>
 
@@ -207,7 +206,7 @@ python src/main.py -m data.batch_size=32,64,128 model.lr=0.001,0.0005
 ```bash
 # this will run hyperparameter search defined in `configs/hparams_search/mnist_optuna.yaml`
 # over chosen experiment config
-python src/main.py -m hparams_search=mnist_optuna experiment=probing/geolocation_vaani_powsm
+python src/main.py -m hparams_search=mnist_optuna experiment=train/timit_powsmpr
 ```
 
 > **Note**: Using [Optuna Sweeper](https://hydra.cc/docs/next/plugins/optuna_sweeper) doesn't require you to add any boilerplate to your code, everything is defined in a [single config file](../configs/hparams_search/mnist_optuna.yaml).
@@ -220,8 +219,8 @@ python src/main.py -m hparams_search=mnist_optuna experiment=probing/geolocation
 <summary><b>Execute all experiments from folder</b></summary>
 
 ```bash
-# Execute all probing experiments
-python src/main.py -m 'experiment=probing/glob(*)'
+# Execute all training experiments
+python src/main.py -m 'experiment=train/glob(*)'
 
 # Execute all inference experiments
 python src/main.py -m 'experiment=inference/glob(*)'
@@ -295,10 +294,10 @@ pytest -k "not slow"
 Each experiment should be tagged in order to easily filter them across files or in logger UI:
 
 ```bash
-python src/main.py tags=["vaani","powsm","geolocation"]
+python src/main.py tags=["timit","powsm","phone_recognition"]
 ```
 
-> **Note**: Tags are structured as `[dataset, model, task]` in probing experiments for consistency.
+> **Note**: Tags are structured as `[dataset, model, task]` for consistency.
 
 > **Note**: You might need to escape the bracket characters in your shell with `python src/main.py tags=\["vaani","powsm","geolocation"\]`.
 
@@ -405,7 +404,7 @@ You can use many of them at once (see [configs/logger/many_loggers.yaml](../conf
 
 You can also write your own logger.
 
-Lightning provides convenient method for logging custom metrics from inside LightningModule. Read the [docs](https://pytorch-lightning.readthedocs.io/en/latest/extensions/logging.html#automatic-logging) or take a look at [geolocation example](../src/recipe/geolocation/model_module.py).
+Lightning provides convenient method for logging custom metrics from inside LightningModule. Read the [docs](https://pytorch-lightning.readthedocs.io/en/latest/extensions/logging.html#automatic-logging) or take a look at [phone recognition example](../src/recipe/phone_recognition/model_module.py).
 
 <!-- Logs directory deprecated. Use your chosen logger's artifact store or Hydra's run dir. -->
 
