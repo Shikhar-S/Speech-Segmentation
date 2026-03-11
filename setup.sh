@@ -34,6 +34,13 @@ echo "Platform: $(uname -m) → installing extra: $EXTRA"
 
 # Create venv if needed and sync deps
 uv sync --extra "$EXTRA"
+
+if [[ "$EXTRA" == "x86" ]]; then
+  uv pip install "espnet @ git+https://github.com/y00njaekim/espnet.git@hotfix"
+elif [[ "$EXTRA" == "dai" ]]; then
+  uv pip install "espnet @ git+https://github.com/Shikhar-S/espnet.git@flashattn"
+fi
+
 source .venv/bin/activate
 
 # x86 only: clone and install icefall (not pip-installable)

@@ -1,7 +1,7 @@
 [project]
 name = "phonebench"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = "==3.10.*"
 dependencies = [
     # pytorch
     "torch==2.6.0",
@@ -43,7 +43,6 @@ dependencies = [
 [project.optional-dependencies]
 # Delta / Babel (x86_64)
 x86 = [
-    "espnet @ git+https://github.com/y00njaekim/espnet.git@hotfix",
     "humanfriendly",
     "torch-complex",
     "h5py",
@@ -59,9 +58,6 @@ x86 = [
     "sortedcontainers==2.4.0",
 ]
 # Delta-AI (aarch64) — flash-attn must be installed separately (see setup.sh)
-dai = [
-    "espnet @ git+https://github.com/Shikhar-S/espnet.git@flashattn",
-]
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cu126"]
