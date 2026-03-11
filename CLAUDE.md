@@ -9,17 +9,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Environment Setup
 
 ```bash
-envinit   # activate project environment (alias for: source setup_uv.sh)
+source setup_uv.sh   # activate project environment
 ```
 
-**Important:** Commands that run Python (training, inference, smoke tests, etc.) require a GPU node
-and an active environment. Always:
-1. Get an interactive GPU node: `now --time=2:00:00`
-2. Activate the environment: `envinit`
+**Important:** Python commands (training, inference, tests) require a GPU node and an active environment.
 
-`now` is a shell function defined in `~/.bashrc` that calls `srun` with defaults from
-`~/.slurm_defaults` (`-A bbjs-delta-gpu -c 16 -p gpuA100x4-interactive --mem=32GB --gpus-per-node=1`).
-Pass `--time=2:00:00` (or any duration) as an argument.
+**Step 1 — Get an interactive GPU node** (max 30 min on all clusters):
+
+| Cluster | Account | Partition |
+|---|---|---|
+| Delta | `bbjs-delta-gpu` | `gpuA100x4-interactive` or `gpuA40x4-interactive` |
+| Delta-AI | `bbjs-dtai-gh` | `ghx4-interactive` |
+| Babel | *(none)* | `debug` |
+
+```bash
+# Example for Delta (adjust -A and -p per cluster/partition):
+srun -A bbjs-delta-gpu -p gpuA100x4-interactive --gpus-per-node=1 -c 16 --mem=32GB --time=0:30:00 --pty bash
+```
+
+**Step 2 — Activate environment:**
+```bash
+source setup_uv.sh
+```
 
 **Phone recognition pipeline (scripts/):**
 ```bash
