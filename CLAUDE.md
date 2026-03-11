@@ -8,10 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment Setup
 
-```bash
-source setup_uv.sh   # activate project environment
-```
-
 **Important:** Python commands (training, inference, tests) require a GPU node and an active environment.
 
 **Step 1 — Get an interactive GPU node** (max 30 min on all clusters):
@@ -27,10 +23,23 @@ source setup_uv.sh   # activate project environment
 srun -A bbjs-delta-gpu -p gpuA100x4-interactive --gpus-per-node=1 -c 16 --mem=32GB --time=0:30:00 --pty bash
 ```
 
-**Step 2 — Activate environment:**
+**Step 2 — Install and activate environment:**
+
 ```bash
-source setup_uv.sh
+make install        # auto-detects x86 vs aarch64
+make install-x86    # force Delta / Babel
+make install-dai    # force Delta-AI
+
+# Activate on subsequent sessions (make cannot activate your shell):
+source .venv/bin/activate
 ```
+
+> **Delta-AI only:** `flash_attn_3` (Hopper build) is installed automatically from the
+> pre-built egg at `/work/nvme/bbjs/sbharadwaj/powsm/flash-attention/hopper/dist/`.
+> If the egg is missing, rebuild with:
+> `cd /work/nvme/bbjs/sbharadwaj/powsm/flash-attention/hopper && python setup.py bdist_egg`
+
+> **Legacy path** (`setup_uv.sh` + `requirements*.txt`) is retained but no longer the primary install method.
 
 **Phone recognition pipeline (scripts/):**
 ```bash
