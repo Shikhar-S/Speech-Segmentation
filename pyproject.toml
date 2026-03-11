@@ -62,6 +62,9 @@ x86 = [
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cu126"]
 find-links = ["https://k2-fsa.github.io/k2/cuda.html"]
+index-strategy = "unsafe-best-match"
+link-mode = "copy"
+cache-dir = ".uv_cache"
 
 [tool.pytest.ini_options]
 addopts = [
