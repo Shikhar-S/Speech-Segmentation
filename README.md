@@ -20,11 +20,17 @@ A codebase for building phone segmentation and recognition models.
 git clone git@github.com:Shikhar-S/Speech-Segmentation.git
 cd Speech-Segmentation
 
-# create environment with your favourite package manager
-# and install dependencies from requirements.txt
-# We provide "setup_uv.sh" for doing these and activating environment
-. ./setup_uv.sh
+# install (auto-detects x86_64 for Delta/Babel, aarch64 for Delta-AI)
+make install
 
+# activate environment (once per session)
+source .venv/bin/activate
+```
+
+On Delta-AI, force the `dai` variant explicitly:
+```bash
+make install-dai
+source .venv/bin/activate
 ```
 
 ## How to run
