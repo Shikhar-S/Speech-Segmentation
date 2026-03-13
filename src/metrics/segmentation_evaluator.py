@@ -1,16 +1,20 @@
-from dataclasses import dataclass
-from typing import List, Dict, Optional
+import csv
+import io
 from collections import defaultdict
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
 import numpy as np
+from rich.console import Console
+from rich.table import Table
 
 from src.utils.pylogger import RankedLogger
-from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
 @dataclass
-class ForceAlignedUnit:
+class SegmentationUnit:
     """Represents a single aligned unit (e.g., phone)."""
 
     start: int | float
@@ -18,7 +22,7 @@ class ForceAlignedUnit:
     label: str | int
 
 
-class AlignmentEvaluator:
+class SegmentationEvaluator:
     """Evaluates CTC-based forced alignment against ground truth."""
 
     def __init__(self, tolerance_ms: int = 20):
@@ -26,16 +30,16 @@ class AlignmentEvaluator:
 
     def evaluate_boundaries(
         self,
-        predicted: List[ForceAlignedUnit],
-        ground_truth: List[ForceAlignedUnit],
+        predicted: List[SegmentationUnit],
+        ground_truth: List[SegmentationUnit],
         symbols: Optional[List[str]] = None,
     ) -> Dict[str, float]:
         """Evaluate predicted phone boundaries against ground truth
             for a single utterance.
 
         Args:
-            predicted: list of ForceAlignedUnit for predicted boundaries.
-            ground_truth: list of ForceAlignedUnit for ground truth boundaries.
+            predicted: list of SegmentationUnit for predicted boundaries.
+            ground_truth: list of SegmentationUnit for ground truth boundaries.
             symbols: optional list of symbol labels aligned 1-to-1 with
                 ground_truth/predicted. If None, symbol-wise analysis is
                 skipped.
@@ -146,222 +150,87 @@ class AlignmentEvaluator:
             return results[mean_key]
         return default
 
-    def _get_percentile_value(
-        self, results: Dict, metric: str, p: int, default: float = 0.0
-    ) -> float:
-        """Get percentile metric, falling back to mean_<metric>_pX for batch."""
-        key = f"{metric}_p{p}"
-        if key in results:
-            return results[key]
-        mean_key = f"mean_{key}"
-        if mean_key in results:
-            return results[mean_key]
-        return default
-
-    def pretty_print(self, results: Dict, verbosity: int = 1) -> None:
-        """Print results as ASCII table."""
+    def pretty_print(self, results: Dict) -> None:
+        """Print results as a rich table followed by a CSV dump."""
         if not results:
             print("No results")
             return
 
-        print("\nALIGNMENT EVALUATION RESULTS")
-        print("=" * 50)
+        console = Console()
 
-        verbosity_map = {
-            0: self._print_minimal,
-            1: self._print_standard,
-            2: self._print_detailed,
-        }
-        verbosity_map.get(verbosity, self._print_full)(results)
-
-    def _print_table(self, rows, col_widths=None):
-        """Print a simple ASCII table."""
-        if not rows:
-            return
-
-        if col_widths is None:
-            col_widths = [
-                max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))
-            ]
-
-        for row in rows:
-            print(" | ".join(str(val).ljust(w) for val, w in zip(row, col_widths)))
-
-    def _print_minimal(self, results):
-        """Minimal output."""
-        f1 = self._get_metric(results, "f1", 0.0)
-        be_mean = self._get_metric(results, "boundary_err_mean", 0.0)
-        be_std = self._get_metric(results, "boundary_err_std", 0.0)
-        dur_mean = self._get_metric(results, "dur_err_mean", 0.0)
-        dur_std = self._get_metric(results, "dur_err_std", 0.0)
-
-        self._print_table(
-            [
-                ["Metric", "Value"],
-                ["-" * 20, "-" * 30],
-                ["F1 Score", f"{f1:.3f}"],
-                ["Boundary Error (ms)", f"{be_mean:.2f} +/- {be_std:.2f}"],
-                ["Duration Error (ms)", f"{dur_mean:.2f} +/- {dur_std:.2f}"],
-            ]
-        )
-
-    def _print_standard(self, results):
-        """Standard output."""
-        f1 = self._get_metric(results, "f1", 0.0)
-        precision = self._get_metric(results, "precision", 0.0)
-        recall = self._get_metric(results, "recall", 0.0)
-        start_mean = self._get_metric(results, "start_err_mean", 0.0)
-        start_std = self._get_metric(results, "start_err_std", 0.0)
-        end_mean = self._get_metric(results, "end_err_mean", 0.0)
-        end_std = self._get_metric(results, "end_err_std", 0.0)
-        pbe_mean = self._get_metric(results, "pbe_mean", 0.0)
-        pbe_std = self._get_metric(results, "pbe_std", 0.0)
-        dur_mean = self._get_metric(results, "dur_err_mean", 0.0)
-        dur_std = self._get_metric(results, "dur_err_std", 0.0)
-
+        g = self._get_metric
         samples = results.get("n", results.get("total_samples", 0))
         segments = results.get("total_segments", None)
 
-        rows = [
-            ["Metric", "Value"],
-            ["-" * 20, "-" * 30],
-            ["Samples", samples],
-        ]
+        # --- rich table ---
+        table = Table(title="Alignment Evaluation Results", show_lines=True)
+        table.add_column("Metric", style="bold")
+        table.add_column("Value", justify="right")
+
+        count_row = f"{samples} samples"
         if segments is not None:
-            rows.append(["Segments", segments])
-
-        rows.extend(
-            [
-                ["F1/Precision/Recall", f"{f1:.3f} / {precision:.3f} / {recall:.3f}"],
-                [
-                    "Start Error (ms)",
-                    f"{start_mean:.2f} +/- {start_std:.2f}",
-                ],
-                [
-                    "End Error (ms)",
-                    f"{end_mean:.2f} +/- {end_std:.2f}",
-                ],
-                [
-                    "PBE (ms)",
-                    f"{pbe_mean:.2f} +/- {pbe_std:.2f}",
-                ],
-                [
-                    "Duration Error (ms)",
-                    f"{dur_mean:.2f} +/- {dur_std:.2f}",
-                ],
-            ]
-        )
-
-        self._print_table(rows)
-
-    def _print_detailed(self, results):
-        """Detailed output with medians and durations."""
-        self._print_standard(results)
-
-        pbe_med = self._get_metric(results, "pbe_median", 0.0)
-        start_med = self._get_metric(results, "start_err_median", 0.0)
-        end_med = self._get_metric(results, "end_err_median", 0.0)
-        dur_med = self._get_metric(results, "dur_err_median", 0.0)
-
-        gt_mean = self._get_metric(results, "gt_dur_mean", 0.0)
-        gt_std = self._get_metric(results, "gt_dur_std", 0.0)
-        pred_mean = self._get_metric(results, "pred_dur_mean", 0.0)
-        pred_std = self._get_metric(results, "pred_dur_std", 0.0)
-
-        print("\nMedians:")
-        self._print_table(
-            [
-                ["Metric", "Median (ms)"],
-                ["-" * 20, "-" * 15],
-                ["PBE", f"{pbe_med:.2f}"],
-                ["Start Error", f"{start_med:.2f}"],
-                ["End Error", f"{end_med:.2f}"],
-                ["Duration Error", f"{dur_med:.2f}"],
-            ]
-        )
-
-        print("\nDurations:")
-        self._print_table(
-            [
-                ["Type", "Mean +/- Std (ms)"],
-                ["-" * 20, "-" * 25],
-                ["Ground Truth", f"{gt_mean:.2f} +/- {gt_std:.2f}"],
-                ["Predicted", f"{pred_mean:.2f} +/- {pred_std:.2f}"],
-            ]
-        )
+            count_row += f", {segments} segments"
+        table.add_row("Count", count_row)
+        table.add_section()
+        table.add_row("F1", f"{g(results, 'f1'):.3f}")
+        table.add_row("Precision", f"{g(results, 'precision'):.3f}")
+        table.add_row("Recall", f"{g(results, 'recall'):.3f}")
+        table.add_section()
+        for label, prefix in [
+            ("Start Error (ms)", "start_err"),
+            ("End Error (ms)", "end_err"),
+            ("Phone Boundary Error (ms)", "pbe"),
+            ("Duration Error (ms)", "dur_err"),
+            ("GT Duration (ms)", "gt_dur"),
+            ("Pred Duration (ms)", "pred_dur"),
+        ]:
+            mean = g(results, f"{prefix}_mean")
+            std = g(results, f"{prefix}_std")
+            table.add_row(label, f"{mean:.2f} ± {std:.2f}")
 
         if "symbol_errors" in results:
-            self._print_symbol_errors(results["symbol_errors"])
-
-    def _print_full(self, results):
-        """Full output with percentiles."""
-        self._print_detailed(results)
-
-        print("\nPercentiles:")
-        percentiles = [5, 25, 50, 75, 95, 99]
-        rows = [
-            ["Metric"] + [f"P{p}" for p in percentiles],
-            ["-" * 15] + ["-" * 8] * len(percentiles),
-        ]
-        for metric in ["pbe", "start_err", "end_err", "dur_err"]:
-            rows.append(
-                [metric.replace("_", " ").title()]
-                + [
-                    f"{self._get_percentile_value(results, metric, p, 0.0):.1f}"
-                    for p in percentiles
-                ]
-            )
-        self._print_table(rows)
-
-    def _print_symbol_errors(self, symbol_errors):
-        """Print symbol-wise error analysis."""
-        if not symbol_errors:
-            return
-
-        print("\nPer-Symbol Analysis (sorted by PBE):")
-        sorted_symbols = sorted(symbol_errors.items(), key=lambda x: x[1]["pbe_mean"])
-        rows = [
-            [
+            sym_table = Table(title="Per-Symbol PBE (top 20)", show_lines=True)
+            for col in (
                 "Symbol",
                 "Count",
                 "PBE Mean",
                 "PBE Std",
                 "Start",
                 "End",
-                "Duration",
-            ],
-            [
-                "-" * 10,
-                "-" * 8,
-                "-" * 10,
-                "-" * 10,
-                "-" * 8,
-                "-" * 8,
-                "-" * 10,
-            ],
-        ]
-        for sym, stats in sorted_symbols[:20]:
-            rows.append(
-                [
+                "Dur",
+            ):
+                sym_table.add_column(col, justify="right")
+            for sym, s in sorted(
+                results["symbol_errors"].items(), key=lambda x: x[1]["pbe_mean"]
+            )[:20]:
+                sym_table.add_row(
                     str(sym)[:8],
-                    stats["count"],
-                    f"{stats['pbe_mean']:.1f}",
-                    f"{stats['pbe_std']:.1f}",
-                    f"{stats['start_mean']:.1f}",
-                    f"{stats['end_mean']:.1f}",
-                    f"{stats['dur_mean']:.1f}",
-                ]
-            )
-        if len(sorted_symbols) > 20:
-            rows.append(["...", "...", "...", "...", "...", "...", "..."])
-        self._print_table(rows)
+                    str(s["count"]),
+                    f"{s['pbe_mean']:.1f}",
+                    f"{s['pbe_std']:.1f}",
+                    f"{s['start_mean']:.1f}",
+                    f"{s['end_mean']:.1f}",
+                    f"{s['dur_mean']:.1f}",
+                )
+
+        console.print(table)
+        if "symbol_errors" in results:
+            console.print(sym_table)
+
+        # --- CSV dump ---
+        flat = {k: v for k, v in results.items() if k != "symbol_errors"}
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(flat.keys())
+        writer.writerow(flat.values())
+        console.print(buf.getvalue())
 
     # -------------------------- batch evaluation ---------------------------- #
 
     def evaluate_batch(
         self,
-        predictions: Dict[str, List[ForceAlignedUnit]],
-        ground_truth: Dict[str, List[ForceAlignedUnit]],
+        predictions: Dict[str, List[SegmentationUnit]],
+        ground_truth: Dict[str, List[SegmentationUnit]],
         symbols_dict: Optional[Dict[str, List[str]]] = None,
         skip_symbols: Optional[set] = None,
     ) -> Dict:
@@ -453,7 +322,8 @@ class AlignmentEvaluator:
 
 if __name__ == "__main__":
     # Example usage of AlignmentEvaluator
-    evaluator = AlignmentEvaluator(tolerance_ms=20)
+    # python -m src.metrics.segmentation_evaluator
+    evaluator = SegmentationEvaluator(tolerance_ms=20)
 
     # Example 1: Single segment evaluation
     print("=" * 60)
@@ -461,21 +331,21 @@ if __name__ == "__main__":
     print("=" * 60)
 
     ground_truth = [
-        ForceAlignedUnit(0.0, 0.1, "AH"),
-        ForceAlignedUnit(0.1, 0.2, "T"),
-        ForceAlignedUnit(0.2, 0.3, "AH"),
-        ForceAlignedUnit(0.3, 0.4, "K"),
+        SegmentationUnit(0.0, 0.1, "AH"),
+        SegmentationUnit(0.1, 0.2, "T"),
+        SegmentationUnit(0.2, 0.3, "AH"),
+        SegmentationUnit(0.3, 0.4, "K"),
     ]
     predicted = [
-        ForceAlignedUnit(0.01, 0.11, "AH"),
-        ForceAlignedUnit(0.11, 0.21, "T"),
-        ForceAlignedUnit(0.21, 0.31, "AH"),
-        ForceAlignedUnit(0.31, 0.41, "K"),
+        SegmentationUnit(0.01, 0.11, "AH"),
+        SegmentationUnit(0.11, 0.21, "T"),
+        SegmentationUnit(0.21, 0.31, "AH"),
+        SegmentationUnit(0.31, 0.41, "K"),
     ]
     symbols = ["AH", "T", "AH", "K"]
 
     results = evaluator.evaluate_boundaries(predicted, ground_truth, symbols)
-    evaluator.pretty_print(results, verbosity=1)
+    evaluator.pretty_print(results)
 
     # Example 2: Batch evaluation
     print("\n" + "=" * 60)
@@ -484,36 +354,36 @@ if __name__ == "__main__":
 
     batch_pred = {
         "segment_001": [
-            ForceAlignedUnit(0.01, 0.11, "AH"),
-            ForceAlignedUnit(0.11, 0.21, "T"),
-            ForceAlignedUnit(0.21, 0.31, "AH"),
+            SegmentationUnit(0.01, 0.11, "AH"),
+            SegmentationUnit(0.11, 0.21, "T"),
+            SegmentationUnit(0.21, 0.31, "AH"),
         ],
         "segment_002": [
-            ForceAlignedUnit(0.02, 0.12, "K"),
-            ForceAlignedUnit(0.12, 0.22, "AH"),
+            SegmentationUnit(0.02, 0.12, "K"),
+            SegmentationUnit(0.12, 0.22, "AH"),
         ],
         "segment_003": [
-            ForceAlignedUnit(0.0, 0.1, "T"),
-            ForceAlignedUnit(0.1, 0.2, "AH"),
-            ForceAlignedUnit(0.2, 0.3, "K"),
-            ForceAlignedUnit(0.3, 0.4, "AH"),
+            SegmentationUnit(0.0, 0.1, "T"),
+            SegmentationUnit(0.1, 0.2, "AH"),
+            SegmentationUnit(0.2, 0.3, "K"),
+            SegmentationUnit(0.3, 0.4, "AH"),
         ],
     }
     batch_gt = {
         "segment_001": [
-            ForceAlignedUnit(0.0, 0.1, "AH"),
-            ForceAlignedUnit(0.1, 0.2, "T"),
-            ForceAlignedUnit(0.2, 0.3, "AH"),
+            SegmentationUnit(0.0, 0.1, "AH"),
+            SegmentationUnit(0.1, 0.2, "T"),
+            SegmentationUnit(0.2, 0.3, "AH"),
         ],
         "segment_002": [
-            ForceAlignedUnit(0.0, 0.1, "K"),
-            ForceAlignedUnit(0.1, 0.2, "AH"),
+            SegmentationUnit(0.0, 0.1, "K"),
+            SegmentationUnit(0.1, 0.2, "AH"),
         ],
         "segment_003": [
-            ForceAlignedUnit(0.0, 0.1, "T"),
-            ForceAlignedUnit(0.1, 0.2, "AH"),
-            ForceAlignedUnit(0.2, 0.3, "K"),
-            ForceAlignedUnit(0.3, 0.4, "AH"),
+            SegmentationUnit(0.0, 0.1, "T"),
+            SegmentationUnit(0.1, 0.2, "AH"),
+            SegmentationUnit(0.2, 0.3, "K"),
+            SegmentationUnit(0.3, 0.4, "AH"),
         ],
     }
     batch_symbols = {
@@ -523,15 +393,4 @@ if __name__ == "__main__":
     }
 
     batch_results = evaluator.evaluate_batch(batch_pred, batch_gt, batch_symbols)
-    evaluator.pretty_print(batch_results, verbosity=2)
-
-    # Example 3: Different verbosity levels
-    print("\n" + "=" * 60)
-    print("Example 3: Minimal Verbosity")
-    print("=" * 60)
-    evaluator.pretty_print(results, verbosity=0)
-
-    print("\n" + "=" * 60)
-    print("Example 4: Full Verbosity")
-    print("=" * 60)
-    evaluator.pretty_print(results, verbosity=3)
+    evaluator.pretty_print(batch_results)

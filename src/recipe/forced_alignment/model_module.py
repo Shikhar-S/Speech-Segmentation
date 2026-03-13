@@ -15,7 +15,7 @@ from lightning.pytorch.utilities import grad_norm
 
 from src.recipe.forced_alignment.forced_alignment_loss import ForcedAlignmentLoss
 from src.recipe.forced_alignment.inference import ForcedAlignmentInference
-from src.metrics.forced_alignment import AlignmentEvaluator, ForceAlignedUnit
+from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 from src.utils import RankedLogger
 
 
@@ -46,7 +46,7 @@ class ForcedAlignmentModel(LightningModule):
         self.save_hyperparameters(logger=False, ignore=["net"])
 
         self.net = net
-        self.evaluator = AlignmentEvaluator(tolerance_ms=20)
+        self.evaluator = SegmentationEvaluator(tolerance_ms=20)
         self.encoder_dim = self.net.encoder_output_size()
         self.criterion = ForcedAlignmentLoss()
 
@@ -139,7 +139,7 @@ class ForcedAlignmentModel(LightningModule):
 
     def _build_gt_alignments(
         self, batch: Dict[str, torch.Tensor], key_prefix: str = ""
-    ) -> Dict[str, List[ForceAlignedUnit]]:
+    ) -> Dict[str, List[SegmentationUnit]]:
         """Build ground truth alignments from target_start/target_end.
         # TODO(shikhar): Move this as a builder to forced alignment metric module.
         """
@@ -155,12 +155,12 @@ class ForcedAlignmentModel(LightningModule):
             ends = target_end[b, :length]
             labels = target[b, :length]
 
-            segs: List[ForceAlignedUnit] = []
+            segs: List[SegmentationUnit] = []
             for s, e, lab in zip(starts, ends, labels):
                 if s < 0 or e < s:
                     continue
                 segs.append(
-                    ForceAlignedUnit(
+                    SegmentationUnit(
                         start=float(s.item()) / self.net.sampling_rate,
                         end=float(e.item()) / self.net.sampling_rate,
                         label=int(lab.item()),
@@ -219,7 +219,7 @@ class ForcedAlignmentModel(LightningModule):
 
     def _align(
         self, speech, speech_length, text, text_length
-    ) -> List[List[ForceAlignedUnit]]:
+    ) -> List[List[SegmentationUnit]]:
         """Get forced alignments for a batch.
 
         Args:
@@ -230,7 +230,7 @@ class ForcedAlignmentModel(LightningModule):
         Returns:
             List[List[AlignmentResult]]: per-utterance segment list.
         """
-        predicted_alignments: List[List[ForceAlignedUnit]] = []
+        predicted_alignments: List[List[SegmentationUnit]] = []
         for sp, splen, txt, txtlen in zip(speech, speech_length, text, text_length):
             sp, txt, splen_t, txtlen_t = ForcedAlignmentInference.prepare_inputs(
                 sp, splen, txt, txtlen, device=self.device

@@ -3,70 +3,41 @@
 Usage:
     python -m src.metrics.phone_recognition \
         --prediction_file exp/runs/inf_doreco_xeuspr/8job/transcription.json \
-        --output_file exp/runs/inf_doreco_xeuspr/8job/inventory_results.csv \
+        --output_file exp/runs/inf_doreco_xeuspr/8job/results.csv \
         --gt_field target \
         --evaluation_name xeuspr \
         --key_field utt_id
-    
+
     python -m src.metrics.phone_recognition --evaluation_name powsmctc \
         --prediction_file exp/runs/inf_doreco_powsm_ctc/8jobARR/transcription.json \
-        --output_file exp/runs/inf_doreco_powsm_ctc/8jobARR/inventory_results.csv \
+        --output_file exp/runs/inf_doreco_powsm_ctc/8jobARR/results.csv \
         --gt_field target \
         --key_field utt_id \
         --language_field lang_sym
-    
-    python -m src.metrics.phone_recognition --evaluation_name qweni \
-        --prediction_file exp/runs/inf_doreco_qweni/1jobArr/transcription.json \
-        --output_file exp/runs/inf_doreco_qweni/1jobArr/inventory_results.csv \
-        --gt_field target \
-        --key_field utt_id \
-        --language_field lang_sym
-    
-    python -m src.metrics.phone_recognition --evaluation_name gemini \
-        --prediction_file exp/runs/inf_tusom2021_gemini/20251224_142557/transcription.withlang.json \
-        --output_file exp/runs/inf_tusom2021_gemini/20251224_142557/inventory_results.csv \
-        --gt_field target \
-        --key_field utt_id \
-        --language_field lang_sym
-    
-    # PR results are in the output_file, inventory on terminal
-    python -m src.metrics.phone_recognition --evaluation_name qweni \
-        --prediction_file  exp/runs/inf_tusom2021_qweni/1jobArr/transcription.json \
-        --output_file exp/runs/inf_tusom2021_qweni/1jobArr/inventory_results.csv \
-        --gt_field target \
-        --key_field utt_id
-        
-    python -m src.metrics.phone_recognition \
-        --prediction_file exp/runs/inf_doreco_lv60/20251220_085643/transcription.withlang.json \
-        --gt_field target \
-        --key_field utt_id \
-        --language_field lang_sym \
-        --noisy_pr # for noisy phone recognition
 
-    # Using a Kaldi-style ground truth file instead of the gt_field in the JSON:
+    # Using a Kaldi-style ground truth file instead of gt_field in the JSON:
     python -m src.metrics.phone_recognition --evaluation_name xeuspr \
         --prediction_file exp/runs/inf_doreco_xeuspr/8job/transcription.json \
-        --output_file exp/runs/inf_doreco_xeuspr/8job/inventory_results.csv \
+        --output_file exp/runs/inf_doreco_xeuspr/8job/results.csv \
         --gt_file data/doreco/text \
         --key_field utt_id
 """
 
 import argparse
-import string
+import csv
+import io
 import json
-from dataclasses import dataclass
-from typing import Dict, Tuple, Any, Union
-from tqdm import tqdm
+import os
+import string
 import unicodedata
-from collections import Counter
-from itertools import chain, combinations
+from dataclasses import dataclass
+from typing import Any, Dict, Tuple, Union
 
 import panphon
 import panphon.distance
-from phone_inventory_metric import get_metrics as get_inventory_metrics
-from phone_inventory_metric.common import setkeydict
 from rich.console import Console
 from rich.table import Table
+from tqdm import tqdm
 
 from src.utils import RankedLogger
 
@@ -74,14 +45,7 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def load_kaldi_text(path: str) -> Dict[str, str]:
-    """Load a Kaldi-style text file (utt_id <space> transcription per line).
-
-    Args:
-        path: Path to the Kaldi text file.
-
-    Returns:
-        Dictionary mapping utterance IDs to their transcriptions.
-    """
+    """Load a Kaldi-style text file (utt_id <space> transcription per line)."""
     utt2text = {}
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -89,9 +53,7 @@ def load_kaldi_text(path: str) -> Dict[str, str]:
             if not line:
                 continue
             parts = line.split(maxsplit=1)
-            utt_id = parts[0]
-            text = parts[1] if len(parts) > 1 else ""
-            utt2text[utt_id] = text
+            utt2text[parts[0]] = parts[1] if len(parts) > 1 else ""
     print(f"Loaded {len(utt2text)} ground truth entries from {path}")
     return utt2text
 
@@ -107,23 +69,15 @@ class PhoneRecognitionSummary:
     SUB: float
     INS: float
     DEL: float
-    N: int  # number of utterances
-    phones: int  # total number of reference phones
-    inventory: setkeydict[float] | None = None  # phone inventory metrics
+    N: int
+    phones: int
 
 
 class PhoneRecognitionEvaluator:
-    """
-    Evaluates phone recognition output using panphon feature-based metrics.
+    """Evaluates phone recognition output using panphon feature-based metrics.
 
-      * PER (phone error rate, %)
-      * FER (feature error rate, %)
-      * FED (total feature edit distance)
-      * PFER (phone feature error rate averaged per utterance)
-      * per-utterance metrics
-
-    Assumes `test_data` is a dict:
-        { utt_id: {"prediction": str, "transcription": str, ...}, ... }
+    Metrics: PER, FER, FED, PFER, and per-utterance breakdowns.
+    Input format: {utt_id: {"prediction": str, "transcription": str}, ...}
     """
 
     def __init__(self, normalize_ipa: bool = True):
@@ -141,11 +95,9 @@ class PhoneRecognitionEvaluator:
         return self.clean_text(text) if self.normalize_ipa else text
 
     def _compute_sid_metrics(self, hyp: str, ref: str) -> Tuple[int, int, int]:
-        """Calculates substitution, insertion, deletion rates on phones."""
+        """Compute substitution, insertion, deletion counts via DP backtrack."""
         sub_errors = ins_errors = del_errors = 0
-        # dp
-        Hlen = len(hyp) + 1
-        Rlen = len(ref) + 1
+        Hlen, Rlen = len(hyp) + 1, len(ref) + 1
         D = [[0] * Rlen for _ in range(Hlen)]
         for hi in range(Hlen):
             D[hi][0] = hi
@@ -155,13 +107,9 @@ class PhoneRecognitionEvaluator:
             for rj in range(1, Rlen):
                 cost = 0 if hyp[hi - 1] == ref[rj - 1] else 1
                 D[hi][rj] = min(
-                    D[hi - 1][rj] + 1,
-                    D[hi][rj - 1] + 1,
-                    D[hi - 1][rj - 1] + cost,
+                    D[hi - 1][rj] + 1, D[hi][rj - 1] + 1, D[hi - 1][rj - 1] + cost
                 )
-        # backtrack
-        hi = Hlen - 1
-        rj = Rlen - 1
+        hi, rj = Hlen - 1, Rlen - 1
         while hi > 0 or rj > 0:
             if (
                 hi > 0
@@ -185,45 +133,32 @@ class PhoneRecognitionEvaluator:
 
     def _compute_utterance_metrics(
         self, hyp: str, ref: str
-    ) -> Tuple[Dict[str, Union[int, float]]]:
-        """
-        Compute metrics for a single utterance.
-
-        Returns:
-            (metrics_dict, pfer, fed, per_errors, n_phones)
-        """
-        hyp = self._prepare(hyp)
-        ref = self._prepare(ref)
-
-        # Phone feature distances
+    ) -> Dict[str, Union[int, float]]:
+        """Compute all metrics for a single utterance."""
+        hyp, ref = self._prepare(hyp), self._prepare(ref)
         pfer = self.dst.hamming_feature_edit_distance(hyp, ref)
         fed = self.dst.feature_edit_distance(hyp, ref)
-
-        # PER via min_edit_distance over IPA segments
         hyp_segs = self.dst.fm.ipa_segs(hyp)
         ref_segs = self.dst.fm.ipa_segs(ref)
         n_phones = len(ref_segs)
-
         per_errors = self.dst.min_edit_distance(
-            lambda v: 1,  # deletion cost
-            lambda v: 1,  # insertion cost
-            lambda x, y: 0 if x == y else 1,  # substitution cost
-            [[]],  # start
+            lambda v: 1,
+            lambda v: 1,
+            lambda x, y: 0 if x == y else 1,
+            [[]],
             hyp_segs,
             ref_segs,
         )
         sub_errors, ins_errors, del_errors = self._compute_sid_metrics(
             hyp_segs, ref_segs
         )
-
-        metrics = {
-            "pfer": float(pfer),
-            "fed": float(fed),
-            "per": float(per_errors / n_phones * 100) if n_phones > 0 else 0.0,
-            "fer": float(fed / n_phones * 100) if n_phones > 0 else 0.0,
-        }
-        out = {
-            "metrics": metrics,
+        return {
+            "metrics": {
+                "pfer": float(pfer),
+                "fed": float(fed),
+                "per": float(per_errors / n_phones * 100) if n_phones > 0 else 0.0,
+                "fer": float(fed / n_phones * 100) if n_phones > 0 else 0.0,
+            },
             "pfer": pfer,
             "fed": fed,
             "per_errors": per_errors,
@@ -232,93 +167,37 @@ class PhoneRecognitionEvaluator:
             "del_errors": del_errors,
             "n_phones": n_phones,
         }
-        return out
-
-    @classmethod
-    def _get_phone_inventory_metrics(
-        cls, test_data: dict[str, dict[str, Any]]
-    ) -> setkeydict[float]:
-        """
-        Compute the phone inventory metrics on the dataset.
-
-        The results are computed against a combination of different boolean options:
-        - `featured`: if True, use a fuzzy notion of set membership based on
-          phonetic feature similarity (provided by Panphon).
-        - `exclusive`: if True, then phones in each inventory may match at most
-          one other phone; if False, any phone matches its nearest neighbor in
-          the other set (this only makes a difference for when `featured` is
-          true.
-        - `max`: if True, compute the optimal cutoff for the reference set in
-          terms of F1-score (i.e., iteratively remove the least frequent phones
-          from the predicted inventory).
-
-        Returns
-        -------
-        setkeydict:
-            A dict where the keys are tuples of strings that do not care about
-            order.  Indexing with brackets works, but some methods (e.g.,
-            `.get()`) may not work properly.
-
-
-        """
-
-        def get_inventory(key: str) -> list[str]:
-            c = Counter()
-            ft = panphon.FeatureTable()
-            for _, sample in test_data.items():
-                datum = sample.get(key, "")
-                c.update(ft.ipa_segs(datum))
-            # This will return phones in order of descending frequency.  For
-            # the reference set, this is not taken into account, but for the
-            # predictions, it used to calculate an upper bound onf the
-            # F1-score.
-            return [x[0] for x in c.most_common()]
-
-        pred_inventory = get_inventory("prediction")
-        ref_inventory = get_inventory("transcription")
-        return get_inventory_metrics(ref_inventory, pred_inventory, search_max=True)
 
     def evaluate(
         self,
         test_data: Dict[str, Dict[str, Any]],
-        compute_inventory: bool = True,
         tqdm_enabled: bool = True,
     ) -> Tuple[PhoneRecognitionSummary, Dict[str, Dict[str, float]]]:
-        """
-        Evaluate a full dataset.
-
-        Args:
-            test_data: mapping from utt_id -> {"prediction": ..., "transcription": ...}
+        """Evaluate a full dataset.
 
         Returns:
-            summary: PhoneRecognitionSummary (aggregate metrics)
-            instance_metrics: per-utterance metrics, same keys as original script:
-                             {utt_id: {"pfer":..., "fed":..., "per":..., "fer":...}}
+            summary: PhoneRecognitionSummary
+            instance_metrics: {utt_id: {"pfer", "fed", "per", "fer"}}
         """
         if not test_data:
-            empty_summary = PhoneRecognitionSummary(
-                PFER=0.0,
-                FER=0.0,
-                FED=0.0,
-                PER=0.0,
-                N=0,
-                phones=0,
-                SUB=0.0,
-                INS=0.0,
-                DEL=0.0,
+            return (
+                PhoneRecognitionSummary(
+                    PFER=0.0,
+                    FER=0.0,
+                    FED=0.0,
+                    PER=0.0,
+                    SUB=0.0,
+                    INS=0.0,
+                    DEL=0.0,
+                    N=0,
+                    phones=0,
+                ),
+                {},
             )
-            return empty_summary, {}
 
         instance_metrics: Dict[str, Dict[str, float]] = {}
-
-        pfer_sum = 0.0
-        fed_sum = 0.0
-        per_err_sum = 0.0
-        phones_sum = 0
-        n_utts = 0
-        sub_err_sum = 0
-        ins_err_sum = 0
-        del_err_sum = 0
+        pfer_sum = fed_sum = per_err_sum = 0.0
+        phones_sum = sub_err_sum = ins_err_sum = del_err_sum = n_utts = 0
 
         iterator = test_data.items()
         if tqdm_enabled:
@@ -327,11 +206,9 @@ class PhoneRecognitionEvaluator:
             )
 
         for utt_id, sample in iterator:
-            hyp = sample.get("prediction", "")
-            ref = sample.get("transcription", "")
-
-            out = self._compute_utterance_metrics(hyp, ref)
-
+            out = self._compute_utterance_metrics(
+                sample.get("prediction", ""), sample.get("transcription", "")
+            )
             instance_metrics[utt_id] = out["metrics"]
             pfer_sum += out["pfer"]
             fed_sum += out["fed"]
@@ -342,33 +219,32 @@ class PhoneRecognitionEvaluator:
             del_err_sum += out["del_errors"]
             n_utts += 1
 
-        summary = PhoneRecognitionSummary(
-            PFER=pfer_sum / n_utts if n_utts > 0 else 0.0,
-            FER=(fed_sum / phones_sum * 100) if phones_sum > 0 else 0.0,
-            FED=fed_sum,
-            PER=(per_err_sum / phones_sum * 100) if phones_sum > 0 else 0.0,
-            SUB=(sub_err_sum / phones_sum * 100) if phones_sum > 0 else 0.0,
-            INS=(ins_err_sum / phones_sum * 100) if phones_sum > 0 else 0.0,
-            DEL=(del_err_sum / phones_sum * 100) if phones_sum > 0 else 0.0,
-            N=n_utts,
-            phones=phones_sum,
-            inventory=(
-                self._get_phone_inventory_metrics(test_data)
-                if compute_inventory
-                else None
+        p = phones_sum
+        return (
+            PhoneRecognitionSummary(
+                PFER=pfer_sum / n_utts if n_utts > 0 else 0.0,
+                FER=(fed_sum / p * 100) if p > 0 else 0.0,
+                FED=fed_sum,
+                PER=(per_err_sum / p * 100) if p > 0 else 0.0,
+                SUB=(sub_err_sum / p * 100) if p > 0 else 0.0,
+                INS=(ins_err_sum / p * 100) if p > 0 else 0.0,
+                DEL=(del_err_sum / p * 100) if p > 0 else 0.0,
+                N=n_utts,
+                phones=phones_sum,
             ),
+            instance_metrics,
         )
-
-        return summary, instance_metrics
 
     @staticmethod
     def pretty_print(summary: PhoneRecognitionSummary, **_kwargs: Any) -> None:
-        """Rich summary table."""
+        """Print a rich summary table then dump a CSV row to stdout."""
+        console = Console()
+
         t = Table(title="Phone Recognition Results")
         t.add_column("Metric")
         t.add_column("Value", justify="right")
-        t.add_row("Utterances (N)", f"{summary.N}")
-        t.add_row("Total Phones", f"{summary.phones}")
+        t.add_row("Utterances (N)", str(summary.N))
+        t.add_row("Total Phones", str(summary.phones))
         t.add_row("PFER (avg per utt)", f"{summary.PFER:.4f}")
         t.add_row("FER (%)", f"{summary.FER:.2f}")
         t.add_row("FED (total)", f"{summary.FED:.2f}")
@@ -376,44 +252,26 @@ class PhoneRecognitionEvaluator:
         t.add_row("SUB (%)", f"{summary.SUB:.2f}")
         t.add_row("INS (%)", f"{summary.INS:.2f}")
         t.add_row("DEL (%)", f"{summary.DEL:.2f}")
-        Console().print(t)
-        if summary.inventory is not None:
-            PhoneRecognitionEvaluator.pretty_print_inventory_metrics(summary.inventory)
+        console.print(t)
 
-    @staticmethod
-    def pretty_print_inventory_metrics(inventory_metrics: setkeydict[float]) -> None:
-        t = Table(title="Phone Inventory Metrics")
-        t.add_column("Exclusive\nMatch", justify="center")
-        t.add_column("Featured", justify="center")
-        t.add_column("Upper\nBound", justify="center")
-        t.add_column("F1", justify="center")
-        t.add_column("Precision", justify="center")
-        t.add_column("Recall", justify="center")
-
-        # powerset
-        base_key_elements = ["exclusive", "max", "featured"]
-        base_keys = chain.from_iterable(
-            combinations(base_key_elements, n)
-            for n in range(len(base_key_elements) + 1)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        fields = ["N", "phones", "PFER", "FER", "FED", "PER", "SUB", "INS", "DEL"]
+        writer.writerow(fields)
+        writer.writerow(
+            [
+                summary.N,
+                summary.phones,
+                f"{summary.PFER:.4f}",
+                f"{summary.FER:.2f}",
+                f"{summary.FED:.2f}",
+                f"{summary.PER:.2f}",
+                f"{summary.SUB:.2f}",
+                f"{summary.INS:.2f}",
+                f"{summary.DEL:.2f}",
+            ]
         )
-
-        for base_key in base_keys:
-            if "featured" not in base_key and "exclusive" in base_key:
-                continue
-            f1 = inventory_metrics[base_key + ("f1_score",)]
-            precision = inventory_metrics[base_key + ("precision",)]
-            recall = inventory_metrics[base_key + ("recall",)]
-            t.add_row(
-                # If we are not using features, the matches are implicitly exclusive.
-                "x" if ("exclusive" in base_key or "featured" not in base_key) else "",
-                "x" if "featured" in base_key else "",
-                "x" if "max" in base_key else "",
-                f"{f1:.3f}",
-                f"{precision:.3f}",
-                f"{recall:.3f}",
-            )
-
-        Console().print(t)
+        console.print(buf.getvalue())
 
     def write_to_csv(
         self,
@@ -423,34 +281,6 @@ class PhoneRecognitionEvaluator:
         language: str,
     ) -> None:
         """Append summary metrics to a CSV file."""
-        import csv
-        import os
-
-        inv_headers = []
-        inv_values = []
-
-        if summary.inventory:
-            base_key_elements = ["exclusive", "max", "featured"]
-            base_keys = chain.from_iterable(
-                combinations(base_key_elements, n)
-                for n in range(len(base_key_elements) + 1)
-            )
-            for base_key in base_keys:
-                if "featured" not in base_key and "exclusive" in base_key:
-                    continue
-                label = "none" if not base_key else "_".join(base_key)
-                prefix = f"inv_{label}"
-                inv_headers.extend(
-                    [f"{prefix}_f1", f"{prefix}_precision", f"{prefix}_recall"]
-                )
-                inv_values.extend(
-                    [
-                        f"{summary.inventory[base_key + ('f1_score',)]:.3f}",
-                        f"{summary.inventory[base_key + ('precision',)]:.3f}",
-                        f"{summary.inventory[base_key + ('recall',)]:.3f}",
-                    ]
-                )
-
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         write_header = (
             not os.path.exists(output_file) or os.path.getsize(output_file) == 0
@@ -463,7 +293,7 @@ class PhoneRecognitionEvaluator:
                         "eval_name",
                         "language",
                         "N",
-                        "Total Phones",
+                        "phones",
                         "PFER",
                         "FER (%)",
                         "FED",
@@ -472,7 +302,6 @@ class PhoneRecognitionEvaluator:
                         "INS (%)",
                         "DEL (%)",
                     ]
-                    + inv_headers
                 )
             writer.writerow(
                 [
@@ -488,7 +317,6 @@ class PhoneRecognitionEvaluator:
                     f"{summary.INS:.2f}",
                     f"{summary.DEL:.2f}",
                 ]
-                + inv_values
             )
 
 
@@ -501,71 +329,52 @@ def _load_predictions(
     pred_field: str = "processed_transcript",
     noisy_pr: bool = False,
 ) -> Dict[str, Dict[str, Dict[str, str]]]:
-    """
-    Loads prediction file from JSON format.
-    The returned structure is:
-    {'language': { utt_id: {"prediction": str, "transcription": str}, ... }}
-    If language_field is None, 'language' is set to the string '"combined"'.
-    If gt_file is provided, ground truth labels are read from the Kaldi-style
-    file and override the gt_field values from the JSON.
-    """
+    """Load predictions from JSON into {language: {utt_id: {prediction, transcription}}}."""
     with open(pred_file, "r") as f:
         data = json.load(f)
-
     original_len = len(data)
     data = {k: v for k, v in data.items() if k != "__error__"}
-    new_len = len(data)
     print(
-        f"Loaded {new_len} entries from {pred_file} (removed {original_len - new_len} error entries)"
+        f"Loaded {len(data)} entries from {pred_file} (removed {original_len - len(data)} errors)"
     )
 
-    # Optionally load ground truth from a Kaldi-style file
     gt_lookup = load_kaldi_text(gt_file) if gt_file is not None else None
 
-    all_languages = set()
     if language_field is not None:
         assert (
             language_field in next(iter(data.values()))["passthrough"]
         ), f"Language field '{language_field}' not found in prediction file."
-        all_languages = {item["passthrough"][language_field] for item in data.values()}
+        all_languages = sorted(
+            {item["passthrough"][language_field] for item in data.values()}
+        )
     else:
-        all_languages = {"combined"}
+        all_languages = ["combined"]
 
-    all_languages = sorted(all_languages)
     print(f"Found {len(all_languages)} languages: {all_languages}")
     return_data = {}
     for lang in tqdm(all_languages, desc="Loading predictions"):
         D = {}
-        for _, item in data.items():
+        for item in data.values():
             if item["passthrough"].get(language_field, "combined") != lang:
                 continue
             utt_id = item["passthrough"][key_field]
             prediction = item["pred"][0][pred_field]
-
-            # Determine ground truth: prefer gt_file if available
             if gt_lookup is not None and utt_id in gt_lookup:
                 transcription = gt_lookup[utt_id]
             elif not noisy_pr:
                 transcription = item["passthrough"][gt_field]
             else:
                 transcription = "".join(
-                    [n for n in item["passthrough"]["masked_phones"] if n != "[NOISE]"]
+                    n for n in item["passthrough"]["masked_phones"] if n != "[NOISE]"
                 )
-
-            D[utt_id] = {
-                "prediction": prediction,
-                "transcription": transcription,
-            }
+            D[utt_id] = {"prediction": prediction, "transcription": transcription}
         return_data[lang] = D
 
     if gt_lookup is not None:
         matched = sum(
-            1
-            for lang_data in return_data.values()
-            for uid in lang_data
-            if uid in gt_lookup
+            1 for ld in return_data.values() for uid in ld if uid in gt_lookup
         )
-        total = sum(len(lang_data) for lang_data in return_data.values())
+        total = sum(len(ld) for ld in return_data.values())
         print(f"Ground truth file matched {matched}/{total} utterances")
 
     return return_data
@@ -580,43 +389,38 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "--gt_field",
         type=str,
         default="masked_phones",
-        help="Field name for ground truth transcription in the prediction file",
+        help="Ground truth field name in the prediction file",
     )
     parser.add_argument(
         "--gt_file",
         type=str,
         default=None,
-        help="Path to a Kaldi-style text file (utt_id <space> transcription) "
-        "to use as ground truth. Overrides --gt_field for matching utterance IDs.",
+        help="Kaldi-style text file to use as ground truth (overrides --gt_field)",
     )
     parser.add_argument(
         "--pred_field",
         type=str,
         default="processed_transcript",
-        help="Field name for predicted transcription in the prediction file",
+        help="Predicted transcription field name",
     )
     parser.add_argument(
-        "--key_field",
-        type=str,
-        default="utt_id",
-        help="Field name for utterance ID in the prediction file",
+        "--key_field", type=str, default="utt_id", help="Utterance ID field name"
     )
     parser.add_argument(
-        "--noisy_pr",
-        action="store_true",
-        help="Whether to evaluate noisy phone recognition",
+        "--noisy_pr", action="store_true", help="Evaluate noisy phone recognition"
     )
     parser.add_argument(
-        "--output_file", type=str, default=None, help="File to write results to"
+        "--output_file", type=str, default=None, help="CSV file to append results to"
     )
     parser.add_argument(
         "--language_field",
         type=str,
         default=None,
-        help="If provided, language field must exist in the prediction file and "
-        "will be used to produce per language metrics.",
+        help="Field for per-language evaluation",
     )
-    parser.add_argument("--evaluation_name", type=str, help="name for the evaluation")
+    parser.add_argument(
+        "--evaluation_name", type=str, help="Name for this evaluation run"
+    )
 
 
 if __name__ == "__main__":
@@ -626,7 +430,6 @@ if __name__ == "__main__":
     if args.output_file:
         assert args.evaluation_name is not None, "Please provide --evaluation_name"
 
-    compute_inventory = args.language_field is not None
     loaded_predictions = _load_predictions(
         args.prediction_file,
         args.language_field,
@@ -637,27 +440,15 @@ if __name__ == "__main__":
         noisy_pr=args.noisy_pr,
     )
     print(
-        f"Loaded predictions for {len(loaded_predictions)} languages containing {sum(len(v) for v in loaded_predictions.values())} utterances."
+        f"Loaded predictions for {len(loaded_predictions)} languages, "
+        f"{sum(len(v) for v in loaded_predictions.values())} utterances."
     )
-    inventories = []
-    langs_used = list(loaded_predictions.keys())
     for lang, preds in tqdm(loaded_predictions.items(), desc="Evaluating languages"):
         evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)
-        summary, _ = evaluator.evaluate(preds, compute_inventory=compute_inventory)
-        inventories.append(summary.inventory)
+        summary, _ = evaluator.evaluate(preds)
+        PhoneRecognitionEvaluator.pretty_print(summary)
         if args.output_file:
-            write_file = args.output_file
-            evaluator.write_to_csv(summary, args.evaluation_name, write_file, lang)
-            print(f"Appended results to {write_file}")
-
-    if compute_inventory:
-        all_keys = set().union(*[inv.keys() for inv in inventories])
-        macro_inv_dict = {}
-        for k in all_keys:
-            vals = [inv[k] for inv in inventories]
-            macro_inv_dict[k] = sum(vals) / len(vals)
-        macro_inventory = setkeydict(list(macro_inv_dict.items()))
-        Console().print(
-            f"\nMacro-averaged Phone Inventory Metrics over {len(langs_used)} languages:"
-        )
-        PhoneRecognitionEvaluator.pretty_print_inventory_metrics(macro_inventory)
+            evaluator.write_to_csv(
+                summary, args.evaluation_name, args.output_file, lang
+            )
+            print(f"Appended results to {args.output_file}")

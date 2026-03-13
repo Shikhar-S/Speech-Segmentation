@@ -142,7 +142,7 @@ inference:
   - `instance_metrics` format: `{utt_id: {"pfer": float, "fer": float, "fed": float, "per": float}}`
   - `PhoneRecognitionSummary` fields: `N`, `phones`, `PER`, `FER`, `FED`, `PFER`, `SUB`, `INS`, `DEL`
   - Reference phone count: `len(evaluator.dst.fm.ipa_segs(evaluator._prepare(ref)))`
-- `forced_alignment.py` – Alignment-based metrics
+- `segmentation_evaluator.py` – Alignment-based metrics
 
 ## Code Conventions
 

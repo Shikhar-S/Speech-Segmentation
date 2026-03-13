@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.metrics.forced_alignment import AlignmentEvaluator, ForceAlignedUnit
+from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 
 
 def make_results(boundaries, labels=None):
@@ -9,7 +9,7 @@ def make_results(boundaries, labels=None):
         # Use simple integer labels if none are provided
         labels = list(range(len(boundaries)))
     return [
-        ForceAlignedUnit(start=s, end=e, label=labels[i])
+        SegmentationUnit(start=s, end=e, label=labels[i])
         for i, (s, e) in enumerate(boundaries)
     ]
 
@@ -19,7 +19,7 @@ class TestAlignmentEvaluator(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.evaluator = AlignmentEvaluator(tolerance_ms=20)
+        self.evaluator = SegmentationEvaluator(tolerance_ms=20)
         np.random.seed(42)
 
     def test_perfect_alignment(self):
@@ -242,7 +242,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_negative_times(self):
         """Test handling of negative timestamps."""
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         gt_boundaries = make_results([(-0.1, 0.0), (0.0, 0.1)])
         pred_boundaries = make_results([(-0.09, 0.01), (0.01, 0.11)])
 
@@ -253,7 +253,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_zero_duration_phonemes(self):
         """Test handling of zero-duration phonemes."""
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         gt_boundaries = make_results(
             [(0.0, 0.0), (0.1, 0.2)]
         )  # First phoneme has 0 duration
@@ -266,7 +266,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_overlapping_boundaries(self):
         """Test with overlapping phoneme boundaries."""
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         # Overlapping boundaries (end > next start)
         gt_boundaries = make_results([(0.0, 0.15), (0.1, 0.2)])
         pred_boundaries = make_results([(0.0, 0.15), (0.1, 0.2)])
@@ -278,7 +278,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_very_long_phonemes(self):
         """Test with unusually long phonemes."""
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         gt_boundaries = make_results([(0.0, 2.0), (2.0, 2.1)])  # 2 second phoneme
         pred_boundaries = make_results([(0.01, 2.01), (2.01, 2.11)])
 
@@ -290,7 +290,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_unicode_symbols(self):
         """Test with Unicode phoneme symbols."""
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         gt_boundaries = make_results([(0.0, 0.1), (0.1, 0.2)])
         pred_boundaries = make_results([(0.01, 0.11), (0.11, 0.21)])
         symbols = ["😀", "中文"]
@@ -307,7 +307,7 @@ class TestTablePrinting(unittest.TestCase):
 
     def test_table_with_different_widths(self):
         """Test table printing with varying column widths."""
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         rows = [
             ["Short", "Value"],
             ["Very Long Metric Name", "123.456"],
@@ -319,7 +319,7 @@ class TestTablePrinting(unittest.TestCase):
 
     def test_empty_table(self):
         """Test printing empty table."""
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         evaluator._print_table([])  # Should not raise error
 
 

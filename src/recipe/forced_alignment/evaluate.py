@@ -10,7 +10,7 @@ import os
 import json
 from tqdm import tqdm
 
-from src.metrics.forced_alignment import AlignmentEvaluator, ForceAlignedUnit
+from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 
 
 def load_fa_predictions(file_path):
@@ -21,14 +21,14 @@ def load_fa_predictions(file_path):
 
 def evaluate_fa_predictions(predictions):
     print("Evaluating forced alignment predictions")
-    evaluator = AlignmentEvaluator(tolerance_ms=20)
+    evaluator = SegmentationEvaluator(tolerance_ms=20)
     fa_predictions = {}
     ground_truth = {}
     for example_id, pred in tqdm(
         predictions.items(), desc="Evaluating FA predictions", total=len(predictions)
     ):
         fa_boundaries = [
-            ForceAlignedUnit(
+            SegmentationUnit(
                 unit["start_time"],
                 unit["end_time"],
                 unit["label"],
@@ -36,7 +36,7 @@ def evaluate_fa_predictions(predictions):
             for unit in pred["predicted_units"]
         ]
         gt_boundaries = [
-            ForceAlignedUnit(
+            SegmentationUnit(
                 unit["start_time"],
                 unit["end_time"],
                 unit["label"],

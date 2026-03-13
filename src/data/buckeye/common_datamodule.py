@@ -366,10 +366,10 @@ def _naive_baseline_equal_segmentation(test_loader: DataLoader):
     """
     print("===" * 20)
     print("Naive baseline - equal segmentation")
-    from src.metrics.forced_alignment import AlignmentEvaluator, ForceAlignedUnit
+    from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
     from tqdm import tqdm
 
-    evaluator = AlignmentEvaluator(tolerance_ms=20)
+    evaluator = SegmentationEvaluator(tolerance_ms=20)
     naive_predictions = {}
     ground_truth = {}
     for batch_id, test_batch in tqdm(
@@ -386,7 +386,7 @@ def _naive_baseline_equal_segmentation(test_loader: DataLoader):
             duration = test_batch["speech_length"][i].item() / 16000  # assuming 16kHz
             phone_duration = duration / n_phones
             boundaries = [
-                ForceAlignedUnit(
+                SegmentationUnit(
                     j * phone_duration,
                     (j + 1) * phone_duration,
                     test_batch["target_text"][i][j],
@@ -401,7 +401,7 @@ def _naive_baseline_equal_segmentation(test_loader: DataLoader):
         ):
             n_phones = test_batch["target_length"][i].item()
             boundaries = [
-                ForceAlignedUnit(
+                SegmentationUnit(
                     test_batch["target_start"][i, j].item() / 16000,
                     test_batch["target_end"][i, j].item() / 16000,
                     test_batch["target_text"][i][j],

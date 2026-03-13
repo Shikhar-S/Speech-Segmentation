@@ -9,7 +9,7 @@ from typing import List
 
 import torch
 import torch.nn as nn
-from src.metrics.forced_alignment import ForceAlignedUnit, AlignmentEvaluator
+from src.metrics.segmentation_evaluator import SegmentationUnit, SegmentationEvaluator
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
@@ -26,7 +26,7 @@ class ForcedAlignmentInference:
         self.net.to(self.device)
 
     @staticmethod
-    def post_process_alignments(net, labels) -> List[ForceAlignedUnit]:
+    def post_process_alignments(net, labels) -> List[SegmentationUnit]:
         """Post-process frame-level labels into forced aligned units.
             Removes blanks.
         Args:
@@ -36,7 +36,7 @@ class ForcedAlignmentInference:
             List[ForceAlignedUnit]: List of forced aligned units.
         """
         points_by_frames = net.points_by_frames()
-        alignment_result: List[ForceAlignedUnit] = []
+        alignment_result: List[SegmentationUnit] = []
         if not labels:
             return alignment_result
 
@@ -46,7 +46,7 @@ class ForcedAlignmentInference:
                 if labels[i - 1] != net.get_blank_id():
                     # only add non-blank labels
                     alignment_result.append(
-                        ForceAlignedUnit(
+                        SegmentationUnit(
                             start=start_idx * points_by_frames / net.sampling_rate,
                             end=i * points_by_frames / net.sampling_rate,
                             label=labels[i - 1],
@@ -56,7 +56,7 @@ class ForcedAlignmentInference:
 
         if labels[-1] != net.get_blank_id():
             alignment_result.append(
-                ForceAlignedUnit(
+                SegmentationUnit(
                     start=start_idx * points_by_frames / net.sampling_rate,
                     end=len(labels) * points_by_frames / net.sampling_rate,
                     label=labels[-1],
@@ -104,7 +104,7 @@ class ForcedAlignmentInference:
         utt_id,
         *args,
         **kwargs,
-    ) -> List[List[ForceAlignedUnit]]:
+    ) -> List[List[SegmentationUnit]]:
         """Get forced alignments for a single utterance.
 
         Args:
@@ -208,12 +208,12 @@ if __name__ == "__main__":
                 f"  {unit} | {model_tokenizer.ids2tokens([unit.label])} | start: {gt_start} | end: {gt_end}"
             )
         print()
-        evaluator = AlignmentEvaluator()
+        evaluator = SegmentationEvaluator()
         metrics = evaluator.evaluate_batch(
             predictions={"identifier": alignment},
             ground_truth={
                 "identifier": [
-                    ForceAlignedUnit(start=ts / 16000, end=te / 16000, label=tl)
+                    SegmentationUnit(start=ts / 16000, end=te / 16000, label=tl)
                     for ts, te, tl in zip(target_start, target_end, target.tolist())
                 ]
             },
