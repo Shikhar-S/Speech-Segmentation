@@ -15,11 +15,11 @@ def make_results(boundaries, labels=None):
 
 
 class TestAlignmentEvaluator(unittest.TestCase):
-    """Test cases for AlignmentEvaluator class."""
+    """Test cases for AlignmentEvaluator class (forced mode)."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.evaluator = SegmentationEvaluator(tolerance_ms=20)
+        self.evaluator = SegmentationEvaluator(tolerance_ms=20, forced=True)
         np.random.seed(42)
 
     def test_perfect_alignment(self):
@@ -27,9 +27,9 @@ class TestAlignmentEvaluator(unittest.TestCase):
         boundaries = make_results([(0.0, 0.1), (0.1, 0.2), (0.2, 0.3)])
         results = self.evaluator.evaluate_boundaries(boundaries, boundaries)
 
-        self.assertEqual(results["f1"], 1.0)
-        self.assertEqual(results["precision"], 1.0)
-        self.assertEqual(results["recall"], 1.0)
+        self.assertAlmostEqual(results["f1"], 1.0, delta=1e-5)
+        self.assertAlmostEqual(results["precision"], 1.0, delta=1e-5)
+        self.assertAlmostEqual(results["recall"], 1.0, delta=1e-5)
         self.assertAlmostEqual(results["pbe_mean"], 0.0)
         self.assertAlmostEqual(results["start_err_mean"], 0.0)
         self.assertAlmostEqual(results["end_err_mean"], 0.0)
@@ -42,7 +42,7 @@ class TestAlignmentEvaluator(unittest.TestCase):
 
         results = self.evaluator.evaluate_boundaries(pred_boundaries, gt_boundaries)
 
-        self.assertEqual(results["f1"], 1.0)  # All within tolerance
+        self.assertAlmostEqual(results["f1"], 1.0, delta=1e-5)  # All within tolerance
         self.assertAlmostEqual(results["start_err_mean"], 10.0, delta=0.1)
         self.assertAlmostEqual(results["end_err_mean"], 10.0, delta=0.1)
         self.assertAlmostEqual(results["pbe_mean"], 10.0, delta=0.1)
@@ -125,8 +125,12 @@ class TestAlignmentEvaluator(unittest.TestCase):
 
         results = self.evaluator.evaluate_boundaries(pred_boundaries, gt_boundaries)
 
-        # Should process only 2 phonemes
+        # Should process only 2 phonemes for error metrics
         self.assertEqual(results["n"], 2)
+        # pred_times=[0.0, 0.1], gt_times=[0.0, 0.1, 0.2]; both preds match, gt[2] unmatched
+        self.assertAlmostEqual(results["precision"], 1.0, delta=0.001)
+        self.assertAlmostEqual(results["recall"], 2 / 3, delta=0.001)
+        self.assertAlmostEqual(results["f1"], 0.8, delta=0.001)
 
     def test_empty_input(self):
         """Test with empty input."""
@@ -202,7 +206,7 @@ class TestAlignmentEvaluator(unittest.TestCase):
         results = self.evaluator.evaluate_boundaries(boundaries, boundaries)
 
         # Should not raise any exceptions
-        self.evaluator.pretty_print(results, verbosity=0)
+        self.evaluator.pretty_print(results)
 
     def test_pretty_print_all_levels(self):
         """Test all verbosity levels."""
@@ -219,9 +223,8 @@ class TestAlignmentEvaluator(unittest.TestCase):
             pred_boundaries, gt_boundaries, symbols
         )
 
-        # Test all verbosity levels - should not raise exceptions
-        for v in range(4):
-            self.evaluator.pretty_print(results, verbosity=v)
+        # Should not raise exceptions
+        self.evaluator.pretty_print(results)
 
     def test_statistics_calculation(self):
         """Test statistical calculations are correct."""
@@ -236,13 +239,29 @@ class TestAlignmentEvaluator(unittest.TestCase):
         self.assertAlmostEqual(results["start_err_std"], 8.16, delta=0.1)
         self.assertAlmostEqual(results["start_err_median"], 10.0, delta=0.1)
 
+    def test_forced_mode_has_rval(self):
+        """Forced mode should include rval alongside other keys."""
+        boundaries = make_results([(0.0, 0.1), (0.1, 0.2), (0.2, 0.3)])
+        results = self.evaluator.evaluate_boundaries(boundaries, boundaries)
+
+        self.assertIn("rval", results)
+        self.assertAlmostEqual(results["rval"], 1.0, delta=0.01)
+
+    def test_forced_mode_rval_present_in_batch(self):
+        """Batch forced mode results should include mean_rval."""
+        batch_pred = {"seg1": make_results([(0.01, 0.11), (0.11, 0.21)])}
+        batch_gt = {"seg1": make_results([(0.0, 0.1), (0.1, 0.2)])}
+        results = self.evaluator.evaluate_batch(batch_pred, batch_gt)
+
+        self.assertIn("mean_rval", results)
+
 
 class TestEdgeCases(unittest.TestCase):
     """Test edge cases and error handling."""
 
     def test_negative_times(self):
         """Test handling of negative timestamps."""
-        evaluator = SegmentationEvaluator()
+        evaluator = SegmentationEvaluator(forced=True)
         gt_boundaries = make_results([(-0.1, 0.0), (0.0, 0.1)])
         pred_boundaries = make_results([(-0.09, 0.01), (0.01, 0.11)])
 
@@ -253,7 +272,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_zero_duration_phonemes(self):
         """Test handling of zero-duration phonemes."""
-        evaluator = SegmentationEvaluator()
+        evaluator = SegmentationEvaluator(forced=True)
         gt_boundaries = make_results(
             [(0.0, 0.0), (0.1, 0.2)]
         )  # First phoneme has 0 duration
@@ -266,7 +285,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_overlapping_boundaries(self):
         """Test with overlapping phoneme boundaries."""
-        evaluator = SegmentationEvaluator()
+        evaluator = SegmentationEvaluator(forced=True)
         # Overlapping boundaries (end > next start)
         gt_boundaries = make_results([(0.0, 0.15), (0.1, 0.2)])
         pred_boundaries = make_results([(0.0, 0.15), (0.1, 0.2)])
@@ -274,11 +293,11 @@ class TestEdgeCases(unittest.TestCase):
         results = evaluator.evaluate_boundaries(pred_boundaries, gt_boundaries)
 
         # Should still compute metrics despite overlap
-        self.assertEqual(results["f1"], 1.0)
+        self.assertAlmostEqual(results["f1"], 1.0, delta=1e-5)
 
     def test_very_long_phonemes(self):
         """Test with unusually long phonemes."""
-        evaluator = SegmentationEvaluator()
+        evaluator = SegmentationEvaluator(forced=True)
         gt_boundaries = make_results([(0.0, 2.0), (2.0, 2.1)])  # 2 second phoneme
         pred_boundaries = make_results([(0.01, 2.01), (2.01, 2.11)])
 
@@ -290,7 +309,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_unicode_symbols(self):
         """Test with Unicode phoneme symbols."""
-        evaluator = SegmentationEvaluator()
+        evaluator = SegmentationEvaluator(forced=True)
         gt_boundaries = make_results([(0.0, 0.1), (0.1, 0.2)])
         pred_boundaries = make_results([(0.01, 0.11), (0.11, 0.21)])
         symbols = ["😀", "中文"]
@@ -302,25 +321,125 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIn("中文", results["symbol_errors"])
 
 
-class TestTablePrinting(unittest.TestCase):
-    """Test ASCII table formatting."""
+class TestFreeModeEvaluator(unittest.TestCase):
+    """Tests for free mode (forced=False, default)."""
 
-    def test_table_with_different_widths(self):
-        """Test table printing with varying column widths."""
-        evaluator = SegmentationEvaluator()
-        rows = [
-            ["Short", "Value"],
-            ["Very Long Metric Name", "123.456"],
-            ["X", "1"],
-        ]
+    def setUp(self):
+        self.evaluator = SegmentationEvaluator(tolerance_ms=20)  # forced=False default
 
-        # Should handle varying widths without error
-        evaluator._print_table(rows)
+    def test_free_mode_is_default(self):
+        """SegmentationEvaluator() should default to free mode."""
+        self.assertFalse(self.evaluator.forced)
 
-    def test_empty_table(self):
-        """Test printing empty table."""
-        evaluator = SegmentationEvaluator()
-        evaluator._print_table([])  # Should not raise error
+    def test_free_mode_different_lengths_no_raise(self):
+        """Free mode should accept pred/GT lists of different length."""
+        gt = make_results([(0.0, 0.1), (0.1, 0.2), (0.2, 0.3), (0.3, 0.4)])
+        pred = make_results([(0.0, 0.15), (0.15, 0.3), (0.3, 0.4)])  # 3 vs 4
+
+        # Should not raise
+        results = self.evaluator.evaluate_boundaries(pred, gt)
+        self.assertIn("f1", results)
+
+    def test_free_mode_returns_boundary_keys_only(self):
+        """Free mode results should contain boundary metrics and no per-phone stats."""
+        gt = make_results([(0.0, 0.1), (0.1, 0.2)])
+        pred = make_results([(0.005, 0.105), (0.105, 0.205)])
+
+        results = self.evaluator.evaluate_boundaries(pred, gt)
+
+        self.assertIn("n_pred", results)
+        self.assertIn("n_gt", results)
+        self.assertIn("precision", results)
+        self.assertIn("recall", results)
+        self.assertIn("f1", results)
+        self.assertIn("rval", results)
+        # Per-phone stats should NOT be present
+        self.assertNotIn("start_err_mean", results)
+        self.assertNotIn("pbe_mean", results)
+        self.assertNotIn("n", results)
+
+    def test_free_mode_perfect_match(self):
+        """Identical pred and GT should give P=R=F1=Rval=1.0 in free mode."""
+        segs = make_results([(0.0, 0.1), (0.1, 0.2), (0.2, 0.3)])
+        results = self.evaluator.evaluate_boundaries(segs, segs)
+
+        self.assertAlmostEqual(results["precision"], 1.0, delta=1e-5)
+        self.assertAlmostEqual(results["recall"], 1.0, delta=1e-5)
+        self.assertAlmostEqual(results["f1"], 1.0, delta=1e-5)
+        self.assertAlmostEqual(results["rval"], 1.0, delta=1e-3)
+
+    def test_free_mode_toy_boundary_values(self):
+        """Verify boundary P/R/F1 for a toy example with known expected values.
+
+        GT boundaries: 0.0, 0.1, 0.2 (from 2 segments: [0,0.1], [0.1,0.2])
+        Pred boundaries: 0.0, 0.15, 0.3 (from 2 segments: [0,0.15], [0.15,0.3])
+
+        tolerance = 20ms = 0.02s
+        precision: 0.0 → nearest GT=0.0, dist=0 ✓; 0.15 → nearest=0.1, dist=0.05 ✗;
+                   0.3 → nearest=0.2, dist=0.1 ✗ → precision=1/3
+        recall:    0.0 → nearest pred=0.0 ✓; 0.1 → nearest=0.15, dist=0.05 ✗;
+                   0.2 → nearest=0.15, dist=0.05 ✗ → recall=1/3
+        """
+        gt = make_results([(0.0, 0.1), (0.1, 0.2)])
+        pred = make_results([(0.0, 0.15), (0.15, 0.3)])
+
+        results = self.evaluator.evaluate_boundaries(pred, gt)
+
+        self.assertAlmostEqual(results["precision"], 1 / 3, delta=0.01)
+        self.assertAlmostEqual(results["recall"], 1 / 3, delta=0.01)
+
+    def test_free_mode_rval_range(self):
+        """R-value should be in a reasonable range [-1, 1]."""
+        gt = make_results([(0.0, 0.1), (0.1, 0.3), (0.3, 0.5)])
+        pred = make_results([(0.05, 0.2), (0.2, 0.4)])
+
+        results = self.evaluator.evaluate_boundaries(pred, gt)
+
+        self.assertGreaterEqual(results["rval"], -1.0)
+        self.assertLessEqual(results["rval"], 1.0)
+
+    def test_free_mode_empty_returns_empty(self):
+        """Empty input should return {}."""
+        results = self.evaluator.evaluate_boundaries([], [])
+        self.assertEqual(results, {})
+
+    def test_free_mode_n_pred_n_gt(self):
+        """n_pred and n_gt should reflect segment counts, not boundary counts."""
+        gt = make_results([(0.0, 0.1), (0.1, 0.2), (0.2, 0.3)])  # 3 segments
+        pred = make_results([(0.0, 0.2), (0.2, 0.3)])  # 2 segments
+
+        results = self.evaluator.evaluate_boundaries(pred, gt)
+
+        self.assertEqual(results["n_pred"], 2)
+        self.assertEqual(results["n_gt"], 3)
+
+    def test_free_mode_batch_no_raise(self):
+        """Free mode batch evaluation should handle different-length segments."""
+        batch_pred = {
+            "seg1": make_results([(0.0, 0.2), (0.2, 0.4)]),  # 2 segs
+            "seg2": make_results([(0.0, 0.1), (0.1, 0.2), (0.2, 0.3)]),  # 3 segs
+        }
+        batch_gt = {
+            "seg1": make_results([(0.0, 0.1), (0.1, 0.2), (0.2, 0.3), (0.3, 0.4)]),  # 4 segs
+            "seg2": make_results([(0.0, 0.15), (0.15, 0.3)]),  # 2 segs
+        }
+
+        results = self.evaluator.evaluate_batch(batch_pred, batch_gt)
+
+        self.assertIn("mean_f1", results)
+        self.assertIn("mean_rval", results)
+        self.assertEqual(results["total_segments"], 2)
+        # total_samples uses n_gt: 4 + 2 = 6
+        self.assertEqual(results["total_samples"], 6)
+
+    def test_free_mode_pretty_print_no_per_phone_rows(self):
+        """pretty_print in free mode should not raise even without per-phone stats."""
+        gt = make_results([(0.0, 0.1), (0.1, 0.2)])
+        pred = make_results([(0.005, 0.105), (0.105, 0.205)])
+        results = self.evaluator.evaluate_boundaries(pred, gt)
+
+        # Should not raise
+        self.evaluator.pretty_print(results)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import argparse
 import csv
 import io
 from collections import defaultdict
@@ -23,10 +24,19 @@ class SegmentationUnit:
 
 
 class SegmentationEvaluator:
-    """Evaluates CTC-based forced alignment against ground truth."""
+    """Evaluates CTC-based forced alignment against ground truth.
 
-    def __init__(self, tolerance_ms: int = 20):
+    Args:
+        tolerance_ms: Boundary tolerance in milliseconds (default 20).
+        forced: If True, operate in forced mode: requires paired segments and
+            computes per-phone error statistics in addition to boundary P/R/F1/Rval.
+            If False (default), operate in free mode: accepts any segment counts
+            and returns only boundary-level metrics.
+    """
+
+    def __init__(self, tolerance_ms: int = 20, forced: bool = False):
         self.tolerance_sec = tolerance_ms / 1000.0
+        self.forced = forced
 
     def evaluate_boundaries(
         self,
@@ -37,20 +47,57 @@ class SegmentationEvaluator:
         """Evaluate predicted phone boundaries against ground truth
             for a single utterance.
 
+        In free mode (forced=False): accepts lists of any length and returns
+        boundary P/R/F1/Rval only.  In forced mode (forced=True): zips
+        predicted/GT pairs and additionally returns per-phone error statistics.
+
         Args:
             predicted: list of SegmentationUnit for predicted boundaries.
             ground_truth: list of SegmentationUnit for ground truth boundaries.
             symbols: optional list of symbol labels aligned 1-to-1 with
-                ground_truth/predicted. If None, symbol-wise analysis is
-                skipped.
+                ground_truth/predicted. Only used in forced mode.
         """
-        assert len(predicted) == len(ground_truth), (
-            "Predicted and ground truth lists must be of the same length "
-            f"for single utterance evaluation, but got {len(predicted)} and "
-            f"{len(ground_truth)}."
-        )
-        assert len(ground_truth) > 0, "Ground truth list is empty."
-        n = len(predicted)
+        if not predicted or not ground_truth:
+            return {}
+
+        if not self.forced:
+            return self._evaluate_free(predicted, ground_truth)
+        return self._evaluate_forced(predicted, ground_truth, symbols)
+
+    # ------------------------------------------------------------------ #
+    # Free mode                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _evaluate_free(
+        self,
+        predicted: List[SegmentationUnit],
+        ground_truth: List[SegmentationUnit],
+    ) -> Dict[str, float]:
+        """Boundary-only evaluation (no per-phone pairing required)."""
+        pred_times = self._extract_boundary_times(predicted)
+        gt_times = self._extract_boundary_times(ground_truth)
+        precision, recall, f1, rval = self._score_boundaries_charsiu(pred_times, gt_times)
+        return {
+            "n_pred": len(predicted),
+            "n_gt": len(ground_truth),
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "rval": rval,
+        }
+
+    # ------------------------------------------------------------------ #
+    # Forced mode                                                          #
+    # ------------------------------------------------------------------ #
+
+    def _evaluate_forced(
+        self,
+        predicted: List[SegmentationUnit],
+        ground_truth: List[SegmentationUnit],
+        symbols: Optional[List[str]] = None,
+    ) -> Dict[str, float]:
+        """Paired evaluation with per-phone error statistics."""
+        n = min(len(predicted), len(ground_truth))
         metrics = np.array(
             [
                 self._compute_metrics(p.start, p.end, g.start, g.end)
@@ -59,15 +106,19 @@ class SegmentationEvaluator:
         )
         start_err, end_err, pbe, dur_err, gt_dur, pred_dur = metrics.T
 
-        # Count correct predictions
-        correct = np.sum(
-            (start_err <= self.tolerance_sec) & (end_err <= self.tolerance_sec)
-        )
-        precision = recall = f1 = correct / n
+        pred_times = np.array([u.start for u in predicted])
+        gt_times = np.array([u.start for u in ground_truth])
+        precision, recall, f1, rval = self._score_boundaries_charsiu(pred_times, gt_times)
 
         # Build results dictionary
         percentiles = [5, 25, 50, 75, 95, 99]
-        results = {"n": n, "f1": f1, "precision": precision, "recall": recall}
+        results = {
+            "n": n,
+            "f1": f1,
+            "precision": precision,
+            "recall": recall,
+            "rval": rval,
+        }
 
         # Add statistics for each error type (convert to ms)
         error_types = [
@@ -89,6 +140,74 @@ class SegmentationEvaluator:
             )
 
         return results
+
+    # ------------------------------------------------------------------ #
+    # Boundary helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _extract_boundary_times(self, units: List[SegmentationUnit]) -> np.ndarray:
+        """Extract all unique boundary times (N starts + final end) from units."""
+        times = [u.start for u in units] + [units[-1].end]
+        return np.unique(times)
+
+    def _score_boundaries_charsiu(
+        self, pred_times: np.ndarray, gt_times: np.ndarray
+    ):
+        """Non-greedy boundary matching (charsiu-style) returning (P, R, F1, Rval).
+
+        Each predicted boundary is matched to the nearest GT boundary
+        without deduplication.
+        """
+        pred_times = np.asarray(pred_times)
+        gt_times = np.asarray(gt_times)
+        precision_counter = sum(
+            np.abs(gt_times - t).min() <= self.tolerance_sec for t in pred_times
+        )
+        recall_counter = sum(
+            np.abs(pred_times - t).min() <= self.tolerance_sec for t in gt_times
+        )
+        return self._get_boundary_metrics(
+            precision_counter, recall_counter, len(pred_times), len(gt_times)
+        )
+
+    def _get_boundary_metrics(
+        self,
+        precision_counter: float,
+        recall_counter: float,
+        pred_counter: int,
+        gt_counter: int,
+    ):
+        """Compute precision, recall, F1, and R-value from boundary match counts.
+
+        R-value formula adapted from UnsupSeg (github.com/felixkreuk/UnsupSeg),
+        also used in charsiu_eval.py.
+        """
+        eps = 1e-7
+        precision = precision_counter / (pred_counter + eps)
+        recall = recall_counter / (gt_counter + eps)
+        f1 = 2 * precision * recall / (precision + recall + eps)
+        os = recall / (precision + eps) - 1
+        r1 = np.sqrt((1 - recall) ** 2 + os**2)
+        r2 = (-os + recall - 1) / np.sqrt(2)
+        rval = 1 - (np.abs(r1) + np.abs(r2)) / 2
+        return precision, recall, f1, rval
+
+    def _score_boundaries(self, pred_times, gt_times):
+        """Kamper-style greedy boundary matching with deduplication."""
+        gt_pool = list(gt_times)
+        n_correct = 0
+        for t in pred_times:
+            idx = next(
+                (i for i, g in enumerate(gt_pool) if abs(t - g) <= self.tolerance_sec),
+                None,
+            )
+            if idx is not None:
+                n_correct += 1
+                gt_pool.pop(idx)
+        precision = n_correct / len(pred_times) if pred_times else 0.0
+        recall = n_correct / len(gt_times) if gt_times else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        return precision, recall, f1
 
     def _compute_metrics(self, ps, pe, gs, ge):
         """Compute metrics for a single phone (in seconds)."""
@@ -159,7 +278,7 @@ class SegmentationEvaluator:
         console = Console()
 
         g = self._get_metric
-        samples = results.get("n", results.get("total_samples", 0))
+        samples = results.get("n", results.get("total_samples", results.get("n_gt", 0)))
         segments = results.get("total_segments", None)
 
         # --- rich table ---
@@ -175,18 +294,22 @@ class SegmentationEvaluator:
         table.add_row("F1", f"{g(results, 'f1'):.3f}")
         table.add_row("Precision", f"{g(results, 'precision'):.3f}")
         table.add_row("Recall", f"{g(results, 'recall'):.3f}")
-        table.add_section()
-        for label, prefix in [
-            ("Start Error (ms)", "start_err"),
-            ("End Error (ms)", "end_err"),
-            ("Phone Boundary Error (ms)", "pbe"),
-            ("Duration Error (ms)", "dur_err"),
-            ("GT Duration (ms)", "gt_dur"),
-            ("Pred Duration (ms)", "pred_dur"),
-        ]:
-            mean = g(results, f"{prefix}_mean")
-            std = g(results, f"{prefix}_std")
-            table.add_row(label, f"{mean:.2f} ± {std:.2f}")
+        table.add_row("R-value", f"{g(results, 'rval'):.3f}")
+
+        has_per_phone = "start_err_mean" in results or "mean_start_err" in results
+        if has_per_phone:
+            table.add_section()
+            for label, prefix in [
+                ("Start Error (ms)", "start_err"),
+                ("End Error (ms)", "end_err"),
+                ("Phone Boundary Error (ms)", "pbe"),
+                ("Duration Error (ms)", "dur_err"),
+                ("GT Duration (ms)", "gt_dur"),
+                ("Pred Duration (ms)", "pred_dur"),
+            ]:
+                mean = g(results, f"{prefix}_mean")
+                std = g(results, f"{prefix}_std")
+                table.add_row(label, f"{mean:.2f} ± {std:.2f}")
 
         if "symbol_errors" in results:
             sym_table = Table(title="Per-Symbol PBE (top 20)", show_lines=True)
@@ -275,11 +398,14 @@ class SegmentationEvaluator:
         if not all_results:
             return {}
 
-        # Aggregate results
-        metric_names = [k for k in all_results[0] if k not in ("symbol_errors", "n")]
+        # Aggregate results — exclude count keys and symbol_errors from mean
+        count_keys = {"n", "n_pred", "n_gt"}
+        metric_names = [
+            k for k in all_results[0] if k not in ("symbol_errors", *count_keys)
+        ]
         aggregated = {
             "total_segments": len(all_results),
-            "total_samples": sum(r["n"] for r in all_results),
+            "total_samples": sum(r.get("n", r.get("n_gt", 0)) for r in all_results),
             **{
                 f"mean_{metric}": np.mean([r[metric] for r in all_results])
                 for metric in metric_names
@@ -321,13 +447,23 @@ class SegmentationEvaluator:
 
 
 if __name__ == "__main__":
-    # Example usage of AlignmentEvaluator
+    # Example usage of SegmentationEvaluator
     # python -m src.metrics.segmentation_evaluator
-    evaluator = SegmentationEvaluator(tolerance_ms=20)
+    # python -m src.metrics.segmentation_evaluator --forced
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--forced",
+        action="store_true",
+        help="Run in forced mode (requires equal segment counts, adds per-phone stats)",
+    )
+    args = parser.parse_args()
+    evaluator = SegmentationEvaluator(tolerance_ms=20, forced=args.forced)
+
+    mode_label = "Forced" if args.forced else "Free"
 
     # Example 1: Single segment evaluation
     print("=" * 60)
-    print("Example 1: Single Segment Evaluation")
+    print(f"Example 1: Single Segment Evaluation ({mode_label} mode)")
     print("=" * 60)
 
     ground_truth = [
@@ -344,12 +480,12 @@ if __name__ == "__main__":
     ]
     symbols = ["AH", "T", "AH", "K"]
 
-    results = evaluator.evaluate_boundaries(predicted, ground_truth, symbols)
+    results = evaluator.evaluate_boundaries(predicted, ground_truth, symbols if args.forced else None)
     evaluator.pretty_print(results)
 
     # Example 2: Batch evaluation
     print("\n" + "=" * 60)
-    print("Example 2: Batch Evaluation")
+    print(f"Example 2: Batch Evaluation ({mode_label} mode)")
     print("=" * 60)
 
     batch_pred = {
@@ -392,5 +528,7 @@ if __name__ == "__main__":
         "segment_003": ["T", "AH", "K", "AH"],
     }
 
-    batch_results = evaluator.evaluate_batch(batch_pred, batch_gt, batch_symbols)
+    batch_results = evaluator.evaluate_batch(
+        batch_pred, batch_gt, batch_symbols if args.forced else None
+    )
     evaluator.pretty_print(batch_results)
