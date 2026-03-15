@@ -1,9 +1,0 @@
-_target_: src.data.fleurs.common_datamodule.FleursLanguageId
-cache_dir: ${paths.cache_dir}/fleurs
-hf_repo: shikhar7ssu/fleurs24-lid
-num_classes: 24
-target_sr: 16000
-max_audio_length: 20.0
-batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-num_workers: 10
-pin_memory: False

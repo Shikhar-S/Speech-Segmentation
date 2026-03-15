@@ -1,8 +1,0 @@
-_target_: src.data.vaani.geolocation.VaaniGeolocation
-hf_repo: shikhar7ssu/vaani-hi-geo
-cache_dir: ${paths.cache_dir}/vaanihindi
-num_classes: 3 # dummy, reset in attn_mlp head to 3 for (x,y,z)
-target_sr: 16000
-batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-num_workers: 10
-pin_memory: False

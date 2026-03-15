@@ -1,7 +1,0 @@
-_target_: src.data.swissgerman.geolocation.SwissGermanGeolocation
-data_dir: ${paths.download_dir}/swiss_german
-metadata_path: ${paths.cache_dir}/swissgerman/metadata.csv
-target_sr: 16000
-batch_size: 48 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-num_workers: 10
-pin_memory: False
