@@ -14,6 +14,13 @@ from src.utils.pylogger import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
+# NOTE(shikhar): This still does not do the equidistant splitting
+# between two close enough boundaries that R-Value paper recommends.
+# https://d1wqtxts1xzle7.cloudfront.net/35865703/IS09_r_value-libre.pdf?1418037042=&response-content-disposition=inline%3B+filename%3DAn_improved_speech_segmentation_quality.pdf&Expires=1773463828&Signature=V8NdeaZ721135Z2F9y85-CLT31h9w~CTFEyPVFQeOYeXBMYorTRdSVdHe~DTxI2~Zb-mob33cAn8OjcpU86jHHUAQHp0A0KcLXadreo1AXEVpfiWpafiT11h~pIfsxqZvEMlQUCNKJVB9lSqFFFv~mUJ-i0msHUoZf9I9q6-THfeDSHpBu8OeF91lV~uO0k69OeKVt49QTrMcmXtaDbaVJEO9NOQxHWyBJmdusvb9dphh~oof039vvbPJ4x0ySV-mizVtk8uOj7ARPXqtPgKNUgCb6ooK7fCWgTnErJBfob2IA2FwB2BL~5eOvTZaaKdT7HR4QRu2MVwaPTNa6ewOA__&Key-Pair-Id=APKAJLOHF5GGSLRBV4ZA
+# but 1) with a low-tolerance setting that kind of splitting will have low impact
+# 2) results from this should be comparable to Jian's earlier papers
+
+
 @dataclass
 class SegmentationUnit:
     """Represents a single aligned unit (e.g., phone)."""
@@ -76,7 +83,9 @@ class SegmentationEvaluator:
         """Boundary-only evaluation (no per-phone pairing required)."""
         pred_times = self._extract_boundary_times(predicted)
         gt_times = self._extract_boundary_times(ground_truth)
-        precision, recall, f1, rval = self._score_boundaries_charsiu(pred_times, gt_times)
+        precision, recall, f1, rval = self._score_boundaries_charsiu(
+            pred_times, gt_times
+        )
         return {
             "n_pred": len(predicted),
             "n_gt": len(ground_truth),
@@ -108,7 +117,9 @@ class SegmentationEvaluator:
 
         pred_times = np.array([u.start for u in predicted])
         gt_times = np.array([u.start for u in ground_truth])
-        precision, recall, f1, rval = self._score_boundaries_charsiu(pred_times, gt_times)
+        precision, recall, f1, rval = self._score_boundaries_charsiu(
+            pred_times, gt_times
+        )
 
         # Build results dictionary
         percentiles = [5, 25, 50, 75, 95, 99]
@@ -150,9 +161,7 @@ class SegmentationEvaluator:
         times = [u.start for u in units] + [units[-1].end]
         return np.unique(times)
 
-    def _score_boundaries_charsiu(
-        self, pred_times: np.ndarray, gt_times: np.ndarray
-    ):
+    def _score_boundaries_charsiu(self, pred_times: np.ndarray, gt_times: np.ndarray):
         """Non-greedy boundary matching (charsiu-style) returning (P, R, F1, Rval).
 
         Each predicted boundary is matched to the nearest GT boundary
@@ -206,7 +215,11 @@ class SegmentationEvaluator:
                 gt_pool.pop(idx)
         precision = n_correct / len(pred_times) if pred_times else 0.0
         recall = n_correct / len(gt_times) if gt_times else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
+        )
         return precision, recall, f1
 
     def _compute_metrics(self, ps, pe, gs, ge):
@@ -480,7 +493,9 @@ if __name__ == "__main__":
     ]
     symbols = ["AH", "T", "AH", "K"]
 
-    results = evaluator.evaluate_boundaries(predicted, ground_truth, symbols if args.forced else None)
+    results = evaluator.evaluate_boundaries(
+        predicted, ground_truth, symbols if args.forced else None
+    )
     evaluator.pretty_print(results)
 
     # Example 2: Batch evaluation
