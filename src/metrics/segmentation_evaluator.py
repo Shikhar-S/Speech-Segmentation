@@ -55,7 +55,7 @@ class SegmentationEvaluator:
             for a single utterance.
 
         In free mode (forced=False): accepts lists of any length and returns
-        boundary P/R/F1/Rval only.  In forced mode (forced=True): zips
+        boundary P/R/F1/Rval only. In forced mode (forced=True): zips
         predicted/GT pairs and additionally returns per-phone error statistics.
 
         Args:
@@ -72,7 +72,7 @@ class SegmentationEvaluator:
         return self._evaluate_forced(predicted, ground_truth, symbols)
 
     # ------------------------------------------------------------------ #
-    # Free mode                                                            #
+    # Free mode                                                          #
     # ------------------------------------------------------------------ #
 
     def _evaluate_free(
@@ -81,10 +81,12 @@ class SegmentationEvaluator:
         ground_truth: List[SegmentationUnit],
     ) -> Dict[str, float]:
         """Boundary-only evaluation (no per-phone pairing required)."""
-        pred_times = self._extract_boundary_times(predicted)
-        gt_times = self._extract_boundary_times(ground_truth)
-        precision, recall, f1, rval = self._score_boundaries_charsiu(
-            pred_times, gt_times
+        counts = self._get_boundary_counts_free(predicted, ground_truth)
+        precision, recall, f1, rval = self._get_boundary_metrics(
+            counts["precision_counter"],
+            counts["recall_counter"],
+            counts["pred_counter"],
+            counts["gt_counter"],
         )
         return {
             "n_pred": len(predicted),
@@ -95,8 +97,31 @@ class SegmentationEvaluator:
             "rval": rval,
         }
 
+    def _get_boundary_counts_free(
+        self,
+        predicted: List[SegmentationUnit],
+        ground_truth: List[SegmentationUnit],
+    ) -> Dict[str, int]:
+        """Return raw boundary match counts for free-mode aggregation."""
+        pred_times = self._extract_boundary_times(predicted)
+        gt_times = self._extract_boundary_times(ground_truth)
+
+        precision_counter = sum(
+            np.abs(gt_times - t).min() <= self.tolerance_sec for t in pred_times
+        )
+        recall_counter = sum(
+            np.abs(pred_times - t).min() <= self.tolerance_sec for t in gt_times
+        )
+
+        return {
+            "precision_counter": int(precision_counter),
+            "recall_counter": int(recall_counter),
+            "pred_counter": int(len(pred_times)),
+            "gt_counter": int(len(gt_times)),
+        }
+
     # ------------------------------------------------------------------ #
-    # Forced mode                                                          #
+    # Forced mode                                                        #
     # ------------------------------------------------------------------ #
 
     def _evaluate_forced(
@@ -115,14 +140,15 @@ class SegmentationEvaluator:
         )
         start_err, end_err, pbe, dur_err, gt_dur, pred_dur = metrics.T
 
-        pred_times = np.array([u.start for u in predicted])
-        gt_times = np.array([u.start for u in ground_truth])
-        precision, recall, f1, rval = self._score_boundaries_charsiu(
-            pred_times, gt_times
+        counts = self._get_boundary_counts_free(predicted, ground_truth)
+        precision, recall, f1, rval = self._get_boundary_metrics(
+            counts["precision_counter"],
+            counts["recall_counter"],
+            counts["pred_counter"],
+            counts["gt_counter"],
         )
 
-        # Build results dictionary
-        percentiles = [5, 25, 50, 75, 95, 99]
+        percentiles = [5, 50, 95]
         results = {
             "n": n,
             "f1": f1,
@@ -131,7 +157,6 @@ class SegmentationEvaluator:
             "rval": rval,
         }
 
-        # Add statistics for each error type (convert to ms)
         error_types = [
             ("start_err", start_err),
             ("end_err", end_err),
@@ -144,7 +169,6 @@ class SegmentationEvaluator:
         for name, data in error_types:
             results.update(self._compute_stats(data * 1000, name, percentiles))
 
-        # Add symbol-wise analysis if symbols provided
         if symbols:
             results["symbol_errors"] = self._analyze_by_symbol(
                 symbols, start_err, end_err, pbe, dur_err
@@ -153,7 +177,7 @@ class SegmentationEvaluator:
         return results
 
     # ------------------------------------------------------------------ #
-    # Boundary helpers                                                     #
+    # Boundary helpers                                                   #
     # ------------------------------------------------------------------ #
 
     def _extract_boundary_times(self, units: List[SegmentationUnit]) -> np.ndarray:
@@ -294,7 +318,6 @@ class SegmentationEvaluator:
         samples = results.get("n", results.get("total_samples", results.get("n_gt", 0)))
         segments = results.get("total_segments", None)
 
-        # --- rich table ---
         table = Table(title="Alignment Evaluation Results", show_lines=True)
         table.add_column("Metric", style="bold")
         table.add_column("Value", justify="right")
@@ -308,6 +331,13 @@ class SegmentationEvaluator:
         table.add_row("Precision", f"{g(results, 'precision'):.3f}")
         table.add_row("Recall", f"{g(results, 'recall'):.3f}")
         table.add_row("R-value", f"{g(results, 'rval'):.3f}")
+
+        if "global_f1" in results:
+            table.add_section()
+            table.add_row("Global F1", f"{results['global_f1']:.3f}")
+            table.add_row("Global Precision", f"{results['global_precision']:.3f}")
+            table.add_row("Global Recall", f"{results['global_recall']:.3f}")
+            table.add_row("Global R-value", f"{results['global_rval']:.3f}")
 
         has_per_phone = "start_err_mean" in results or "mean_start_err" in results
         if has_per_phone:
@@ -353,7 +383,6 @@ class SegmentationEvaluator:
         if "symbol_errors" in results:
             console.print(sym_table)
 
-        # --- CSV dump ---
         flat = {k: v for k, v in results.items() if k != "symbol_errors"}
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -385,6 +414,11 @@ class SegmentationEvaluator:
         """
         all_results = []
 
+        global_precision_counter = 0
+        global_recall_counter = 0
+        global_pred_counter = 0
+        global_gt_counter = 0
+
         for seg_id in ground_truth:
             if seg_id not in predictions:
                 log.warning(f"Segment ID {seg_id} missing in predictions; skipping.")
@@ -406,12 +440,19 @@ class SegmentationEvaluator:
                     syms = [s for s in syms if s not in skip_symbols]
 
             res = self.evaluate_boundaries(preds, gts, syms)
+            if not res:
+                continue
             all_results.append(res)
+
+            counts = self._get_boundary_counts_free(preds, gts)
+            global_precision_counter += counts["precision_counter"]
+            global_recall_counter += counts["recall_counter"]
+            global_pred_counter += counts["pred_counter"]
+            global_gt_counter += counts["gt_counter"]
 
         if not all_results:
             return {}
 
-        # Aggregate results — exclude count keys and symbol_errors from mean
         count_keys = {"n", "n_pred", "n_gt"}
         metric_names = [
             k for k in all_results[0] if k not in ("symbol_errors", *count_keys)
@@ -425,7 +466,27 @@ class SegmentationEvaluator:
             },
         }
 
-        # Merge symbol errors if present
+        global_precision, global_recall, global_f1, global_rval = (
+            self._get_boundary_metrics(
+                global_precision_counter,
+                global_recall_counter,
+                global_pred_counter,
+                global_gt_counter,
+            )
+        )
+        aggregated.update(
+            {
+                "global_precision_counter": global_precision_counter,
+                "global_recall_counter": global_recall_counter,
+                "global_pred_counter": global_pred_counter,
+                "global_gt_counter": global_gt_counter,
+                "global_precision": global_precision,
+                "global_recall": global_recall,
+                "global_f1": global_f1,
+                "global_rval": global_rval,
+            }
+        )
+
         if "symbol_errors" in all_results[0]:
             merged_symbols = defaultdict(
                 lambda: {
@@ -474,7 +535,6 @@ if __name__ == "__main__":
 
     mode_label = "Forced" if args.forced else "Free"
 
-    # Example 1: Single segment evaluation
     print("=" * 60)
     print(f"Example 1: Single Segment Evaluation ({mode_label} mode)")
     print("=" * 60)
@@ -498,7 +558,6 @@ if __name__ == "__main__":
     )
     evaluator.pretty_print(results)
 
-    # Example 2: Batch evaluation
     print("\n" + "=" * 60)
     print(f"Example 2: Batch Evaluation ({mode_label} mode)")
     print("=" * 60)
