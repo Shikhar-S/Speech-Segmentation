@@ -24,7 +24,7 @@ dependencies = [
     "phonemizer==3.3.0",
     "flashlight-text==0.0.7",
     "huggingface_hub==0.35.3",
-    "datasets==4.4.1",
+    "datasets==3.6.0",
     "pyarrow==22.0.0",
     "wandb==0.22.1",
     "buckeye==1.3",
