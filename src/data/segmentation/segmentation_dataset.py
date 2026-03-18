@@ -7,9 +7,7 @@ The loader converts each row into a list of ``SegmentationUnit`` objects
 keyed by ``utt_id``.
 """
 
-from pathlib import Path
-from typing import Dict, List, Optional
-from src.core.utils import download_hf_snapshot
+from typing import Optional
 
 import datasets
 import torch
@@ -32,7 +30,6 @@ class SegmentationDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.dataset[idx]
-        print(row)
         audio = row["audio"]
         waveform = torch.tensor(audio["array"], dtype=torch.float32)
         if audio["sampling_rate"] != self.target_sr:
@@ -115,6 +112,7 @@ class SegmentationDataModule(L.LightningDataModule):
     ):
         super().__init__()
         self.hf_repo = hf_repo
+        assert tokenizer is not None, "Tokenizer must be provided for segmentation dataset."
         self.tokenizer = tokenizer
         self.train_split = train_split
         self.val_split = val_split
@@ -161,8 +159,11 @@ class SegmentationDataModule(L.LightningDataModule):
 
 
 if __name__ == "__main__":
+    # export HF_HOME="exp/cache/hf"
+    # cp -f /u/sbharadwaj/.cache/huggingface/token exp/cache/hf/token [copy token]
     # python -m src.data.segmentation.segmentation_dataset
-    dl=SegmentationDataModule(hf_repo="changelinglab/buckeye-segment", tokenizer=None)
+    tokenizer = type("DummyTokenizer", (), {"tokens2ids": lambda self, phones: [i for i in range(len(phones))]})()
+    dl = SegmentationDataModule(hf_repo="changelinglab/buckeye-segment", tokenizer=tokenizer, batch_size=2)
     dl.setup()
     for batch in dl.train_dataloader():
         print(batch)

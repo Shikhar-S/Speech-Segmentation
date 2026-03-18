@@ -273,28 +273,16 @@ class SegmentationModel(LightningModule):
 
 
 if __name__ == "__main__":
-    from pathlib import Path
-    from src.model.powsm.powsm_model import build_powsm
-    from src.data.buckeye.common_datamodule import BuckeyeDataModule
-    from src.model.powsm.token_id_converter import build_powsm_tokenizer
-    from src.model.wav2vec2phoneme.builders import (
-        build_wav2vec2phoneme_model,
-        build_wav2vec2phoneme_tokenizer,
-    )
+    from src.data.segmentation.segmentation_dataset import SegmentationDataModule
 
     MODEL = "w2v2ph"
     # MODEL = "powsm"
-
-    data_dir = "/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache"
-    buckeye_root = (
-        "/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/"
-        "ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye"
-    )
-    train_meta = Path(data_dir) / "train_metadata.json"
-    val_meta = Path(data_dir) / "val_metadata.json"
-    test_meta = Path(data_dir) / "test_metadata.json"
+    HF_REPO = "changelinglab/buckeye-segment"
 
     if MODEL == "powsm":
+        from src.model.powsm.powsm_model import build_powsm
+        from src.model.powsm.token_id_converter import build_powsm_tokenizer
+
         tokenizer = build_powsm_tokenizer(
             work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
             hf_repo="espnet/powsm",
@@ -304,6 +292,10 @@ if __name__ == "__main__":
             hf_repo="espnet/powsm",
         )
     elif MODEL == "w2v2ph":
+        from src.model.wav2vec2phoneme.builders import (
+            build_wav2vec2phoneme_model,
+            build_wav2vec2phoneme_tokenizer,
+        )
 
         tokenizer = build_wav2vec2phoneme_tokenizer(
             hf_repo="ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns",
@@ -317,29 +309,15 @@ if __name__ == "__main__":
         optimizer=torch.optim.Adam,
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
     )
-    # print(model.net.points_by_frames(), "points by frame ratio")
 
-    data_module = BuckeyeDataModule(
-        buckeye_root="/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye",
-        local_cache_path="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache",
-        model_tokenizer=tokenizer,
+    data_module = SegmentationDataModule(
+        hf_repo=HF_REPO,
+        tokenizer=tokenizer,
         batch_size=2,
         num_workers=1,
     )
 
     data_module.setup()
-    # print("Model step sanity check...")
-    # test_batch = next(iter(data_module.test_dataloader()))
-    # preds = model.predict_step(test_batch, batch_idx=0)
-
-    # for utt_idx, alignment in enumerate(preds):
-    #     print(f"Utterance {utt_idx}:")
-    #     for seg in alignment:
-    #         print(seg.start, seg.end, seg.label)
-    #         print(seg.start, seg.end)
-    #         print("---")
-
-    # print("Model predict step successful!")
 
     print("Training step sanity check...")
     train_batch = next(iter(data_module.train_dataloader()))
