@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: timit
-  - override /model: forced_alignment
+  - override /model: segmentation
   - override /model/net: logmel
   - override /data/tokenizer: IPA
   - override /trainer: gpu

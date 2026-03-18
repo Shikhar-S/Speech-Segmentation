@@ -4,7 +4,7 @@ This script creates segment-level metadata (one segment = one TIMIT utterance)
 for use with a forced-alignment data pipeline.
 
 Usage:
-    python -m src.recipe.forced_alignment.local.timit_data_prep \
+    python -m src.recipe.segmentation.local.timit_data_prep \
         --timit_root /work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk \
         --output_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/timit \
         --split_index /work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk/split_index.txt

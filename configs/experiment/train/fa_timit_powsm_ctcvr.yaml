@@ -2,7 +2,7 @@
 # python src/main.py experiment=probing/fa_timit_powsm_ctcvr +trainer.precision=bf16
 defaults:
   - override /data: timit
-  - override /model: forced_alignment
+  - override /model: segmentation
   - override /model/net: powsm_ctc_vr
   - override /data/tokenizer: powsm  # FINE FOR NOW BECAUSE TOKEN LIST IS SAME!
   - override /trainer: gpu

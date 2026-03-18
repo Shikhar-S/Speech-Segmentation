@@ -34,7 +34,7 @@ inference:
     - "text"
     - "ground_truth_timestamps"
   inference_runner:
-    _target_: src.recipe.forced_alignment.inference.ForcedAlignmentInference
+    _target_: src.recipe.segmentation.inference.SegmentationInference
     model:
       _target_: src.model.powsm.powsm_model.build_powsm
       work_dir: ${paths.cache_dir}/powsm

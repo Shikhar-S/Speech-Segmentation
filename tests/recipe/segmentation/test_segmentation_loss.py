@@ -2,14 +2,14 @@
 
 import torch
 import pytest
-from src.recipe.forced_alignment.forced_alignment_loss import ForcedAlignmentLoss
+from src.recipe.segmentation.segmentation_loss import SegmentationLoss
 import torch.nn.functional as F
 
 
 # -------------------------------------------------------------------
 # GROUND TRUTH REFERENCE IMPLEMENTATION
 # -------------------------------------------------------------------
-class ReferenceForcedAlignmentLoop(torch.nn.Module):
+class ReferenceSegmentationLoop(torch.nn.Module):
     """
     Slow, explicit loop-based implementation to establish Ground Truth.
     """
@@ -93,13 +93,13 @@ class ReferenceForcedAlignmentLoop(torch.nn.Module):
 def loss_fn():
     """The optimized implementation under test."""
     # Ensure this imports your corrected class
-    return ForcedAlignmentLoss(ignore_index=-100)
+    return SegmentationLoss(ignore_index=-100)
 
 
 @pytest.fixture
 def loss_fn_ref():
     """The ground truth reference."""
-    return ReferenceForcedAlignmentLoop(ignore_index=-100)
+    return ReferenceSegmentationLoop(ignore_index=-100)
 
 
 def run_comparison(

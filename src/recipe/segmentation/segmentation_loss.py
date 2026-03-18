@@ -3,7 +3,7 @@ import torch.nn as nn
 from typing import Dict, Optional
 
 
-class ForcedAlignmentLoss(nn.Module):
+class SegmentationLoss(nn.Module):
     def __init__(self, ignore_index=-1):
         super().__init__()
         self.ignore_index = ignore_index

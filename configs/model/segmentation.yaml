@@ -1,4 +1,4 @@
-_target_: src.recipe.forced_alignment.model_module.ForcedAlignmentModel
+_target_: src.recipe.segmentation.model_module.SegmentationModel
 
 optimizer:
   _target_: torch.optim.Adam

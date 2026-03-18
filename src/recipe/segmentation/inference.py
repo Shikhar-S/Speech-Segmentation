@@ -1,7 +1,7 @@
 """Forced alignment inference module.
 
 Usage:
-    python -m src.recipe.forced_alignment.inference
+    python -m src.recipe.segmentation.inference
 """
 
 import pyarrow.parquet as pq  # before torch
@@ -15,7 +15,7 @@ from src.utils import RankedLogger
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-class ForcedAlignmentInference:
+class SegmentationInference:
     def __init__(
         self,
         model: nn.Module,
@@ -116,7 +116,7 @@ class ForcedAlignmentInference:
         Returns:
             List[ForceAlignedUnit]: list of forced aligned units for the utterance.
         """
-        sp, txt, splen_t, txtlen_t = ForcedAlignmentInference.prepare_inputs(
+        sp, txt, splen_t, txtlen_t = SegmentationInference.prepare_inputs(
             speech,
             speech_length,
             target,
@@ -128,7 +128,7 @@ class ForcedAlignmentInference:
             sp, splen_t, txt, txtlen_t, utt_id=utt_id
         )
         labels = align_label.squeeze(0).detach().cpu().tolist()
-        alignment_result = ForcedAlignmentInference.post_process_alignments(
+        alignment_result = SegmentationInference.post_process_alignments(
             self.net, labels
         )
         return alignment_result
@@ -161,7 +161,7 @@ if __name__ == "__main__":
             "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
         )
     print("Point to frame for model:", model.points_by_frames())
-    inference_module = ForcedAlignmentInference(model=model)
+    inference_module = SegmentationInference(model=model)
 
     # Dummy input
     # speech = torch.randn(16000 * 5)  # 5 seconds of audio at 16kHz

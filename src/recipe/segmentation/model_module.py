@@ -1,7 +1,7 @@
 """Forced alignment model module.
 
 Usage:
-    python -m src.recipe.forced_alignment.model_module
+    python -m src.recipe.segmentation.model_module
 """
 
 import pyarrow.parquet as pq  # before torch
@@ -13,8 +13,8 @@ from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
 
-from src.recipe.forced_alignment.forced_alignment_loss import ForcedAlignmentLoss
-from src.recipe.forced_alignment.inference import ForcedAlignmentInference
+from src.recipe.segmentation.segmentation_loss import SegmentationLoss
+from src.recipe.segmentation.inference import SegmentationInference
 from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 from src.utils import RankedLogger
 
@@ -35,7 +35,7 @@ def convert_pointstamps_to_frame_indices(
     return start_idx, end_idx
 
 
-class ForcedAlignmentModel(LightningModule):
+class SegmentationModel(LightningModule):
     def __init__(
         self,
         net: nn.Module,
@@ -48,7 +48,7 @@ class ForcedAlignmentModel(LightningModule):
         self.net = net
         self.evaluator = SegmentationEvaluator(tolerance_ms=20)
         self.encoder_dim = self.net.encoder_output_size()
-        self.criterion = ForcedAlignmentLoss()
+        self.criterion = SegmentationLoss()
 
         self.test_data = {}
         self.train_loss = MeanMetric()
@@ -232,12 +232,12 @@ class ForcedAlignmentModel(LightningModule):
         """
         predicted_alignments: List[List[SegmentationUnit]] = []
         for sp, splen, txt, txtlen in zip(speech, speech_length, text, text_length):
-            sp, txt, splen_t, txtlen_t = ForcedAlignmentInference.prepare_inputs(
+            sp, txt, splen_t, txtlen_t = SegmentationInference.prepare_inputs(
                 sp, splen, txt, txtlen, device=self.device
             )
             align_label, _ = self.net.forced_align(sp, splen_t, txt, txtlen_t)
             labels = align_label.squeeze(0).detach().cpu().tolist()
-            alignment_result = ForcedAlignmentInference.post_process_alignments(
+            alignment_result = SegmentationInference.post_process_alignments(
                 self.net,
                 labels,
             )
@@ -312,7 +312,7 @@ if __name__ == "__main__":
             hf_repo="ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns",
         )
 
-    model = ForcedAlignmentModel(
+    model = SegmentationModel(
         net=net,
         optimizer=torch.optim.Adam,
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,

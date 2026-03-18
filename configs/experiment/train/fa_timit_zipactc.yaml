@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: timit
-  - override /model: forced_alignment
+  - override /model: segmentation
   - override /model/net: zipactc
   - override /data/tokenizer: zipactc
   - override /trainer: gpu

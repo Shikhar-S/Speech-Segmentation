@@ -7,7 +7,7 @@
 
 defaults:
   - override /data: buckeye
-  - override /model: forced_alignment
+  - override /model: segmentation
   - override /model/net: whisper
   - override /data/tokenizer: IPA
   - override /trainer: gpu

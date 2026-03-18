@@ -11,14 +11,14 @@ first hyphen-delimited component of the utt_id; speaker_id is the second.
 
 Usage::
 
-python -m src.recipe.forced_alignment.local.voxangeles_data_convert \
+python -m src.recipe.segmentation.local.voxangeles_data_convert \
       --wav_scp   /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/test_voxangeles/wav.scp \
       --text      /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/test_voxangeles/text.good \
       --va_dir    /work/nvme/bbjs/sbharadwaj/powsm/voxangeles \
       --output_dir exp/voxangeles-seg \
       --hf_repo    changelinglab/voxangeles-segment
 
-    python -m src.recipe.forced_alignment.local.voxangeles_data_convert \\
+    python -m src.recipe.segmentation.local.voxangeles_data_convert \\
         --wav_scp   /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/test_voxangeles/wav.scp \\
         --text      /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/test_voxangeles/text.good \\
         --va_dir    /work/nvme/bbjs/sbharadwaj/powsm/voxangeles \\

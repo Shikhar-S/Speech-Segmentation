@@ -6,7 +6,7 @@ in the same schema as ``seg_data_convert.py``.
 
 Usage (TIMIT-style — ``audio_root/{segment_id}.wav``)::
 
-python -m src.recipe.forced_alignment.local.processed_data_convert \
+python -m src.recipe.segmentation.local.processed_data_convert \
     --metadata_dir exp/cache/timit/ \
     --audio_root   /work/hdd/bbjs/shared/corpora/TIMIT/timit_nltk \
     --output_dir   exp/timit-seg \
@@ -15,7 +15,7 @@ python -m src.recipe.forced_alignment.local.processed_data_convert \
 
 Usage (Buckeye-style — pre-extracted clips in ``clips_dir/{segment_id}.wav``)::
 
-python -m src.recipe.forced_alignment.local.processed_data_convert \
+python -m src.recipe.segmentation.local.processed_data_convert \
     --metadata_dir /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/buckeye \
     --clips_dir    /work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/cache/buckeye/speech_clips \
     --output_dir   exp/buckeye-seg \

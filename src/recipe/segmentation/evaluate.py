@@ -1,7 +1,7 @@
 """Script to read the dumped predictions for forced alignment and evaluate and print the metrics.
 
 Usage:
-    python -m src.recipe.forced_alignment.evaluate \
+    python -m src.recipe.segmentation.evaluate \
         --prediction_file <path_to_prediction_file>
 """
 
