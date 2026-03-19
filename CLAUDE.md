@@ -143,8 +143,21 @@ inference:
 
 ## Code Conventions
 
-- **Line length:** 99 (Black)
-- **Imports:** isort-sorted
+Follow the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html).
+The full quick-reference is in **`docs/style.md`** — consult it for any design decision.
+
+Key rules:
+- **Line length:** 80 (Black + Google standard)
+- **Imports:** 4 groups (future → stdlib → third-party → local); no relative imports
+- **Naming:** `lower_with_under` for functions/vars, `CapWords` for classes, `CAPS` for constants
+- **Docstrings:** Google format (`Args:` / `Returns:` / `Raises:` / `Yields:` sections)
+- **Type annotations:** required on all public functions and complex logic
+- **Defaults:** never mutable (`list`, `dict`) — use `None` sentinel
+- **Exceptions:** specific built-in types; no bare `except:`
+- **No `staticmethod`** — write module-level functions instead
+- **Strings in loops:** `"".join(...)`, never `+=`
+- **Checks:** `if x is None:`, `if items:`, `if flag:` — never `== None` or `== True`
+- **Files:** always use `with` context manager
 - **Docstring coverage:** 80% minimum (interrogate)
 - Config files use YAML with `_target_` for Hydra `instantiate()` calls
 

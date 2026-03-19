@@ -8,7 +8,8 @@
       "Bash(wc:*)",
       "Read(//work/nvme/bbjs/sbharadwaj/powsm/flash-attention/build/**)",
       "Read(//work/nvme/bbjs/sbharadwaj/powsm/flash-attention/flash_attn.egg-info/**)",
-      "Read(//work/nvme/bbjs/sbharadwaj/powsm/flash-attention/**)"
+      "Read(//work/nvme/bbjs/sbharadwaj/powsm/flash-attention/**)",
+      "Bash(unzip -l /work/nvme/bbjs/sbharadwaj/powsm/voxangeles/data/unaudited/ajp.zip)"
     ]
   }
 }

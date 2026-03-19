@@ -1,10 +1,8 @@
-"""Forced alignment inference module.
+"""Segmentation inference module.
 
 Usage:
     python -m src.recipe.segmentation.inference
 """
-
-import pyarrow.parquet as pq  # before torch
 from typing import List
 
 import torch

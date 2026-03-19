@@ -59,6 +59,9 @@ x86 = [
 ]
 # Delta-AI (aarch64) — flash-attn must be installed separately (see setup.sh)
 
+[tool.black]
+line-length = 80
+
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cu126"]
 find-links = ["https://k2-fsa.github.io/k2/cuda.html"]
