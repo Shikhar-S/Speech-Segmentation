@@ -12,7 +12,7 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "phone_segmentation"
+task_name: "speech_segmentation"
 tags: ["timit", "xeuspr", "segmentation"]
 
 seed: 42
@@ -28,6 +28,17 @@ trainer:
   val_check_interval: 125
   check_val_every_n_epoch: null
   log_every_n_steps: 100
+
+callbacks:
+  model_checkpoint:
+    monitor: val/accuracy
+    mode: max
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping:
+    monitor: val/accuracy
+    mode: max
+    patience: 100
 
 model:
   optimizer:

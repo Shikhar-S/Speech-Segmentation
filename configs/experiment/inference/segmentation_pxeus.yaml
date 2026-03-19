@@ -1,0 +1,37 @@
+# @package _global_
+defaults:
+  - override /data: segmentation_train
+  - override /data/tokenizer: xeuspr
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: powsm # dummy — not used, satisfies Hydra requirement
+
+task_name: "inf_segmentation"
+tags: ["segmentation", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/timit-segment
+
+inference:
+  num_workers: 4
+  out_file: ${paths.output_dir}/seg_pxeus.json
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+  inference_runner:
+    _target_: src.recipe.segmentation.inference.build_segmentation_inference
+    ckpt_path: ???   # supplied at runtime via script override
+    work_dir: ${paths.cache_dir}/xeus
+    hf_repo: espnet/xeus
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+    interctc_weight: 0.3
+    interctc_layer_idx: [4, 8, 12]
+    interctc_use_conditioning: true
+    ctc_weight: 1.0
+    device: cuda
+    greedy: true

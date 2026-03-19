@@ -1,9 +1,10 @@
-_target_: src.data.segmentation.segmentation_dataset.SegmentationDataModule
+_target_: src.data.segmentation.segmentation_dataset.build_eval_datamodule
 hf_repo: changelinglab/timit-segment
+cache_dir: ${paths.cache_dir}/hf
 tokenizer: ??? # defined in experiment config
 batch_size: 32
 num_workers: 4
 pin_memory: True
 target_sr: 16000
-train_fraction: 1.0
 seed: 42
+max_speech_length: None

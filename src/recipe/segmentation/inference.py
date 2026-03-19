@@ -9,7 +9,7 @@ from typing import List
 
 import torch
 import torch.nn as nn
-from src.metrics.segmentation_evaluator import SegmentationUnit, SegmentationEvaluator
+from src.metrics.segmentation_evaluator import SegmentationUnit
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
@@ -160,92 +160,40 @@ class SegmentationInference:
         return SegmentationInference.post_process_alignments(self.net, labels)
 
 
+def build_segmentation_inference(
+    ckpt_path: str,
+    work_dir: str,
+    device: str = "cuda",
+    greedy: bool = False,
+    hf_repo: str = "espnet/xeus",
+    vocab_file: str = "src/model/xeusphoneme/resources/ipa_vocab.json",
+    interctc_weight: float = 0.3,
+    interctc_layer_idx: list = None,
+    interctc_use_conditioning: bool = True,
+    ctc_weight: float = 1.0,
+) -> SegmentationInference:
+    """Build SegmentationInference with ALL weights loaded from a Lightning checkpoint."""
+    from src.model.xeusphoneme.builders import build_xeus_pr_from_hf
+
+    net = build_xeus_pr_from_hf(
+        work_dir=work_dir,
+        hf_repo=hf_repo,
+        load_ckpt=False,
+        vocab_file=vocab_file,
+        interctc_weight=interctc_weight,
+        interctc_layer_idx=interctc_layer_idx,
+        interctc_use_conditioning=interctc_use_conditioning,
+        ctc_weight=ctc_weight,
+    )
+    state = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
+    net_state = {k[len("net."):]: v for k, v in state.items() if k.startswith("net.")}
+    net.load_state_dict(net_state, strict=True)
+    return SegmentationInference(model=net, device=device, greedy=greedy)
+
+
 if __name__ == "__main__":
-    from src.model.wav2vec2phoneme.builders import (
-        build_wav2vec2phoneme_model,
-        build_wav2vec2phoneme_tokenizer,
-    )
-    from src.model.powsm.powsm_model import build_powsm
-    from src.model.powsm.token_id_converter import build_powsm_tokenizer
-
-    MODEL = "powsm"
-    # MODEL = "w2v2ph"
-    if MODEL == "powsm":
-        model = build_powsm(
-            work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
-            hf_repo="espnet/powsm",
-        )
-        model_tokenizer = build_powsm_tokenizer(
-            work_dir="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/powsm_cache",
-            hf_repo="espnet/powsm",
-        )
-    elif MODEL == "w2v2ph":
-        model = build_wav2vec2phoneme_model(
-            "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
-        )
-        model_tokenizer = build_wav2vec2phoneme_tokenizer(
-            "ctaguchi/wav2vec2-large-xlsr-japlmthufielta-ipa1000-ns"
-        )
-    print("Point to frame for model:", model.points_by_frames())
-    inference_module = SegmentationInference(model=model)
-
-    # Dummy input
-    # speech = torch.randn(16000 * 5)  # 5 seconds of audio at 16kHz
-    # speech_length = torch.tensor(16000 * 5)
-    # target = torch.randint(0, 100, (50,))  # random tokenized target
-    # target_length = torch.tensor(50)
-    from src.data.buckeye.common_datamodule import BuckeyeDataModule
-
-    # Create dataloaders
-    data_module = BuckeyeDataModule(
-        buckeye_root="/work/nvme/bbjs/sbharadwaj/powsm/espnet/egs2/ipapack_plus/s2t1/dump/raw/test_buckeye/buckeye",
-        local_cache_path="/work/nvme/bbjs/sbharadwaj/powsm/PhoneBench/exp/buckeye_cache",
-        model_tokenizer=model_tokenizer,
-        batch_size=1,
-        num_workers=1,
-    )
-    data_module.setup()
-
-    # train_loader = data_module.train_dataloader()
-    # val_loader = data_module.val_dataloader()
-    test_loader = data_module.test_dataloader()
-
-    for batch in test_loader:
-        speech = batch["speech"].squeeze(0)
-        speech_length = batch["speech_length"].squeeze(0)
-        target = batch["target"].squeeze(0)
-        target_length = batch["target_length"].squeeze(0)
-        target_start = batch["target_start"].squeeze(0).tolist()
-        target_end = batch["target_end"].squeeze(0).tolist()
-        # print(target_length)
-        alignment = inference_module(
-            speech=speech,
-            speech_length=speech_length,
-            target=target,
-            target_length=target_length,
-        )
-        print(target)
-        print(batch["target_text"])
-
-        for j, unit in enumerate(alignment):
-            gt_start = target_start[j] / 16000 if j < len(target_start) else "N/A"
-            gt_end = target_end[j] / 16000 if j < len(target_end) else "N/A"
-            print(
-                f"  {unit} | {model_tokenizer.ids2tokens([unit.label])} | start: {gt_start} | end: {gt_end}"
-            )
-        print()
-        evaluator = SegmentationEvaluator()
-        metrics = evaluator.evaluate_batch(
-            predictions={"identifier": alignment},
-            ground_truth={
-                "identifier": [
-                    SegmentationUnit(start=ts / 16000, end=te / 16000, label=tl)
-                    for ts, te, tl in zip(target_start, target_end, target.tolist())
-                ]
-            },
-            skip_symbols={model_tokenizer.unk_symbol},
-        )
-        evaluator.pretty_print(metrics, verbosity=2)
-        break
-        # ignore id problems in training
-        # filter blank/pad during FA evals
+    # python -m src.recipe.segmentation.inference
+    ckpt_path='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/seg_pxeus_frac1_0/20260318_203249/checkpoints/last.ckpt'
+    inference_module = build_segmentation_inference(ckpt_path, work_dir='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/xeus', device='cuda', greedy=False)
+    log.info("SegmentationInference module built successfully.")
+    

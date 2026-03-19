@@ -105,6 +105,7 @@ class SegmentationDataModule(L.LightningDataModule):
         train_split: str = "train",
         val_split: str = "val",
         test_split: str = "test",
+        predict_split: Optional[str] = None,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -121,6 +122,7 @@ class SegmentationDataModule(L.LightningDataModule):
         self.train_split = train_split
         self.val_split = val_split
         self.test_split = test_split
+        self.predict_split = predict_split or [train_split, val_split, test_split]
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -170,8 +172,8 @@ class SegmentationDataModule(L.LightningDataModule):
         return self._dl(self.test_dataset)
 
     def predict_dataloader(self):
-        available = [ds for ds in [self.train_dataset, self.val_dataset, self.test_dataset] if ds is not None]
-        return self._dl(ConcatDataset(available))
+        predict_datasets = [getattr(self, f"{split}_dataset") for split in self.predict_split]
+        return self._dl(ConcatDataset(predict_datasets))
 
 
 def build_eval_datamodule(hf_repo, tokenizer, batch_size=32, num_workers=4, pin_memory=True, target_sr=16000, max_speech_length=None, cache_dir="exp/cache/hf"):
@@ -182,6 +184,7 @@ def build_eval_datamodule(hf_repo, tokenizer, batch_size=32, num_workers=4, pin_
         train_split="test",
         val_split="test",
         test_split="test",
+        predict_split=["test"],
         train_fraction=0.0,
         batch_size=batch_size,
         num_workers=num_workers,
