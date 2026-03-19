@@ -51,7 +51,7 @@ python -m src.recipe.phone_recognition.model_module
 ## General Instruction on Coding Style
 Prefer to make new files or functions with minimal changes to original code. Do not bloat the code with unnecessary try catch. Be biased towards simplicity, but if there are any major decisions be proactive to ask the user.
 
-- **Extract helpers with descriptive names.** Non-trivial logic embedded in orchestration methods should be pulled into named helpers. Names should document intent.
+- **Extract helpers with descriptive names.** Non-trivial logic embedded in orchestration methods should be pulled into named helpers. Names should document intent. Helpers should hide complexity, not rename simplicity or introduce unnecessary layers — extract when the logic is non-trivial, not just to give a readable name to something already readable inline.
 - **Guard clause first.** Handle the no-op or trivial case with an early return at the top; keep the main logic unindented.
 - **Preserve caller uniformity.** Side effects that affect only part of a shared structure should be encapsulated in helpers so the caller can treat all cases identically, without special-casing.
 - **Minimal lines, no redundant intermediates.** Prefer dense, direct expressions over named temporaries and explanatory comments for obvious steps.

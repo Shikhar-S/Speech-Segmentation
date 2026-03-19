@@ -66,29 +66,14 @@ class SegmentationEvaluator:
         """
         if not predicted or not ground_truth:
             return {}
-
-        if not self.forced:
-            return self._evaluate_free(predicted, ground_truth)
-        return self._evaluate_forced(predicted, ground_truth, symbols)
-
-    # ------------------------------------------------------------------ #
-    # Free mode                                                          #
-    # ------------------------------------------------------------------ #
-
-    def _evaluate_free(
-        self,
-        predicted: List[SegmentationUnit],
-        ground_truth: List[SegmentationUnit],
-    ) -> Dict[str, float]:
-        """Boundary-only evaluation (no per-phone pairing required)."""
-        counts = self._get_boundary_counts_free(predicted, ground_truth)
+        counts = self._get_boundary_counts(predicted, ground_truth)
         precision, recall, f1, rval = self._get_boundary_metrics(
             counts["precision_counter"],
             counts["recall_counter"],
             counts["pred_counter"],
             counts["gt_counter"],
         )
-        return {
+        results = {
             "n_pred": len(predicted),
             "n_gt": len(ground_truth),
             "precision": precision,
@@ -96,8 +81,11 @@ class SegmentationEvaluator:
             "f1": f1,
             "rval": rval,
         }
+        if not self.forced:
+            return results
+        return self._add_forced_alignment_metrics(results, predicted, ground_truth, symbols)
 
-    def _get_boundary_counts_free(
+    def _get_boundary_counts(
         self,
         predicted: List[SegmentationUnit],
         ground_truth: List[SegmentationUnit],
@@ -120,17 +108,15 @@ class SegmentationEvaluator:
             "gt_counter": int(len(gt_times)),
         }
 
-    # ------------------------------------------------------------------ #
-    # Forced mode                                                        #
-    # ------------------------------------------------------------------ #
-
-    def _evaluate_forced(
+    def _add_forced_alignment_metrics(
         self,
+        results: Dict[str, float],
         predicted: List[SegmentationUnit],
         ground_truth: List[SegmentationUnit],
         symbols: Optional[List[str]] = None,
     ) -> Dict[str, float]:
-        """Paired evaluation with per-phone error statistics."""
+        """Add forced-mode metrics to existing results."""
+        # print('length of predicted and ground_truth', len(predicted), len(ground_truth))
         n = min(len(predicted), len(ground_truth))
         metrics = np.array(
             [
@@ -138,25 +124,26 @@ class SegmentationEvaluator:
                 for p, g in zip(predicted, ground_truth)
             ]
         )
+        # # print first 5 times
+        # print("First 5 predicted vs GT times:")
+        # for i in range(min(5, len(metrics))):
+        #     ps, pe, gs, ge = predicted[i].start, predicted[i].end, ground_truth[i].start, ground_truth[i].end
+        #     print(f"Pred: ({ps:.3f}, {pe:.3f}), GT: ({gs:.3f}, {ge:.3f})")
+            
+        
+        # print('-=-' * 20)
+        # print('Largest predicted and GT time for largest 5 pbe')
+        # pbe = metrics[:, 2]
+        # largest_indices = np.argsort(pbe)[-5:]
+        # for idx in largest_indices:
+        #     ps, pe, gs, ge = predicted[idx].start, predicted[idx].end, ground_truth[idx].start, ground_truth[idx].end
+        #     print(f"PBE: {pbe[idx]:.3f} sec - Pred: ({ps:.3f}, {pe:.3f}), GT: ({gs:.3f}, {ge:.3f})")  
+
         start_err, end_err, pbe, dur_err, gt_dur, pred_dur = metrics.T
 
-        counts = self._get_boundary_counts_free(predicted, ground_truth)
-        precision, recall, f1, rval = self._get_boundary_metrics(
-            counts["precision_counter"],
-            counts["recall_counter"],
-            counts["pred_counter"],
-            counts["gt_counter"],
-        )
-
         percentiles = [5, 50, 95]
-        results = {
-            "n": n,
-            "f1": f1,
-            "precision": precision,
-            "recall": recall,
-            "rval": rval,
-        }
-
+        results.update({'n': n})
+        
         error_types = [
             ("start_err", start_err),
             ("end_err", end_err),
@@ -185,24 +172,6 @@ class SegmentationEvaluator:
         times = [u.start for u in units] + [units[-1].end]
         return np.unique(times)
 
-    def _score_boundaries_charsiu(self, pred_times: np.ndarray, gt_times: np.ndarray):
-        """Non-greedy boundary matching (charsiu-style) returning (P, R, F1, Rval).
-
-        Each predicted boundary is matched to the nearest GT boundary
-        without deduplication.
-        """
-        pred_times = np.asarray(pred_times)
-        gt_times = np.asarray(gt_times)
-        precision_counter = sum(
-            np.abs(gt_times - t).min() <= self.tolerance_sec for t in pred_times
-        )
-        recall_counter = sum(
-            np.abs(pred_times - t).min() <= self.tolerance_sec for t in gt_times
-        )
-        return self._get_boundary_metrics(
-            precision_counter, recall_counter, len(pred_times), len(gt_times)
-        )
-
     def _get_boundary_metrics(
         self,
         precision_counter: float,
@@ -224,27 +193,6 @@ class SegmentationEvaluator:
         r2 = (-os + recall - 1) / np.sqrt(2)
         rval = 1 - (np.abs(r1) + np.abs(r2)) / 2
         return precision, recall, f1, rval
-
-    def _score_boundaries(self, pred_times, gt_times):
-        """Kamper-style greedy boundary matching with deduplication."""
-        gt_pool = list(gt_times)
-        n_correct = 0
-        for t in pred_times:
-            idx = next(
-                (i for i, g in enumerate(gt_pool) if abs(t - g) <= self.tolerance_sec),
-                None,
-            )
-            if idx is not None:
-                n_correct += 1
-                gt_pool.pop(idx)
-        precision = n_correct / len(pred_times) if pred_times else 0.0
-        recall = n_correct / len(gt_times) if gt_times else 0.0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0.0
-        )
-        return precision, recall, f1
 
     def _compute_metrics(self, ps, pe, gs, ge):
         """Compute metrics for a single phone (in seconds)."""
@@ -332,14 +280,11 @@ class SegmentationEvaluator:
         table.add_row("Recall", f"{g(results, 'recall'):.3f}")
         table.add_row("R-value", f"{g(results, 'rval'):.3f}")
 
-        if "global_f1" in results:
-            table.add_section()
-            table.add_row("Global F1", f"{results['global_f1']:.3f}")
-            table.add_row("Global Precision", f"{results['global_precision']:.3f}")
-            table.add_row("Global Recall", f"{results['global_recall']:.3f}")
-            table.add_row("Global R-value", f"{results['global_rval']:.3f}")
-
-        has_per_phone = "start_err_mean" in results or "mean_start_err" in results
+        has_per_phone = (
+            "start_err_mean" in results
+            or "mean_start_err" in results
+            or "mean_start_err_mean" in results
+        )
         if has_per_phone:
             table.add_section()
             for label, prefix in [
@@ -414,10 +359,10 @@ class SegmentationEvaluator:
         """
         all_results = []
 
-        global_precision_counter = 0
-        global_recall_counter = 0
-        global_pred_counter = 0
-        global_gt_counter = 0
+        micro_precision_counter = 0
+        micro_recall_counter = 0
+        micro_pred_counter = 0
+        micro_gt_counter = 0
 
         for seg_id in ground_truth:
             if seg_id not in predictions:
@@ -444,18 +389,21 @@ class SegmentationEvaluator:
                 continue
             all_results.append(res)
 
-            counts = self._get_boundary_counts_free(preds, gts)
-            global_precision_counter += counts["precision_counter"]
-            global_recall_counter += counts["recall_counter"]
-            global_pred_counter += counts["pred_counter"]
-            global_gt_counter += counts["gt_counter"]
+            counts = self._get_boundary_counts(preds, gts)
+            micro_precision_counter += counts["precision_counter"]
+            micro_recall_counter += counts["recall_counter"]
+            micro_pred_counter += counts["pred_counter"]
+            micro_gt_counter += counts["gt_counter"]
 
         if not all_results:
             return {}
 
+        boundary_metrics = {"f1", "precision", "recall", "rval"}
         count_keys = {"n", "n_pred", "n_gt"}
         metric_names = [
-            k for k in all_results[0] if k not in ("symbol_errors", *count_keys)
+            k
+            for k in all_results[0]
+            if k not in ("symbol_errors", *count_keys, *boundary_metrics)
         ]
         aggregated = {
             "total_segments": len(all_results),
@@ -466,24 +414,22 @@ class SegmentationEvaluator:
             },
         }
 
-        global_precision, global_recall, global_f1, global_rval = (
-            self._get_boundary_metrics(
-                global_precision_counter,
-                global_recall_counter,
-                global_pred_counter,
-                global_gt_counter,
-            )
+        precision, recall, f1, rval = self._get_boundary_metrics(
+            micro_precision_counter,
+            micro_recall_counter,
+            micro_pred_counter,
+            micro_gt_counter,
         )
         aggregated.update(
             {
-                "global_precision_counter": global_precision_counter,
-                "global_recall_counter": global_recall_counter,
-                "global_pred_counter": global_pred_counter,
-                "global_gt_counter": global_gt_counter,
-                "global_precision": global_precision,
-                "global_recall": global_recall,
-                "global_f1": global_f1,
-                "global_rval": global_rval,
+                "precision_counter": micro_precision_counter,
+                "recall_counter": micro_recall_counter,
+                "pred_counter": micro_pred_counter,
+                "gt_counter": micro_gt_counter,
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "rval": rval,
             }
         )
 

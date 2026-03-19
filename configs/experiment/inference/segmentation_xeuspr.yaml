@@ -1,5 +1,5 @@
 # @package _global_
-# python src/main.py experiment=inference/segmentation_pxeus inference.inference_runner.ckpt_path=exp/runs/speech_segmentation/seg_pxeus_frac0_053/last.ckpt
+# python src/main.py experiment=inference/segmentation_xeuspr inference.inference_runner.ckpt_path=exp/runs/speech_segmentation/seg_xeuspr_frac0_053/last.ckpt
 defaults:
   - override /data: segmentation_train
   - override /data/tokenizer: xeuspr
@@ -19,7 +19,7 @@ data:
 
 inference:
   num_workers: 4
-  out_file: ${paths.output_dir}/seg_pxeus.greedy${inference.inference_runner.greedy}.json
+  out_file: ${paths.output_dir}/seg_xeuspr.greedy${inference.inference_runner.greedy}.json
   passthrough_keys:
     - "utt_id"
     - "phone_timestamps"
@@ -36,7 +36,7 @@ inference:
       hf_repo: espnet/xeus
       vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
       load_ckpt: false
-      interctc_weight: 0.3
-      interctc_layer_idx: [4, 8, 12]
-      interctc_use_conditioning: true
+      interctc_weight: 0.0
+      interctc_layer_idx: null
+      interctc_use_conditioning: false
       ctc_weight: 1.0

@@ -18,7 +18,7 @@ class SegmentationInference:
         self,
         model: nn.Module,
         device: str = "cpu",
-        greedy: bool = False,
+        greedy: bool = True,
     ) -> None:
         self.net = model
         self.device = device
@@ -159,30 +159,12 @@ class SegmentationInference:
 
 
 def build_segmentation_inference(
+    net: nn.Module,
     ckpt_path: str,
-    work_dir: str,
     device: str = "cuda",
-    greedy: bool = False,
-    hf_repo: str = "espnet/xeus",
-    vocab_file: str = "src/model/xeusphoneme/resources/ipa_vocab.json",
-    interctc_weight: float = 0.3,
-    interctc_layer_idx: list = None,
-    interctc_use_conditioning: bool = True,
-    ctc_weight: float = 1.0,
+    greedy: bool = True,
 ) -> SegmentationInference:
     """Build SegmentationInference with ALL weights loaded from a Lightning checkpoint."""
-    from src.model.xeusphoneme.builders import build_xeus_pr_from_hf
-
-    net = build_xeus_pr_from_hf(
-        work_dir=work_dir,
-        hf_repo=hf_repo,
-        load_ckpt=False,
-        vocab_file=vocab_file,
-        interctc_weight=interctc_weight,
-        interctc_layer_idx=interctc_layer_idx,
-        interctc_use_conditioning=interctc_use_conditioning,
-        ctc_weight=ctc_weight,
-    )
     state = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
     net_state = {k[len("net."):]: v for k, v in state.items() if k.startswith("net.")}
     net.load_state_dict(net_state, strict=True)
@@ -191,7 +173,19 @@ def build_segmentation_inference(
 
 if __name__ == "__main__":
     # python -m src.recipe.segmentation.inference
-    ckpt_path='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/seg_pxeus_frac1_0/20260318_203249/checkpoints/last.ckpt'
-    inference_module = build_segmentation_inference(ckpt_path, work_dir='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/xeus', device='cuda', greedy=False)
+    from src.model.xeusphoneme.builders import build_xeus_pr_from_hf
+
+    ckpt_path = '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/speech_segmentation/seg_pxeus_frac0_053/last.ckpt'
+    net = build_xeus_pr_from_hf(
+        work_dir='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/xeus',
+        hf_repo='espnet/xeus',
+        load_ckpt=False,
+        vocab_file='src/model/xeusphoneme/resources/ipa_vocab.json',
+        interctc_weight=0.3,
+        interctc_layer_idx=[4, 8, 12],
+        interctc_use_conditioning=True,
+        ctc_weight=1.0,
+    )
+    inference_module = build_segmentation_inference(net, ckpt_path, device='cuda', greedy=True)
     log.info("SegmentationInference module built successfully.")
     
