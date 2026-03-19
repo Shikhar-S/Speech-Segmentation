@@ -20,9 +20,11 @@ class SegmentationInference:
         self,
         model: nn.Module,
         device: str = "cpu",
+        greedy: bool = False,
     ) -> None:
         self.net = model
         self.device = device
+        self.greedy = greedy
         self.net.to(self.device)
 
     @staticmethod
@@ -65,6 +67,28 @@ class SegmentationInference:
         return alignment_result
 
     @staticmethod
+    @torch.no_grad()
+    def greedy_decode(net, speech, speech_length, device="cpu") -> List[SegmentationUnit]:
+        """Greedy CTC decode a single utterance without text input.
+
+        Runs argmax over CTC logits frame-by-frame, then collapses repeated
+        tokens and blanks while mapping frames back to time.
+
+        Args:
+            net: The model (must implement ctc_logits, points_by_frames, sampling_rate, get_blank_id).
+            speech: (Length,) waveform tensor.
+            speech_length: int or scalar tensor, number of valid samples.
+            device: device string.
+        Returns:
+            List[SegmentationUnit]: collapsed phone segments with timestamps.
+        """
+        sp = speech[:int(speech_length)].unsqueeze(0).to(device)
+        splen_t = torch.as_tensor([int(speech_length)], device=device)
+        logits, logit_lengths = net.ctc_logits(sp, splen_t)
+        frame_labels = logits.argmax(dim=-1).squeeze(0)[:int(logit_lengths[0])].tolist()
+        return SegmentationInference.post_process_alignments(net, frame_labels)
+
+    @staticmethod
     def prepare_inputs(
         speech: torch.Tensor,
         speech_length: torch.Tensor,
@@ -99,23 +123,28 @@ class SegmentationInference:
         self,
         speech,
         speech_length,
-        target,
-        target_length,
-        utt_id,
+        target=None,
+        target_length=None,
+        utt_id=None,
         *args,
         **kwargs,
-    ) -> List[List[SegmentationUnit]]:
-        """Get forced alignments for a single utterance.
+    ) -> List[SegmentationUnit]:
+        """Get segmentation for a single utterance.
+
+        In greedy mode, decodes without text input via CTC argmax.
+        In forced-align mode, requires target and target_length.
 
         Args:
             speech: (Length)
             speech_length: int
-            target: (Length) tokenized
-            target_length: int
+            target: (Length) tokenized — required if greedy=False
+            target_length: int — required if greedy=False
             utt_id: str, identifier for the utterance
         Returns:
-            List[ForceAlignedUnit]: list of forced aligned units for the utterance.
+            List[SegmentationUnit]: list of segmentation units for the utterance.
         """
+        if self.greedy:
+            return SegmentationInference.greedy_decode(self.net, speech, speech_length, device=self.device)
         sp, txt, splen_t, txtlen_t = SegmentationInference.prepare_inputs(
             speech,
             speech_length,
@@ -128,10 +157,7 @@ class SegmentationInference:
             sp, splen_t, txt, txtlen_t, utt_id=utt_id
         )
         labels = align_label.squeeze(0).detach().cpu().tolist()
-        alignment_result = SegmentationInference.post_process_alignments(
-            self.net, labels
-        )
-        return alignment_result
+        return SegmentationInference.post_process_alignments(self.net, labels)
 
 
 if __name__ == "__main__":

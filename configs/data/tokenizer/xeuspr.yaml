@@ -1,0 +1,2 @@
+_target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json

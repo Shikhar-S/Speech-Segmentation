@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Xeus Phoneme Recognition Model.
 # -*- coding: utf-8 -*-
-
+# TODO(shikhar): Add a forced align function
 # Copyright 2025 William Chen. Adapted from ESPnet.
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional, Tuple, Union
 import argparse
 
 import torch
+import torch.nn.functional as F
+import torchaudio
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet_import.nets.pytorch_backend.nets_utils import make_pad_mask
 from espnet_import.nets.pytorch_backend.nets_utils import pad_list, th_accuracy
@@ -111,6 +113,23 @@ class XeusPRModel(torch.nn.Module):
             ), "Cannot infer number of encoder layers for weighted_sum"
             self.layer_weights = torch.nn.Parameter(torch.zeros(int(n_layers)))
         self.interctc_weight = interctc_weight
+        self.sampling_rate = 16000
+
+    def points_by_frames(self) -> int:
+        """Samples per encoder frame (CNN downsampling factor)."""
+        return self.frontend.downsampling_factor
+
+    @torch.no_grad()
+    def forced_align(self, speech, speech_lengths, text, text_lengths, utt_id=None):
+        """CTC forced alignment via torchaudio.functional.forced_align (batch size 1)."""
+        assert speech.shape[0] == 1, "forced_align requires batch size 1"
+        text = text[:, : text_lengths.max()]
+        logits, logit_lengths = self.ctc_logits(speech, speech_lengths)
+        log_probs = F.log_softmax(logits, dim=-1)
+        align_label, align_prob = torchaudio.functional.forced_align(
+            log_probs, text, logit_lengths, text_lengths, blank=self.blank_id
+        )
+        return align_label, align_prob
 
     def collect_feats(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor, **kwargs

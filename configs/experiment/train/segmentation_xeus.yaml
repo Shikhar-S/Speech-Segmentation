@@ -1,0 +1,42 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/main.py experiment=train/segmentation_xeus
+
+defaults:
+  - override /data: segmentation_train
+  - override /model: segmentation
+  - override /model/net: xeuspr
+  - override /data/tokenizer: xeuspr
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "phone_segmentation"
+tags: ["timit", "xeuspr", "segmentation"]
+
+seed: 42
+
+trainer:
+  devices: -1  # use all available GPUs
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 0
+  max_epochs: -1
+  max_steps: 5000 # 125 steps per epoch with batch size 32, so ~ 40 epochs
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 125
+  check_val_every_n_epoch: null
+  log_every_n_steps: 100
+
+model:
+  optimizer:
+    lr: 0.0001
+
+data:
+  batch_size: 32
+  hf_repo: changelinglab/timit-segment
+
+logger:
+  wandb:
+    tags: ${tags}
