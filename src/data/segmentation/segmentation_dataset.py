@@ -37,6 +37,8 @@ class SegmentationDataset(Dataset):
         if self.max_speech_length is not None:
             waveform = waveform[:int(self.max_speech_length * self.target_sr)]
 
+        # NOTE(shikhar): All processing like arpabet to ipa, merging segment should be here. 
+        # Keep dataset on hf clean, w/o such logic.
         phones_ipa = [ARPABET_TO_IPA.get(p.lower(), p.lower()) for p in row["phones"]]
         phone_timestamps = list(zip(row["phone_starts"], row["phone_ends"]))
         phone_pointstamps = [(int(s * self.target_sr), int(e * self.target_sr)) for s, e in phone_timestamps]
@@ -109,6 +111,8 @@ class SegmentationDataModule(L.LightningDataModule):
         target_sr: int = 16000,
         max_speech_length: Optional[float] = None,
         cache_dir: str = "exp/cache/hf",
+        train_fraction: float = 1.0,
+        seed: int = 42,
     ):
         super().__init__()
         self.hf_repo = hf_repo
@@ -123,9 +127,21 @@ class SegmentationDataModule(L.LightningDataModule):
         self.target_sr = target_sr
         self.max_speech_length = max_speech_length
         self.cache_dir = cache_dir
+        self.train_fraction = train_fraction
+        self.seed = seed
+
+    def _maybe_sample_subset(self, dataset, fraction):
+        if fraction >= 1.0:
+            return dataset
+        total_size = len(dataset[self.train_split])
+        subset_size = int(total_size * fraction)
+        indices = torch.randperm(total_size, generator=torch.Generator().manual_seed(self.seed))[:subset_size].tolist()
+        dataset[self.train_split] = dataset[self.train_split].select(indices)
+        return dataset
 
     def setup(self, stage: Optional[str] = None):
         ddict=datasets.load_dataset(self.hf_repo, cache_dir=self.cache_dir)
+        ddict = self._maybe_sample_subset(ddict, self.train_fraction)
         self.train_dataset = self._ds(ddict, self.train_split)
         self.val_dataset = self._ds(ddict, self.val_split)
         self.test_dataset = self._ds(ddict, self.test_split)
@@ -158,12 +174,32 @@ class SegmentationDataModule(L.LightningDataModule):
         return self._dl(ConcatDataset(available))
 
 
+def build_eval_datamodule(hf_repo, tokenizer, batch_size=32, num_workers=4, pin_memory=True, target_sr=16000, max_speech_length=None, cache_dir="exp/cache/hf"):
+    # DATASET='changelinglab/voxangeles-segment'
+    return SegmentationDataModule(
+        hf_repo=hf_repo,
+        tokenizer=tokenizer,
+        train_split="test",
+        val_split="test",
+        test_split="test",
+        train_fraction=0.0,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        target_sr=target_sr,
+        max_speech_length=max_speech_length,
+        cache_dir=cache_dir,
+    )
+
+
 if __name__ == "__main__":
     # export HF_HOME="exp/cache/hf"
     # cp -f /u/sbharadwaj/.cache/huggingface/token exp/cache/hf/token [copy token]
     # python -m src.data.segmentation.segmentation_dataset
     tokenizer = type("DummyTokenizer", (), {"tokens2ids": lambda self, phones: [i for i in range(len(phones))]})()
-    dl = SegmentationDataModule(hf_repo="changelinglab/buckeye-segment", tokenizer=tokenizer, batch_size=2)
+    DATASET='changelinglab/buckeye-segment'
+    DATASET='changelinglab/timit-segment'
+    dl = SegmentationDataModule(hf_repo=DATASET, tokenizer=tokenizer, batch_size=2)
     dl.setup()
     for batch in dl.train_dataloader():
         print(batch)

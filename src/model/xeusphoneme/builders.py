@@ -25,6 +25,18 @@ from src.model.xeusphoneme.resources.phonetic_substitutions import (
 log = RankedLogger(__name__, rank_zero_only=False)
 
 
+class XeusPRTokenizer:
+    """Tokenizer that maps IPA phones to IDs using the xeuspr ipa_vocab.json."""
+
+    def __init__(self, vocab_file: str):
+        with open(vocab_file) as f:
+            self.vocab: Dict[str, int] = json.load(f)
+        self.unk_id = self.vocab.get("<unk>", 0)
+
+    def tokens2ids(self, tokens) -> list:
+        return [self.vocab.get(t, self.unk_id) for t in tokens]
+
+
 def build_panphon_distance_matrix(vocab: list[str]) -> torch.Tensor:
     """Build panphon distance matrix for articulatory CTC.
     Args:
