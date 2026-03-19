@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**PhoneBench** is a phonetic model benchmarking framework built on PyTorch Lightning + Hydra. It evaluates phone recognition and forced alignment across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). The main model family is **PowSM** (Phoneme-oriented Weighted Speech Model), a CTC-Attention hybrid encoder-decoder.
+**PhoneBench** is a phonetic model benchmarking framework built on PyTorch Lightning + Hydra. It evaluates phone recognition and segmentation across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). The main model family is **PowSM** (Phoneme-oriented Weighted Speech Model), a CTC-Attention hybrid encoder-decoder.
 
 ## Environment Setup
 
@@ -39,16 +39,22 @@ source .venv/bin/activate
 > If the egg is missing, rebuild with:
 > `cd /work/nvme/bbjs/sbharadwaj/powsm/flash-attention/hopper && python setup.py bdist_egg`
 
-> **Legacy path** (`setup_uv.sh` + `requirements*.txt`) is retained but no longer the primary install method.
+## Sanity Check Before Large Runs
 
-**Phone recognition pipeline (scripts/):**
+Before submitting SLURM jobs, always run the recipe module directly to catch import/data errors early:
+
 ```bash
-bash scripts/pr_timit_train.sh      # train on TIMIT with Epitran mixing
-bash scripts/pr_decode.sh           # decode/inference on datasets
-bash scripts/pr_eval.sh             # evaluate decoded outputs
-python scripts/pr_parse_results.py  # aggregate results
-python scripts/parse_wandb.py       # extract WandB metrics
+python -m src.recipe.segmentation.model_module
+python -m src.recipe.phone_recognition.model_module
 ```
+
+## General Instruction on Coding Style
+Prefer to make new files or functions with minimal changes to original code. Do not bloat the code with unnecessary try catch. Be biased towards simplicity, but if there are any major decisions be proactive to ask the user.
+
+- **Extract helpers with descriptive names.** Non-trivial logic embedded in orchestration methods should be pulled into named helpers. Names should document intent.
+- **Guard clause first.** Handle the no-op or trivial case with an early return at the top; keep the main logic unindented.
+- **Preserve caller uniformity.** Side effects that affect only part of a shared structure should be encapsulated in helpers so the caller can treat all cases identically, without special-casing.
+- **Minimal lines, no redundant intermediates.** Prefer dense, direct expressions over named temporaries and explanatory comments for obvious steps.
 
 ## Architecture
 
@@ -71,16 +77,7 @@ All config lives in `configs/`. The entry point is `configs/main.yaml`, which is
 - `specaug.py` – SpecAugment data augmentation
 - `e_branchformer.py` – Default encoder (EBranchformer)
 - `transformer_decoder.py` – Attention decoder
-- `ctc.py` – CTC loss module (imports from variant files below)
-
-**CTC variants in `ctc.py`** (the active variant is imported at top of `ctc.py`):
-- Standard builtin CTC
-- `fixed_articulatory_ctc.py` – Articulatory CTC with fixed phonetic feature distances (currently active)
-- Scheduled articulatory CTC – annealed loss weighting during training
-- Vectorized articulatory CTC – batch-efficient version
-- BRCTC (Balanced Risk CTC)
-
-Articulatory CTC variants use **panphon** phonetic feature distances to weight substitution errors in the CTC loss, encouraging phonetically similar confusions over arbitrary ones.
+- `ctc.py` – CTC loss module
 
 ### Data Layer (`src/data/`)
 
@@ -90,7 +87,7 @@ Datasets load from Kaldi-style ark/scp files (`kaldi_dataset.py`) or JSON. Key d
 
 Task-specific Lightning modules (model + data glue):
 - `phone_recognition/` – Phone recognition models and error analysis
-- `forced_alignment/` – Forced alignment models, loss, inference, and evaluation
+- `segmentation/` – Segmentation models (`SegmentationModel`, `SegmentationLoss`, `SegmentationInference`), evaluation
 
 ### Distributed Inference (`src/core/distributed_inference.py`)
 
@@ -132,7 +129,7 @@ inference:
 
 **DataModule contract for inference:** Must implement `predict_dataloader()` returning a dataset whose `__getitem__` yields a dict. The dict must include `speech` (raw waveform tensor). Any key in `inference_call_args` can be overridden per-sample by including it in the dataset item dict.
 
-**Merging sharded outputs:** After all SLURM tasks finish, collect `*.0.jsonl`, `*.1.jsonl`, … and merge. `scripts/pr_parse_results.py` handles downstream aggregation.
+**Merging sharded outputs:** After all SLURM tasks finish, collect `*.0.jsonl`, `*.1.jsonl`, … and merge.
 
 ### Metrics (`src/metrics/`)
 
