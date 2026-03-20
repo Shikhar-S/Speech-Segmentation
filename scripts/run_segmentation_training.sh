@@ -23,5 +23,5 @@ for entry in "${RUNS[@]}"; do
         scripts/daixpr.batch \
         experiment=train/${model} \
         data.train_fraction=${frac} \
-        run_folder=${run_folder}
+        run_folder=${run_folder} "$@"
 done

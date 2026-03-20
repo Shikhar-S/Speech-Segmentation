@@ -13,7 +13,7 @@ defaults:
   - override /logger: wandb
 
 task_name: "speech_segmentation"
-tags: ["timit", "phoneticxeus", "segmentation"]
+tags: ["phoneticxeus", "segmentation"]
 
 seed: 42
 

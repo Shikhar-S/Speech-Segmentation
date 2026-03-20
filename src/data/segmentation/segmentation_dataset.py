@@ -39,7 +39,7 @@ class SegmentationDataset(Dataset):
 
         # NOTE(shikhar): All processing like arpabet to ipa, merging segment should be here. 
         # Keep dataset on hf clean, w/o such logic.
-        phones_ipa = [ARPABET_TO_IPA.get(p.lower(), p.lower()) for p in row["phones"]]
+        phones_ipa = [ARPABET_TO_IPA.get(p.lower(), p.lower()) for p in row["phones"]] # passthrough ipa
         phone_timestamps = list(zip(row["phone_starts"], row["phone_ends"]))
         phone_pointstamps = [(int(s * self.target_sr), int(e * self.target_sr)) for s, e in phone_timestamps]
         target = self.tokenizer.tokens2ids(phones_ipa)
@@ -172,28 +172,13 @@ class SegmentationDataModule(L.LightningDataModule):
         return self._dl(self.test_dataset)
 
     def predict_dataloader(self):
-        predict_datasets = [getattr(self, f"{split}_dataset") for split in self.predict_split]
+        predict_datasets=[]
+        for split in self.predict_split:
+            ds = getattr(self, f"{split}_dataset")
+            if ds is not None:
+                predict_datasets.append(ds)
+        assert len(predict_datasets) > 0, f"None of the predict splits {self.predict_split} found in dataset."
         return self._dl(ConcatDataset(predict_datasets))
-
-
-def build_eval_datamodule(hf_repo, tokenizer, batch_size=32, num_workers=4, pin_memory=True, target_sr=16000, max_speech_length=None, cache_dir="exp/cache/hf"):
-    # DATASET='changelinglab/voxangeles-segment'
-    return SegmentationDataModule(
-        hf_repo=hf_repo,
-        tokenizer=tokenizer,
-        train_split="test",
-        val_split="test",
-        test_split="test",
-        predict_split=["test"],
-        train_fraction=0.0,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        target_sr=target_sr,
-        max_speech_length=max_speech_length,
-        cache_dir=cache_dir,
-    )
-
 
 if __name__ == "__main__":
     # export HF_HOME="exp/cache/hf"
