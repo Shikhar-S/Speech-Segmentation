@@ -37,7 +37,7 @@ jamo
 espnet-tts-frontend
 jaconv
 huggingface_hub==0.35.3
-datasets==4.4.1
+datasets==3.6.0
 pyarrow==22.0.0
 pandas
 transformers
