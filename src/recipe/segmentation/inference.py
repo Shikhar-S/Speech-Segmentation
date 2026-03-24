@@ -158,6 +158,122 @@ class SegmentationInference:
         return SegmentationInference.post_process_alignments(self.net, labels)
 
 
+def _boundary_flags_to_units(net, is_boundary, valid_len) -> List[SegmentationUnit]:
+    """Convert per-frame boundary flags to SegmentationUnit segments.
+
+    Args:
+        net: The encoder model (provides points_by_frames and sampling_rate).
+        is_boundary: List[bool] of length valid_len; True marks a phone start.
+        valid_len: Number of valid (non-padded) frames.
+    Returns:
+        List[SegmentationUnit] with label=0 (no phone-class info in BCE mode).
+    """
+    points = net.points_by_frames()
+    sr = net.sampling_rate
+    units: List[SegmentationUnit] = []
+    start = 0
+    for i in range(1, valid_len):
+        if is_boundary[i]:
+            units.append(SegmentationUnit(
+                start=start * points / sr,
+                end=i * points / sr,
+                label=0,
+            ))
+            start = i
+    units.append(SegmentationUnit(
+        start=start * points / sr,
+        end=valid_len * points / sr,
+        label=0,
+    ))
+    return units
+
+
+class BoundaryInference:
+    """Inference for the BCE boundary detection model.
+
+    Applies sigmoid to per-frame boundary_head logits, thresholds to find
+    phone boundaries, and returns SegmentationUnit objects with timestamps.
+
+    Args:
+        model: Encoder network (must implement encode, points_by_frames, sampling_rate).
+        boundary_head: Linear(encoder_dim, 1) trained with BoundaryLoss.
+        device: Torch device string.
+        threshold: Sigmoid threshold for declaring a boundary (default 0.5).
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        boundary_head: nn.Module,
+        device: str = "cpu",
+        threshold: float = 0.5,
+    ) -> None:
+        self.net = model
+        self.boundary_head = boundary_head
+        self.threshold = threshold
+        self.device = device
+        self.net.to(self.device)
+        self.boundary_head.to(self.device)
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        speech,
+        speech_length,
+        **kwargs,
+    ) -> List[SegmentationUnit]:
+        """Segment a single utterance using boundary detection.
+
+        Args:
+            speech: (Length,) waveform tensor.
+            speech_length: int or scalar tensor, number of valid samples.
+        Returns:
+            List[SegmentationUnit]: phone segments with timestamps, label=0.
+        """
+        sp = speech[:int(speech_length)].unsqueeze(0).to(self.device)
+        splen_t = torch.as_tensor([int(speech_length)], device=self.device)
+        features, logit_lens = self.net.encode(sp, splen_t)
+        if isinstance(features, tuple):
+            features = features[0]
+        boundary_probs = torch.sigmoid(
+            self.boundary_head(features).squeeze(-1)
+        ).squeeze(0)
+        valid_len = int(logit_lens[0])
+        is_boundary = (boundary_probs[:valid_len] > self.threshold).tolist()
+        return _boundary_flags_to_units(self.net, is_boundary, valid_len)
+
+
+def build_boundary_inference(
+    net: nn.Module,
+    ckpt_path: str,
+    device: str = "cuda",
+    threshold: float = 0.5,
+) -> BoundaryInference:
+    """Build BoundaryInference with net and boundary_head loaded from a Lightning checkpoint.
+
+    Args:
+        net: Encoder network instance (uninitialised weights).
+        ckpt_path: Path to Lightning .ckpt file saved by SegmentationModel.
+        device: Torch device string.
+        threshold: Sigmoid threshold for boundary detection.
+    Returns:
+        BoundaryInference ready for inference.
+    """
+    state = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
+    net.load_state_dict(
+        {k[len("net."):]: v for k, v in state.items() if k.startswith("net.")},
+        strict=True,
+    )
+    boundary_head = nn.Linear(net.encoder_output_size(), 1)
+    boundary_head.load_state_dict(
+        {k[len("boundary_head."):]: v for k, v in state.items() if k.startswith("boundary_head.")},
+        strict=True,
+    )
+    return BoundaryInference(
+        model=net, boundary_head=boundary_head, device=device, threshold=threshold
+    )
+
+
 def build_segmentation_inference(
     net: nn.Module,
     ckpt_path: str,

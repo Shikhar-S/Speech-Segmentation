@@ -12,4 +12,7 @@ scheduler:
   total_iters: 100
   last_epoch: -1
 
+bce_weight: 0.0   # 0=FA only, 1=BCE only, in-between=combined
+pos_weight: 1.0   # BCEWithLogitsLoss positive-class weight
+
 net: ???

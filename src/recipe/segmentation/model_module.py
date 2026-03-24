@@ -13,8 +13,11 @@ from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
 
-from src.recipe.segmentation.segmentation_loss import SegmentationLoss
-from src.recipe.segmentation.inference import SegmentationInference
+from src.recipe.segmentation.segmentation_loss import BoundaryLoss, SegmentationLoss
+from src.recipe.segmentation.inference import (
+    SegmentationInference,
+    _boundary_flags_to_units,
+)
 from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 from src.utils import RankedLogger
 
@@ -41,6 +44,8 @@ class SegmentationModel(LightningModule):
         net: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
+        bce_weight: float = 0.0,
+        pos_weight: float = 1.0,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net"])
@@ -49,6 +54,10 @@ class SegmentationModel(LightningModule):
         self.evaluator = SegmentationEvaluator(tolerance_ms=20)
         self.encoder_dim = self.net.encoder_output_size()
         self.criterion = SegmentationLoss()
+        self.bce_weight = bce_weight
+        if bce_weight > 0:
+            self.boundary_head = nn.Linear(self.encoder_dim, 1)
+            self.boundary_criterion = BoundaryLoss(pos_weight=pos_weight)
 
         self.test_data = {}
         self.train_loss = MeanMetric()
@@ -59,8 +68,35 @@ class SegmentationModel(LightningModule):
     def forward(
         self, x: torch.Tensor, x_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return CTC logits and their lengths."""
-        return self.net.ctc_logits(x, x_lengths)
+        """Return encoder features and their lengths."""
+        features, lengths = self.net.encode(x, x_lengths)
+        if isinstance(features, tuple):
+            features = features[0]
+        return features, lengths
+
+    def _fa_loss(
+        self,
+        logits: torch.Tensor,
+        logit_len: torch.Tensor,
+        target: torch.Tensor,
+        t_start: torch.Tensor,
+        t_end: torch.Tensor,
+        t_len: torch.Tensor,
+    ) -> Dict:
+        """Forced alignment loss from CTC logits."""
+        return self.criterion(logits, logit_len, target, t_start, t_end, t_len)
+
+    def _bce_loss(
+        self,
+        features: torch.Tensor,
+        logit_len: torch.Tensor,
+        t_start: torch.Tensor,
+        t_len: torch.Tensor,
+    ) -> Dict:
+        """Boundary detection loss from encoder features."""
+        return self.boundary_criterion(
+            self.boundary_head(features).squeeze(-1), logit_len, t_start, t_len
+        )
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Shared step used by train/val/test."""
@@ -75,21 +111,46 @@ class SegmentationModel(LightningModule):
             target_start, target_end, self.net.points_by_frames()
         )
 
-        logits, logit_len = self(speech, lengths)
-        fa_loss = self.criterion(
+        # Guard: FA-only mode uses the public ctc_logits() API, which works for
+        # all model types (not all nets expose ctc.ctc_lo directly).
+        if self.bce_weight == 0.0:
+            logits, logit_len = self.net.ctc_logits(speech, lengths)
+            fa_out = self._fa_loss(logits, logit_len, target, target_start_idx, target_end_idx, target_len)
+            return {
+                "speech": speech, "speech_length": lengths,
+                "loss": fa_out["loss"], "accuracy": fa_out["accuracy"],
+                "fa_loss": fa_out["loss"], "bce_loss": None,
+                "target": target, "target_start": target_start,
+                "target_end": target_end, "target_length": target_len,
+                "logits": logits.detach(),
+            }
+
+        # BCE or combined: encode once, apply both heads as needed.
+        features, logit_len = self(speech, lengths)
+        logits = None if self.bce_weight == 1.0 else self.net.ctc.ctc_lo(features)
+        fa_out = {} if logits is None else self._fa_loss(
             logits, logit_len, target, target_start_idx, target_end_idx, target_len
         )
-        return {
+        bce_out = self._bce_loss(features, logit_len, target_start_idx, target_len)
+
+        loss = (1 - self.bce_weight) * fa_out.get("loss", 0) + self.bce_weight * bce_out["loss"]
+        result = {
             "speech": speech,
             "speech_length": lengths,
-            "loss": fa_loss["loss"],
-            "accuracy": fa_loss["accuracy"],
+            "loss": loss,
+            "accuracy": fa_out.get("accuracy", 0.0),
+            "fa_loss": fa_out.get("loss"),
+            "bce_loss": bce_out["loss"],
             "target": target,
             "target_start": target_start,
             "target_end": target_end,
-            "target_length": batch["target_length"],
-            "logits": logits.detach(),
+            "target_length": target_len,
+            "logits": logits.detach() if logits is not None else None,
         }
+        for k in ("precision", "recall", "f1", "rval"):
+            if k in bce_out:
+                result[k] = bce_out[k]
+        return result
 
     def on_before_optimizer_step(self, optimizer):
         norms = grad_norm(self, norm_type=2)
@@ -107,16 +168,15 @@ class SegmentationModel(LightningModule):
     ) -> torch.Tensor:
         out = self.model_step(batch)
         self.train_loss(out["loss"].detach())
-        self.log(
-            "train/accuracy",
-            out["accuracy"],
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        self.log(
-            "train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True
-        )
+        self.log("train/accuracy", out["accuracy"], on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
+        if out["fa_loss"] is not None:
+            self.log("train/fa_loss", out["fa_loss"].detach(), on_step=True, on_epoch=True)
+        if out["bce_loss"] is not None:
+            self.log("train/bce_loss", out["bce_loss"].detach(), on_step=True, on_epoch=True)
+        for k in ("precision", "recall", "f1", "rval"):
+            if k in out:
+                self.log(f"train/{k}", out[k], on_step=True, on_epoch=True)
         return out["loss"]
 
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
@@ -126,6 +186,9 @@ class SegmentationModel(LightningModule):
             "val/accuracy", out["accuracy"], on_step=False, on_epoch=True, prog_bar=True
         )
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        for k in ("precision", "recall", "f1", "rval"):
+            if k in out:
+                self.log(f"val/{k}", out[k], on_step=False, on_epoch=True, prog_bar=(k == "f1"))
 
     def on_validation_epoch_end(self) -> None:
         loss = self.val_loss.compute()
@@ -172,50 +235,56 @@ class SegmentationModel(LightningModule):
     def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         out = self.model_step(batch)
         self.test_loss(out["loss"].detach())
-        accuracy = out["accuracy"]
+        self.log("test/accuracy", out["accuracy"], on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        self.log("test/accuracy", accuracy, on_step=False, on_epoch=True, prog_bar=True)
-        self.log(
-            "test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True
-        )
-
-        pred_alignments = self._align(
-            out["speech"],
-            out["speech_length"],
-            out["target"],
-            out["target_length"],
-        )
         KEY_PREFIX = f"batch_{batch_idx}_utt"
-        pred_dict = {f"{KEY_PREFIX}{i}": ali for i, ali in enumerate(pred_alignments)}
         gt_dict = self._build_gt_alignments(out, key_prefix=KEY_PREFIX)
-        # store for epoch
-        if self.test_data:
-            self.test_data["predictions"].update(pred_dict)
-            self.test_data["ground_truth"].update(gt_dict)
-        else:
-            self.test_data = {"predictions": pred_dict, "ground_truth": gt_dict}
+
+        # CTC-based eval: FA + greedy (only when CTC head was trained)
+        if self.bce_weight < 1.0:
+            fa_preds = self._align(
+                out["speech"], out["speech_length"],
+                out["target"], out["target_length"],
+            )
+            greedy_preds = self._greedy_align(
+                out["speech"], out["speech_length"],
+            )
+            for mode, preds in [("fa", fa_preds), ("greedy", greedy_preds)]:
+                pred_dict = {f"{KEY_PREFIX}{i}": ali for i, ali in enumerate(preds)}
+                self.test_data[mode]["predictions"].update(pred_dict)
+                self.test_data[mode]["ground_truth"].update(gt_dict)
+
+        # Boundary eval (only when boundary_head was trained)
+        if self.bce_weight > 0.0:
+            bnd_preds = self._boundary_align(
+                out["speech"], out["speech_length"],
+            )
+            pred_dict = {f"{KEY_PREFIX}{i}": ali for i, ali in enumerate(bnd_preds)}
+            self.test_data["boundary"]["predictions"].update(pred_dict)
+            self.test_data["boundary"]["ground_truth"].update(gt_dict)
 
     def on_test_start(self):
-        self.test_data = {}  # clear
+        self.test_data = {
+            mode: {"predictions": {}, "ground_truth": {}}
+            for mode in ("fa", "greedy", "boundary")
+        }
 
     def on_test_epoch_end(self):
-        fa_results = self.evaluator.evaluate_batch(
-            self.test_data["predictions"], self.test_data["ground_truth"]
-        )
-        # Relevant metrics
         LOG_METRICS = [
-            "f1",
-            "precision",
-            "recall",
-            "pbe_median",
-            "start_err_median",
-            "end_err_median",
-            "dur_err_median",
-            "pred_dur_mean",
-            "gt_dur_mean",
+            "f1", "precision", "recall", "pbe_median",
+            "start_err_median", "end_err_median",
+            "dur_err_median", "pred_dur_mean", "gt_dur_mean",
         ]
-        for metric in LOG_METRICS:
-            self.log(f"{metric}", self.evaluator._get_metric(fa_results, metric, 0.0))
+        for mode in ("fa", "greedy", "boundary"):
+            preds = self.test_data[mode]["predictions"]
+            if not preds:
+                continue
+            gt = self.test_data[mode]["ground_truth"]
+            results = self.evaluator.evaluate_batch(preds, gt)
+            for metric in LOG_METRICS:
+                val = self.evaluator._get_metric(results, metric, 0.0)
+                self.log(f"{mode}/{metric}", val)
 
     def _align(
         self, speech, speech_length, text, text_length
@@ -243,6 +312,39 @@ class SegmentationModel(LightningModule):
             )
             predicted_alignments.append(alignment_result)
         return predicted_alignments
+
+    def _greedy_align(
+        self, speech, speech_length,
+    ) -> List[List[SegmentationUnit]]:
+        """Greedy CTC decode for a batch (no text input needed)."""
+        return [
+            SegmentationInference.greedy_decode(
+                self.net, sp, splen, device=self.device,
+            )
+            for sp, splen in zip(speech, speech_length)
+        ]
+
+    @torch.no_grad()
+    def _boundary_align(
+        self, speech, speech_length,
+    ) -> List[List[SegmentationUnit]]:
+        """Boundary detection alignment for a batch."""
+        results: List[List[SegmentationUnit]] = []
+        for sp, splen in zip(speech, speech_length):
+            sp_b = sp[:int(splen)].unsqueeze(0).to(self.device)
+            splen_t = torch.as_tensor([int(splen)], device=self.device)
+            features, logit_lens = self.net.encode(sp_b, splen_t)
+            if isinstance(features, tuple):
+                features = features[0]
+            probs = torch.sigmoid(
+                self.boundary_head(features).squeeze(-1)
+            ).squeeze(0)
+            valid_len = int(logit_lens[0])
+            flags = (probs[:valid_len] > 0.5).tolist()
+            results.append(
+                _boundary_flags_to_units(self.net, flags, valid_len)
+            )
+        return results
 
     def predict_step(
         self,
