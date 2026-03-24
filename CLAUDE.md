@@ -161,6 +161,10 @@ Key rules:
 - **Docstring coverage:** 80% minimum (interrogate)
 - Config files use YAML with `_target_` for Hydra `instantiate()` calls
 
+## Experiment Log
+
+BCE segmentation experiment results and run paths: [`exp/experiment_log.md`](exp/experiment_log.md)
+
 ## Cluster / Job Submission
 
 SLURM batch scripts: `scripts/daixpr.batch`, `scripts/deltaxpr.batch`
