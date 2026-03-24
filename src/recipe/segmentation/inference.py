@@ -216,6 +216,7 @@ class BoundaryInference:
         resolution: int = 1,
         device: str = "cpu",
         threshold: float = 0.5,
+        audio_sr: int = 16000,
     ) -> None:
         self.net = model
         self.boundary_head = boundary_head
@@ -223,6 +224,7 @@ class BoundaryInference:
         self.resolution = resolution
         self.threshold = threshold
         self.device = device
+        self.audio_sr = audio_sr
         self.net.to(self.device)
         self.boundary_head.to(self.device)
         self.upsample.to(self.device)
@@ -258,7 +260,7 @@ class BoundaryInference:
         is_boundary = (boundary_probs[:valid_len] > self.threshold).tolist()
         pbf = self.net.points_by_frames() / self.resolution
         return _boundary_flags_to_units(
-            is_boundary, valid_len, pbf, self.net.sampling_rate,
+            is_boundary, valid_len, pbf, self.audio_sr,
         )
 
 
@@ -280,7 +282,9 @@ def build_boundary_inference(
     """
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     state = ckpt["state_dict"]
-    resolution = ckpt.get("hyper_parameters", {}).get("resolution", 1)
+    hparams = ckpt.get("hyper_parameters", {})
+    resolution = hparams.get("resolution", 1)
+    audio_sr = hparams.get("audio_sr", 16000)
     D = net.encoder_output_size()
 
     net.load_state_dict(
@@ -300,6 +304,7 @@ def build_boundary_inference(
     return BoundaryInference(
         model=net, boundary_head=boundary_head, upsample=upsample,
         resolution=resolution, device=device, threshold=threshold,
+        audio_sr=audio_sr,
     )
 
 

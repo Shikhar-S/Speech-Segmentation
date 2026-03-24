@@ -47,11 +47,13 @@ class SegmentationModel(LightningModule):
         bce_weight: float = 0.0,
         pos_weight: float = 1.0,
         resolution: int = 1,
+        audio_sr: int = 16000,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net"])
 
         self.net = net
+        self.audio_sr = audio_sr
         self.evaluator = SegmentationEvaluator(tolerance_ms=20)
         self.encoder_dim = self.net.encoder_output_size()
         self.criterion = SegmentationLoss()
@@ -138,7 +140,7 @@ class SegmentationModel(LightningModule):
         then delegates to the evaluator for proper boundary matching.
         """
         pbf = self.effective_pbf
-        sr = self.net.sampling_rate
+        sr = self.audio_sr
         preds_dict, gt_dict = {}, {}
         B = boundary_logits.shape[0]
         for b in range(B):
@@ -295,8 +297,8 @@ class SegmentationModel(LightningModule):
                     continue
                 segs.append(
                     SegmentationUnit(
-                        start=float(s.item()) / self.net.sampling_rate,
-                        end=float(e.item()) / self.net.sampling_rate,
+                        start=float(s.item()) / self.audio_sr,
+                        end=float(e.item()) / self.audio_sr,
                         label=int(lab.item()),
                     )
                 )
@@ -401,7 +403,7 @@ class SegmentationModel(LightningModule):
     ) -> List[List[SegmentationUnit]]:
         """Boundary detection alignment for a batch."""
         pbf = self.effective_pbf
-        sr = self.net.sampling_rate
+        sr = self.audio_sr
         results: List[List[SegmentationUnit]] = []
         for sp, splen in zip(speech, speech_length):
             sp_b = sp[:int(splen)].unsqueeze(0).to(self.device)

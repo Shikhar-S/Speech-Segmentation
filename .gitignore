@@ -155,6 +155,7 @@ configs/local/default.yaml
 /data/
 **/logs/
 /exp/
+!/exp/experiment_log.md
 .env
 
 # Aim logging

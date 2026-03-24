@@ -75,7 +75,7 @@ def _make_batch(B=2, T_speech=6400, T_phones=4):
     }
 
 
-def _make_model(bce_weight=0.0, pos_weight=1.0, resolution=1):
+def _make_model(bce_weight=0.0, pos_weight=1.0, resolution=1, audio_sr=16000):
     return SegmentationModel(
         net=DummyNet(),
         optimizer=torch.optim.Adam,
@@ -83,6 +83,7 @@ def _make_model(bce_weight=0.0, pos_weight=1.0, resolution=1):
         bce_weight=bce_weight,
         pos_weight=pos_weight,
         resolution=resolution,
+        audio_sr=audio_sr,
     )
 
 
