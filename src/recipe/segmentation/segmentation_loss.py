@@ -1,8 +1,5 @@
-import math
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from typing import Dict, Optional
 
 
@@ -122,27 +119,4 @@ class BoundaryLoss(nn.Module):
         frame_mask = s_idx < logit_lens.unsqueeze(1)
 
         loss = (self.bce(boundary_logits, labels) * frame_mask).sum() / frame_mask.sum().clamp_min(1)
-
-        with torch.no_grad():
-            preds = (boundary_logits > 0) & frame_mask
-            # Dilate GT by ±1 frame for tolerance (~20-40 ms).
-            dilated_gt = F.max_pool1d(
-                labels.unsqueeze(1), kernel_size=3, stride=1, padding=1
-            ).squeeze(1).bool() & frame_mask
-            tp = (preds & dilated_gt).sum().float()
-            precision = tp / preds.sum().float().clamp_min(1)
-            gt_count = ((labels > 0) & frame_mask).sum().float().clamp_min(1)
-            recall = tp / gt_count
-            f1 = 2 * precision * recall / (precision + recall).clamp_min(1e-8)
-            os = recall / precision.clamp_min(1e-8) - 1
-            r1 = ((1 - recall) ** 2 + os ** 2).sqrt()
-            r2 = (-os + recall - 1) / math.sqrt(2)
-            rval = 1 - (r1.abs() + r2.abs()) / 2
-
-        return {
-            "loss": loss,
-            "precision": precision.item(),
-            "recall": recall.item(),
-            "f1": f1.item(),
-            "rval": rval.item(),
-        }
+        return {"loss": loss}

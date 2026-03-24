@@ -94,9 +94,50 @@ class SegmentationModel(LightningModule):
         t_len: torch.Tensor,
     ) -> Dict:
         """Boundary detection loss from encoder features."""
-        return self.boundary_criterion(
-            self.boundary_head(features).squeeze(-1), logit_len, t_start, t_len
-        )
+        boundary_logits = self.boundary_head(features).squeeze(-1)
+        out = self.boundary_criterion(boundary_logits, logit_len, t_start, t_len)
+        out["boundary_logits"] = boundary_logits
+        return out
+
+    def _boundary_metrics(
+        self,
+        boundary_logits: torch.Tensor,
+        logit_len: torch.Tensor,
+        target_start_idx: torch.Tensor,
+        target_len: torch.Tensor,
+    ) -> Dict[str, float]:
+        """Compute boundary-level P/R/F1/Rval using SegmentationEvaluator.
+
+        Converts frame predictions and GT to SegmentationUnit segments,
+        then delegates to the evaluator for proper boundary matching.
+        """
+        pbf = self.net.points_by_frames()
+        sr = self.net.sampling_rate
+        preds_dict, gt_dict = {}, {}
+        B = boundary_logits.shape[0]
+        for b in range(B):
+            vlen = int(logit_len[b])
+            # Predicted boundaries: convert frame flags to segments
+            flags = (boundary_logits[b, :vlen] > 0).tolist()
+            pred_units = _boundary_flags_to_units(self.net, flags, vlen)
+            # GT boundaries: build segments from start frame indices
+            n_phones = int(target_len[b])
+            starts = target_start_idx[b, :n_phones].tolist()
+            gt_units = []
+            for i in range(n_phones):
+                s = starts[i]
+                e = starts[i + 1] if i + 1 < n_phones else vlen
+                gt_units.append(SegmentationUnit(
+                    start=s * pbf / sr, end=e * pbf / sr, label=0,
+                ))
+            key = str(b)
+            preds_dict[key] = pred_units
+            gt_dict[key] = gt_units
+        results = self.evaluator.evaluate_batch(preds_dict, gt_dict)
+        return {
+            k: self.evaluator._get_metric(results, k, 0.0)
+            for k in ("precision", "recall", "f1", "rval")
+        }
 
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Shared step used by train/val/test."""
@@ -147,9 +188,12 @@ class SegmentationModel(LightningModule):
             "target_length": target_len,
             "logits": logits.detach() if logits is not None else None,
         }
-        for k in ("precision", "recall", "f1", "rval"):
-            if k in bce_out:
-                result[k] = bce_out[k]
+        with torch.no_grad():
+            bnd_metrics = self._boundary_metrics(
+                bce_out["boundary_logits"].detach(),
+                logit_len, target_start_idx, target_len,
+            )
+        result.update(bnd_metrics)
         return result
 
     def on_before_optimizer_step(self, optimizer):
