@@ -31,13 +31,13 @@ trainer:
 
 callbacks:
   model_checkpoint:
-    monitor: val/loss
-    mode: min
+    monitor: val/rval
+    mode: max
     filename: step_{step:06d}
     save_last: true
   early_stopping:
-    monitor: val/loss
-    mode: min
+    monitor: val/rval
+    mode: max
     patience: 100
 
 model:
