@@ -46,6 +46,7 @@ class SegmentationModel(LightningModule):
         scheduler: torch.optim.lr_scheduler,
         bce_weight: float = 0.0,
         pos_weight: float = 1.0,
+        resolution: int = 1,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net"])
@@ -55,6 +56,11 @@ class SegmentationModel(LightningModule):
         self.encoder_dim = self.net.encoder_output_size()
         self.criterion = SegmentationLoss()
         self.bce_weight = bce_weight
+        assert resolution >= 1 and isinstance(resolution, int), (
+            f"resolution must be a positive integer, got {resolution}"
+        )
+        self.resolution = resolution
+        self.upsample = nn.Linear(self.encoder_dim, self.encoder_dim * resolution)
         if bce_weight > 0:
             self.boundary_head = nn.Linear(self.encoder_dim, 1)
             self.boundary_criterion = BoundaryLoss(pos_weight=pos_weight)
@@ -65,6 +71,25 @@ class SegmentationModel(LightningModule):
         self.test_loss = MeanMetric()
         self.val_loss_best = MinMetric()
 
+    @property
+    def effective_pbf(self) -> float:
+        """Points per frame after upsampling."""
+        return self.net.points_by_frames() / self.resolution
+
+    def _upsample_features(
+        self, features: torch.Tensor, lengths: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Upsample encoder features by self.resolution.
+
+        Linear projects (B, T, D) → (B, T, D*R), then reshapes to
+        (B, T*R, D) so embedding [a, b] becomes [a, a_1, b, b_1].
+        """
+        B, T, D = features.shape
+        R = self.resolution
+        # (B, T, D) → (B, T, D*R) → (B, T, R, D) → (B, T*R, D)
+        features = self.upsample(features).view(B, T, R, D).reshape(B, T * R, D)
+        return features, lengths * R
+
     def forward(
         self, x: torch.Tensor, x_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -72,6 +97,7 @@ class SegmentationModel(LightningModule):
         features, lengths = self.net.encode(x, x_lengths)
         if isinstance(features, tuple):
             features = features[0]
+        features, lengths = self._upsample_features(features, lengths)
         return features, lengths
 
     def _fa_loss(
@@ -111,7 +137,7 @@ class SegmentationModel(LightningModule):
         Converts frame predictions and GT to SegmentationUnit segments,
         then delegates to the evaluator for proper boundary matching.
         """
-        pbf = self.net.points_by_frames()
+        pbf = self.effective_pbf
         sr = self.net.sampling_rate
         preds_dict, gt_dict = {}, {}
         B = boundary_logits.shape[0]
@@ -119,7 +145,7 @@ class SegmentationModel(LightningModule):
             vlen = int(logit_len[b])
             # Predicted boundaries: convert frame flags to segments
             flags = (boundary_logits[b, :vlen] > 0).tolist()
-            pred_units = _boundary_flags_to_units(self.net, flags, vlen)
+            pred_units = _boundary_flags_to_units(flags, vlen, pbf, sr)
             # GT boundaries: build segments from start frame indices
             n_phones = int(target_len[b])
             starts = target_start_idx[b, :n_phones].tolist()
@@ -149,13 +175,14 @@ class SegmentationModel(LightningModule):
         target_len = batch["target_length"]
 
         target_start_idx, target_end_idx = convert_pointstamps_to_frame_indices(
-            target_start, target_end, self.net.points_by_frames()
+            target_start, target_end, self.effective_pbf,
         )
 
         # Guard: FA-only mode uses the public ctc_logits() API, which works for
         # all model types (not all nets expose ctc.ctc_lo directly).
         if self.bce_weight == 0.0:
-            logits, logit_len = self.net.ctc_logits(speech, lengths)
+            features, logit_len = self(speech, lengths)
+            logits = self.net.ctc.ctc_lo(features)
             fa_out = self._fa_loss(logits, logit_len, target, target_start_idx, target_end_idx, target_len)
             return {
                 "speech": speech, "speech_length": lengths,
@@ -373,20 +400,20 @@ class SegmentationModel(LightningModule):
         self, speech, speech_length,
     ) -> List[List[SegmentationUnit]]:
         """Boundary detection alignment for a batch."""
+        pbf = self.effective_pbf
+        sr = self.net.sampling_rate
         results: List[List[SegmentationUnit]] = []
         for sp, splen in zip(speech, speech_length):
             sp_b = sp[:int(splen)].unsqueeze(0).to(self.device)
             splen_t = torch.as_tensor([int(splen)], device=self.device)
-            features, logit_lens = self.net.encode(sp_b, splen_t)
-            if isinstance(features, tuple):
-                features = features[0]
+            features, logit_lens = self(sp_b, splen_t)
             probs = torch.sigmoid(
                 self.boundary_head(features).squeeze(-1)
             ).squeeze(0)
             valid_len = int(logit_lens[0])
             flags = (probs[:valid_len] > 0.5).tolist()
             results.append(
-                _boundary_flags_to_units(self.net, flags, valid_len)
+                _boundary_flags_to_units(flags, valid_len, pbf, sr)
             )
         return results
 

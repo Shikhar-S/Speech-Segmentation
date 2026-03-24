@@ -75,13 +75,14 @@ def _make_batch(B=2, T_speech=6400, T_phones=4):
     }
 
 
-def _make_model(bce_weight=0.0, pos_weight=1.0):
+def _make_model(bce_weight=0.0, pos_weight=1.0, resolution=1):
     return SegmentationModel(
         net=DummyNet(),
         optimizer=torch.optim.Adam,
         scheduler=None,
         bce_weight=bce_weight,
         pos_weight=pos_weight,
+        resolution=resolution,
     )
 
 
@@ -181,3 +182,22 @@ def test_test_step_combined():
     assert len(model.test_data["fa"]["predictions"]) > 0
     assert len(model.test_data["greedy"]["predictions"]) > 0
     assert len(model.test_data["boundary"]["predictions"]) > 0
+
+
+def test_upsample_resolution_2():
+    """resolution=2: features double in time, effective_pbf halves."""
+    model = _make_model(bce_weight=1.0, resolution=2)
+    assert model.effective_pbf == DummyNet.POINTS / 2
+    assert hasattr(model, "upsample")
+    out = model.model_step(_make_batch())
+    assert torch.isfinite(out["loss"])
+
+
+def test_upsample_backward():
+    """resolution=2: backward pass produces finite gradients on upsample."""
+    model = _make_model(bce_weight=1.0, resolution=2)
+    out = model.model_step(_make_batch())
+    out["loss"].backward()
+    assert model.upsample.weight.grad is not None
+    assert model.upsample.weight.grad.isfinite().all()
+    assert model.boundary_head.weight.grad is not None

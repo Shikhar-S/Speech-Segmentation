@@ -158,18 +158,21 @@ class SegmentationInference:
         return SegmentationInference.post_process_alignments(self.net, labels)
 
 
-def _boundary_flags_to_units(net, is_boundary, valid_len) -> List[SegmentationUnit]:
+def _boundary_flags_to_units(
+    is_boundary, valid_len, points_by_frames, sampling_rate,
+) -> List[SegmentationUnit]:
     """Convert per-frame boundary flags to SegmentationUnit segments.
 
     Args:
-        net: The encoder model (provides points_by_frames and sampling_rate).
         is_boundary: List[bool] of length valid_len; True marks a phone start.
         valid_len: Number of valid (non-padded) frames.
+        points_by_frames: Number of audio samples per frame.
+        sampling_rate: Audio sampling rate in Hz.
     Returns:
         List[SegmentationUnit] with label=0 (no phone-class info in BCE mode).
     """
-    points = net.points_by_frames()
-    sr = net.sampling_rate
+    points = points_by_frames
+    sr = sampling_rate
     units: List[SegmentationUnit] = []
     start = 0
     for i in range(1, valid_len):
@@ -195,8 +198,12 @@ class BoundaryInference:
     phone boundaries, and returns SegmentationUnit objects with timestamps.
 
     Args:
-        model: Encoder network (must implement encode, points_by_frames, sampling_rate).
+        model: Encoder network (must implement encode, points_by_frames,
+            sampling_rate, encoder_output_size).
         boundary_head: Linear(encoder_dim, 1) trained with BoundaryLoss.
+        upsample: Linear(encoder_dim, encoder_dim * resolution) for temporal
+            upsampling. Always present (resolution=1 is identity reshape).
+        resolution: Temporal upsample factor.
         device: Torch device string.
         threshold: Sigmoid threshold for declaring a boundary (default 0.5).
     """
@@ -205,15 +212,20 @@ class BoundaryInference:
         self,
         model: nn.Module,
         boundary_head: nn.Module,
+        upsample: nn.Module,
+        resolution: int = 1,
         device: str = "cpu",
         threshold: float = 0.5,
     ) -> None:
         self.net = model
         self.boundary_head = boundary_head
+        self.upsample = upsample
+        self.resolution = resolution
         self.threshold = threshold
         self.device = device
         self.net.to(self.device)
         self.boundary_head.to(self.device)
+        self.upsample.to(self.device)
 
     @torch.no_grad()
     def __call__(
@@ -235,12 +247,19 @@ class BoundaryInference:
         features, logit_lens = self.net.encode(sp, splen_t)
         if isinstance(features, tuple):
             features = features[0]
+        B, T, D = features.shape
+        R = self.resolution
+        features = self.upsample(features).view(B, T, R, D).reshape(B, T * R, D)
+        logit_lens = logit_lens * R
         boundary_probs = torch.sigmoid(
             self.boundary_head(features).squeeze(-1)
         ).squeeze(0)
         valid_len = int(logit_lens[0])
         is_boundary = (boundary_probs[:valid_len] > self.threshold).tolist()
-        return _boundary_flags_to_units(self.net, is_boundary, valid_len)
+        pbf = self.net.points_by_frames() / self.resolution
+        return _boundary_flags_to_units(
+            is_boundary, valid_len, pbf, self.net.sampling_rate,
+        )
 
 
 def build_boundary_inference(
@@ -249,7 +268,7 @@ def build_boundary_inference(
     device: str = "cuda",
     threshold: float = 0.5,
 ) -> BoundaryInference:
-    """Build BoundaryInference with net and boundary_head loaded from a Lightning checkpoint.
+    """Build BoundaryInference with net, boundary_head, and upsample loaded from checkpoint.
 
     Args:
         net: Encoder network instance (uninitialised weights).
@@ -259,18 +278,28 @@ def build_boundary_inference(
     Returns:
         BoundaryInference ready for inference.
     """
-    state = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state = ckpt["state_dict"]
+    resolution = ckpt.get("hyper_parameters", {}).get("resolution", 1)
+    D = net.encoder_output_size()
+
     net.load_state_dict(
         {k[len("net."):]: v for k, v in state.items() if k.startswith("net.")},
         strict=True,
     )
-    boundary_head = nn.Linear(net.encoder_output_size(), 1)
+    boundary_head = nn.Linear(D, 1)
     boundary_head.load_state_dict(
         {k[len("boundary_head."):]: v for k, v in state.items() if k.startswith("boundary_head.")},
         strict=True,
     )
+    upsample = nn.Linear(D, D * resolution)
+    upsample.load_state_dict(
+        {k[len("upsample."):]: v for k, v in state.items() if k.startswith("upsample.")},
+        strict=True,
+    )
     return BoundaryInference(
-        model=net, boundary_head=boundary_head, device=device, threshold=threshold
+        model=net, boundary_head=boundary_head, upsample=upsample,
+        resolution=resolution, device=device, threshold=threshold,
     )
 
 

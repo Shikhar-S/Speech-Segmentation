@@ -14,5 +14,6 @@ scheduler:
 
 bce_weight: 0.0   # 0=FA only, 1=BCE only, in-between=combined
 pos_weight: 1.0   # BCEWithLogitsLoss positive-class weight
+resolution: 1     # temporal upsample factor (2 = 10ms frames from 20ms)
 
 net: ???
