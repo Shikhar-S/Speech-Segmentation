@@ -1,5 +1,8 @@
+import math
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import Dict, Optional
 
 
@@ -64,3 +67,82 @@ class SegmentationLoss(nn.Module):
         acc = is_correct.sum() / valid_frames.sum().clamp_min(1)
 
         return {"loss": loss, "accuracy": acc.item()}
+
+
+class BoundaryLoss(nn.Module):
+    """Masked BCE loss that predicts phone boundary frames.
+
+    A boundary label of 1 is placed at the start frame of every phone
+    (equivalent to all phone-to-phone transitions plus the utterance start).
+    All padding frames are excluded from the loss.
+
+    Args:
+        pos_weight: Weight for the positive (boundary) class. Increase to
+            penalise missed boundaries more heavily (default: 1.0).
+    """
+
+    def __init__(self, pos_weight: float = 1.0) -> None:
+        super().__init__()
+        self.bce = nn.BCEWithLogitsLoss(
+            reduction="none",
+            pos_weight=torch.tensor([pos_weight]),
+        )
+
+    def forward(
+        self,
+        boundary_logits: torch.Tensor,
+        logit_lens: torch.Tensor,
+        target_start_idx: torch.Tensor,
+        t_lens: Optional[torch.Tensor] = None,
+    ) -> Dict:
+        """Compute masked BCE boundary loss.
+
+        Args:
+            boundary_logits: (B, S) – raw per-frame boundary scores.
+            logit_lens: (B,) – valid frame counts (padding is ignored).
+            target_start_idx: (B, T) – start frame index of each phone.
+            t_lens: (B,) – number of valid phones per utterance.
+
+        Returns:
+            Dict with key "loss": scalar loss tensor.
+        """
+        B, S = boundary_logits.shape
+        T = target_start_idx.shape[1]
+
+        t_idx = torch.arange(T, device=boundary_logits.device).unsqueeze(0)
+        valid_t = t_idx < (t_lens.unsqueeze(1) if t_lens is not None else T)
+        in_range = (target_start_idx >= 0) & (target_start_idx < S)
+        scatter_mask = (valid_t & in_range).float()
+
+        labels = torch.zeros(B, S, device=boundary_logits.device)
+        labels.scatter_add_(1, target_start_idx.clamp(0, S - 1), scatter_mask)
+        labels.clamp_(max=1.0)
+
+        s_idx = torch.arange(S, device=boundary_logits.device).unsqueeze(0)
+        frame_mask = s_idx < logit_lens.unsqueeze(1)
+
+        loss = (self.bce(boundary_logits, labels) * frame_mask).sum() / frame_mask.sum().clamp_min(1)
+
+        with torch.no_grad():
+            preds = (boundary_logits > 0) & frame_mask
+            # Dilate GT by ±1 frame for tolerance (~20-40 ms).
+            dilated_gt = F.max_pool1d(
+                labels.unsqueeze(1), kernel_size=3, stride=1, padding=1
+            ).squeeze(1).bool() & frame_mask
+            tp = (preds & dilated_gt).sum().float()
+            precision = tp / preds.sum().float().clamp_min(1)
+            gt_count = ((labels > 0) & frame_mask).sum().float().clamp_min(1)
+            recall = tp / gt_count
+            f1 = 2 * precision * recall / (precision + recall).clamp_min(1e-8)
+            os = recall / precision.clamp_min(1e-8) - 1
+            r1 = ((1 - recall) ** 2 + os ** 2).sqrt()
+            r2 = (-os + recall - 1) / math.sqrt(2)
+            rval = 1 - (r1.abs() + r2.abs()) / 2
+
+        return {
+            "loss": loss,
+            "precision": precision.item(),
+            "recall": recall.item(),
+            "f1": f1.item(),
+            "rval": rval.item(),
+        }
