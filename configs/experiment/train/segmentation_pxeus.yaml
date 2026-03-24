@@ -31,12 +31,12 @@ trainer:
 
 callbacks:
   model_checkpoint:
-    monitor: val/accuracy
+    monitor: val/rval
     mode: max
     filename: step_{step:06d}
     save_last: true
   early_stopping:
-    monitor: val/accuracy
+    monitor: val/rval
     mode: max
     patience: 100
 

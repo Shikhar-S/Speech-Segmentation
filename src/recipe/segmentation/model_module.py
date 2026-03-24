@@ -38,6 +38,24 @@ def convert_pointstamps_to_frame_indices(
     return start_idx, end_idx
 
 
+def _ctc_boundary_flags(
+    logits: torch.Tensor, valid_len: int, blank_id: int,
+) -> List[bool]:
+    """Derive boundary flags from CTC frame logits.
+
+    A boundary at frame i means a new non-blank phone starts there.
+    """
+    labels = logits[:valid_len].argmax(dim=-1).tolist()
+    flags = [False] * valid_len
+    prev = blank_id
+    for i, lab in enumerate(labels):
+        if lab != blank_id and lab != prev:
+            flags[i] = True
+        if lab != blank_id:
+            prev = lab
+    return flags
+
+
 class SegmentationModel(LightningModule):
     def __init__(
         self,
@@ -167,6 +185,45 @@ class SegmentationModel(LightningModule):
             for k in ("precision", "recall", "f1", "rval")
         }
 
+    def _ctc_boundary_metrics(
+        self,
+        logits: torch.Tensor,
+        logit_len: torch.Tensor,
+        target_start_idx: torch.Tensor,
+        target_len: torch.Tensor,
+    ) -> Dict[str, float]:
+        """Boundary P/R/F1/Rval derived from CTC greedy decode.
+
+        Phone transitions in the argmax sequence are treated as
+        predicted boundaries.
+        """
+        pbf = self.effective_pbf
+        sr = self.audio_sr
+        blank = self.net.get_blank_id()
+        preds_dict, gt_dict = {}, {}
+        for b in range(logits.shape[0]):
+            vlen = int(logit_len[b])
+            flags = _ctc_boundary_flags(logits[b], vlen, blank)
+            pred_units = _boundary_flags_to_units(flags, vlen, pbf, sr)
+            n = int(target_len[b])
+            starts = target_start_idx[b, :n].tolist()
+            gt_units = [
+                SegmentationUnit(
+                    start=starts[i] * pbf / sr,
+                    end=(starts[i + 1] if i + 1 < n else vlen)
+                    * pbf / sr,
+                    label=0,
+                )
+                for i in range(n)
+            ]
+            preds_dict[str(b)] = pred_units
+            gt_dict[str(b)] = gt_units
+        results = self.evaluator.evaluate_batch(preds_dict, gt_dict)
+        return {
+            k: self.evaluator._get_metric(results, k, 0.0)
+            for k in ("precision", "recall", "f1", "rval")
+        }
+
     def model_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Shared step used by train/val/test."""
         speech = batch["speech"]
@@ -185,8 +242,11 @@ class SegmentationModel(LightningModule):
         if self.bce_weight == 0.0:
             features, logit_len = self(speech, lengths)
             logits = self.net.ctc.ctc_lo(features)
-            fa_out = self._fa_loss(logits, logit_len, target, target_start_idx, target_end_idx, target_len)
-            return {
+            fa_out = self._fa_loss(
+                logits, logit_len, target,
+                target_start_idx, target_end_idx, target_len,
+            )
+            result = {
                 "speech": speech, "speech_length": lengths,
                 "loss": fa_out["loss"], "accuracy": fa_out["accuracy"],
                 "fa_loss": fa_out["loss"], "bce_loss": None,
@@ -194,6 +254,13 @@ class SegmentationModel(LightningModule):
                 "target_end": target_end, "target_length": target_len,
                 "logits": logits.detach(),
             }
+            with torch.no_grad():
+                bnd = self._ctc_boundary_metrics(
+                    logits.detach(), logit_len,
+                    target_start_idx, target_len,
+                )
+            result.update(bnd)
+            return result
 
         # BCE or combined: encode once, apply both heads as needed.
         features, logit_len = self(speech, lengths)

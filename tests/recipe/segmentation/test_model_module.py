@@ -99,6 +99,8 @@ def test_fa_only_no_boundary_head():
     assert out["bce_loss"] is None
     assert out["fa_loss"] is not None
     assert torch.isfinite(out["loss"])
+    assert "rval" in out
+    assert out["rval"] is not None
 
 
 def test_bce_only_no_fa_computed():

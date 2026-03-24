@@ -24,7 +24,7 @@ trainer:
   max_epochs: -1
   max_steps: 5000
   gradient_clip_val: 1.0
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 16
   val_check_interval: 125
   check_val_every_n_epoch: null
   log_every_n_steps: 100
@@ -47,8 +47,9 @@ model:
     lr: 0.0001
 
 data:
-  batch_size: 32
+  batch_size: 8
   target_sr: 32000
+  max_speech_length: 8  # seconds; caps outlier utterances to prevent OOM at 32kHz
   hf_repo: changelinglab/timit-segment
 
 logger:
