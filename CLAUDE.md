@@ -165,6 +165,24 @@ Key rules:
 
 BCE segmentation experiment results and run paths: [`exp/experiment_log.md`](exp/experiment_log.md)
 
+## Experimentation Workflow
+
+When running experiments (training, inference, evaluation):
+
+1. **Use `/loop` to monitor SLURM jobs.** After submitting jobs, set up a recurring check (e.g. `/loop 5m check job status`) that:
+   - Polls `sacct -j <JOB_ID>` for completion/failure
+   - On failure: reads SLURM logs (`exp/slurm_logs/<jobid>_*.out`), diagnoses the error, fixes the code, resubmits
+   - On success: proceeds to the next step (inference after training, evaluation after inference)
+   - Stops looping once the pipeline is complete
+
+2. **Maintain `exp/experiment_log.md`.** After every experiment round:
+   - Record run directories, SLURM job IDs, configs used, and key hyperparameters
+   - Record evaluation results with the full comparison table
+   - Note any code changes or bug fixes applied during the run
+   - Commit the updated log
+
+3. **Pipeline order:** train → monitor → inference (all datasets) → evaluate → log results → compare with prior rounds
+
 ## Cluster / Job Submission
 
 SLURM batch scripts: `scripts/daixpr.batch`, `scripts/deltaxpr.batch`
