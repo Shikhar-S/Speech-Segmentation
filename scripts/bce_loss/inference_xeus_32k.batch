@@ -1,0 +1,26 @@
+#!/bin/bash
+#SBATCH -A bbjs-delta-gpu
+#SBATCH -p gpuA100x4
+#SBATCH -J inf-bce-xeus-32k
+#SBATCH -N 1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=62G
+#SBATCH -t 2:00:00
+#SBATCH -o exp/slurm_logs/%A_%a.out
+#SBATCH -e exp/slurm_logs/%A_%a.out
+
+# === Directory Setup ===
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p "exp/slurm_logs"
+# === Environment setup ===
+source ~/.bashrc
+conda deactivate
+source setup_uv.sh .venv
+export HF_HOME="/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf"
+export PHONEMIZER_ESPEAK_LIBRARY="/work/nvme/bbjs/sbharadwaj/powsm/delta_dependencies/espeak-ng/src/.libs/libespeak-ng.so.1.1.51"
+export ESPEAK_DATA_PATH="/work/nvme/bbjs/sbharadwaj/powsm/delta_dependencies/espeak-ng/espeak-ng-data"
+###########################
+# Usage: sbatch scripts/bce_loss/inference_xeus_32k.batch inference.inference_runner.ckpt_path=<path>
+python src/main.py experiment=inference/segmentation_xeus_bce_32k "$@"
+###########################

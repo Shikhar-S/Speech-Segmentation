@@ -1,0 +1,43 @@
+# @package _global_
+# python src/main.py experiment=inference/segmentation_xeus_bce_32k inference.inference_runner.ckpt_path=<path>
+defaults:
+  - override /data: segmentation_train
+  - override /data/tokenizer: xeuspr
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: powsm
+
+task_name: "inf_seg_bce_xeus_32k"
+tags: ["segmentation", "bce", "inference", "32k"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/timit-segment
+  target_sr: 32000
+
+inference:
+  num_workers: 4
+  out_file: ${paths.output_dir}/seg_xeus_bce_32k.json
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.recipe.segmentation.inference.build_boundary_inference
+    ckpt_path: ???
+    device: cuda
+    threshold: 0.5
+    net:
+      _target_: src.model.xeusphoneme.builders.build_xeus_pr_from_hf
+      work_dir: ${paths.cache_dir}/xeus
+      hf_repo: espnet/xeus
+      vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+      load_ckpt: false
+      interctc_weight: 0.0
+      interctc_layer_idx: null
+      interctc_use_conditioning: false
+      ctc_weight: 1.0

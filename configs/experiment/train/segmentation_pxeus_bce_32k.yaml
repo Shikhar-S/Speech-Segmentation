@@ -1,0 +1,56 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/main.py experiment=train/segmentation_pxeus_bce_32k
+
+defaults:
+  - override /data: segmentation_train
+  - override /model: segmentation
+  - override /model/net: phoneticxeus
+  - override /data/tokenizer: xeuspr
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "seg_bce_pxeus_32k"
+tags: ["pxeus", "segmentation", "bce", "32k"]
+
+seed: 42
+
+trainer:
+  devices: -1  # use all available GPUs
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 0
+  max_epochs: -1
+  max_steps: 5000
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 125
+  check_val_every_n_epoch: null
+  log_every_n_steps: 100
+
+callbacks:
+  model_checkpoint:
+    monitor: val/rval
+    mode: max
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping:
+    monitor: val/rval
+    mode: max
+    patience: 100
+
+model:
+  bce_weight: 1.0
+  audio_sr: 32000
+  optimizer:
+    lr: 0.0001
+
+data:
+  batch_size: 32
+  target_sr: 32000
+  hf_repo: changelinglab/timit-segment
+
+logger:
+  wandb:
+    tags: ${tags}
