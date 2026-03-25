@@ -17,6 +17,9 @@ backbones, trained on TIMIT, evaluated on TIMIT, Buckeye, and VoxAngeles.
 **Hyperparameters:** bce_weight=1.0, pos_weight=1.0, resolution=1, lr=1e-4,
 batch_size=32, max_steps=5000, val_check_interval=125, data=timit-segment
 
+**Checkpoint selection:** `val/loss` (min). Inference used best-loss checkpoint
+(`step_000562.ckpt`) for both models.
+
 ### Round 2 — resolution=2 (10ms frames)
 
 | Run | Model | Config | Run Dir | SLURM |
@@ -26,6 +29,9 @@ batch_size=32, max_steps=5000, val_check_interval=125, data=timit-segment
 
 **Hyperparameters:** same as r1 except resolution=2 (Linear upsample
 D→D*2, reshape to double temporal frames, effective_pbf=160 = 10ms)
+
+**Checkpoint selection:** `val/loss` (min). Inference used `last.ckpt` (not
+best-loss checkpoint). XEUS best was `step_000562`, pXEUS best was `step_000593`.
 
 ## Inference Runs
 
@@ -65,6 +71,9 @@ Config: `experiment=inference/segmentation_{xeus,pxeus}_bce`
 lr=1e-4, batch_size=8, accumulate_grad_batches=16, max_speech_length=8s,
 max_steps=5000, 1×A40 GPU. Effective batch=128.
 
+**Checkpoint selection:** `val/rval` (max). Inference used best-rval checkpoint
+(`step_002458` for XEUS, `step_001479` for pXEUS).
+
 **Note:** XEUS training timed out at 8h (step 2458). pXEUS converged via early
 stopping (patience=100) at step 1479. Results may improve with full XEUS training.
 
@@ -78,6 +87,23 @@ stopping (patience=100) at step 1479. Results may improve with full XEUS trainin
 | pXEUS | TIMIT | `exp/runs/inf_bce_pxeus_32k_timit/inf_bce_pxeus_32k_timit/seg_pxeus_bce_32k.0.jsonl` | 6300 |
 | pXEUS | Buckeye | `exp/runs/inf_bce_pxeus_32k_buckeye/inf_bce_pxeus_32k_buckeye/seg_pxeus_bce_32k.0.jsonl` | 10477 |
 | pXEUS | VoxAngeles | `exp/runs/inf_bce_pxeus_32k_voxangeles/inf_bce_pxeus_32k_voxangeles/seg_pxeus_bce_32k.0.jsonl` | 5445 |
+
+## Comparability Notes
+
+Checkpoint selection is **not consistent** across rounds:
+
+| Round | Ckpt monitor | Ckpt used for inference |
+|-------|-------------|------------------------|
+| r1 | `val/loss` (min) | best val/loss (`step_000562`) |
+| r2 | `val/loss` (min) | `last.ckpt` (not best) |
+| 32k | `val/rval` (max) | best val/rval (`step_002458`/`step_001479`) |
+
+**Impact:** r1 and r2 may be slightly disadvantaged by using loss-based
+checkpoint selection instead of rval-based. r2 is further disadvantaged by
+using `last.ckpt` instead of the best checkpoint. A fair rerun of r1/r2 with
+`val/rval` checkpointing is needed for strict comparisons. That said, the
+32kHz gains are large enough that the conclusion (32k >> r1 > r2) is unlikely
+to change.
 
 ## Evaluation Results (20ms tolerance)
 
