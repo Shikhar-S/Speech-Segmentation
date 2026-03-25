@@ -4,8 +4,8 @@
 
 set -euo pipefail
 
-XEUS_CKPT="exp/runs/seg_bce_xeus_32k/FILL_DATE/checkpoints/last.ckpt"
-PXEUS_CKPT="exp/runs/seg_bce_pxeus_32k/FILL_DATE/checkpoints/last.ckpt"
+XEUS_CKPT="exp/runs/seg_bce_xeus_32k/20260324_165829/checkpoints/step_002094.ckpt"
+PXEUS_CKPT="exp/runs/seg_bce_pxeus_32k/20260324_165829/checkpoints/step_001479.ckpt"
 
 declare -A DATASETS
 DATASETS[timit]=changelinglab/timit-segment
