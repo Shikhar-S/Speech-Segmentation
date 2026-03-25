@@ -98,12 +98,31 @@ Checkpoint selection is **not consistent** across rounds:
 | r2 | `val/loss` (min) | `last.ckpt` (not best) |
 | 32k | `val/rval` (max) | best val/rval (`step_002458`/`step_001479`) |
 
-**Impact:** r1 and r2 may be slightly disadvantaged by using loss-based
-checkpoint selection instead of rval-based. r2 is further disadvantaged by
-using `last.ckpt` instead of the best checkpoint. A fair rerun of r1/r2 with
-`val/rval` checkpointing is needed for strict comparisons. That said, the
-32kHz gains are large enough that the conclusion (32k >> r1 > r2) is unlikely
-to change.
+### Wandb curve analysis: does checkpoint selection matter?
+
+We pulled val/loss and val/rval curves from wandb to quantify the impact.
+val/loss overfits early (best at step ~31) while val/rval keeps improving
+and plateaus later.
+
+| Run | Best-loss step | Rval @ best-loss | Best-rval step | Rval @ best-rval | Gap |
+|-----|---------------|------------------|----------------|------------------|-----|
+| r1 XEUS | 31 | 0.960 | 53 | 0.978 | +0.018 |
+| r1 pXEUS | 31 | 0.973 | 157 | 0.978 | +0.006 |
+| r2 XEUS | 31 | 0.811 | 196 | 0.910 | +0.099 |
+| r2 pXEUS | 32 | 0.822 | 187 | 0.909 | +0.086 |
+
+**Conclusion: checkpoint selection is NOT a major confound.**
+
+- **r1:** Gap is tiny (0.6–1.8% rval). The best-loss checkpoint already has
+  near-optimal rval. Rerunning with val/rval won't meaningfully change results.
+- **r2:** Gap looks large (8–10%), but r2 inference used `last.ckpt` (rval
+  ~0.90), which is within 0.5% of the best-rval checkpoint (0.91). The real
+  bottleneck is the approach (learned upsample), not checkpoint selection.
+- **32k** already uses val/rval — no issue.
+- The 32kHz gains over r1 (4–16% rval) far exceed any checkpoint effect.
+
+Reruns with val/rval (jobs 16996720–16996723) will provide definitive
+confirmation but are not expected to change conclusions.
 
 ## Evaluation Results (20ms tolerance)
 
