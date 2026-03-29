@@ -104,7 +104,7 @@ class ErrorCalculator:
                 for i, (h, r) in enumerate(pairs)
             }
             summary, _ = self.evaluator.evaluate(
-                test_data, compute_inventory=False, tqdm_enabled=False
+                test_data, tqdm_enabled=False,
             )
             metrics["per"] = summary.FER
             metrics["pfer"] = float(summary.PER)
