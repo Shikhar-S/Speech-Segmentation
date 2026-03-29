@@ -1,0 +1,61 @@
+# @package _global_
+
+# python src/main.py experiment=train/joint_prseg_xeus
+
+defaults:
+  - override /data: joint_prseg
+  - override /model: joint_prseg
+  - override /model/net: xeuspr
+
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "joint_prseg_xeus"
+tags: ["xeuspr", "joint", "pr", "segmentation"]
+
+seed: 42
+
+trainer:
+  devices: -1
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 0
+  max_epochs: -1
+  max_steps: 10000
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 250
+  check_val_every_n_epoch: null
+  log_every_n_steps: 100
+
+callbacks:
+  model_checkpoint:
+    monitor: val_seg/rval
+    mode: max
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping:
+    monitor: val_seg/rval
+    mode: max
+    patience: 100
+
+model:
+  bce_weight: 1.0
+  optimizer:
+    lr: 0.0001
+
+data:
+  pr_weight: 1.0
+  seg_weight: 1.0
+  batch_size: 32
+  seg_datamodule:
+    hf_repo: changelinglab/timit-segment
+    batch_size: 32
+  pr_datamodule:
+    train_split: "train_timit"
+    dev_splits: ["dev_timit"]
+    batch_size: 16
+
+logger:
+  wandb:
+    tags: ${tags}

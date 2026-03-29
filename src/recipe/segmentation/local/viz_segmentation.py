@@ -44,9 +44,9 @@ _HF_CACHE = os.getenv(
     "HF_HOME",
     "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf",
 )
-_HOP_LENGTH = 128
-_N_FFT = 512
-_N_MELS = 80
+_HOP_LENGTH = 64
+_N_FFT = 1024
+_N_MELS = 256
 
 
 # ─── Data structures ──────────────────────────────────────────────────────
@@ -265,8 +265,8 @@ def compute_mel_spectrogram(
 ) -> np.ndarray:
     """Compute log-mel spectrogram matching the model frontend parameters.
 
-    Uses n_fft=512, hop_length=128 (~8ms hop), n_mels=80, matching the
-    DefaultFrontend in src/model/powsm/frontend.py.
+    Uses n_fft=1024, hop_length=64 (~4ms hop), n_mels=256 for
+    high-resolution visualization.
 
     Args:
         waveform: Float32 audio array of shape (T,).
