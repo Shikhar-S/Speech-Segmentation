@@ -289,10 +289,13 @@ class JointPRSegModel(LightningModule):
 
     def validation_step(
         self,
-        batch: Dict[str, torch.Tensor],
+        batch,
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        # CombinedLoader may wrap batch in a tuple or nested structure
+        if isinstance(batch, (tuple, list)):
+            batch = batch[0]
         has_seg = batch.get("target_start") is not None
 
         # Normalize seg validation batches
