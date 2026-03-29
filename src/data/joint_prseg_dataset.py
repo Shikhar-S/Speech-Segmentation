@@ -278,16 +278,7 @@ class JointPRSegDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self):
-        loaders = []
-        seg_val = self.seg.val_dataloader()
-        if seg_val is not None:
-            loaders.append(seg_val)
-        pr_val = self.pr.val_dataloader()
-        if pr_val is not None:
-            loaders.append(pr_val)
-        if not loaders:
-            return None
-        return CombinedLoader(loaders, mode="sequential")
+        return self.seg.val_dataloader()
 
     def test_dataloader(self):
         seg_test = self.seg.test_dataloader()

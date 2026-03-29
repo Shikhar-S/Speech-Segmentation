@@ -293,23 +293,16 @@ class JointPRSegModel(LightningModule):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        # CombinedLoader may wrap batch in a tuple or nested structure
-        if isinstance(batch, (tuple, list)):
-            batch = batch[0]
-        has_seg = batch.get("target_start") is not None
-
-        # Normalize seg validation batches
-        if has_seg and "text" not in batch and "target" in batch:
+        # Normalize seg batch keys (target -> text)
+        if "text" not in batch and "target" in batch:
             batch["text"] = batch.pop("target")
             batch["text_length"] = batch.pop("target_length")
-            B = batch["speech"].shape[0]
-            batch["lang_sym"] = batch.get("lang_sym", ["<eng>"] * B)
+        B = batch["speech"].shape[0]
+        batch.setdefault("lang_sym", ["<eng>"] * B)
 
         features, logit_len = self._encode(
             batch["speech"], batch["speech_length"],
         )
-
-        prefix = "val_seg" if dataloader_idx == 0 else "val_pr"
 
         # PR metrics
         pr_loss, pr_stats = self._pr_loss(
@@ -317,30 +310,20 @@ class JointPRSegModel(LightningModule):
             batch["text"], batch["text_length"],
             lang_sym=batch.get("lang_sym"),
         )
-        self.val_pr_loss(pr_loss.detach())
-        self.log(
-            f"{prefix}/pr_loss", pr_loss.detach(),
-            on_step=False, on_epoch=True,
-        )
-        for k, v in pr_stats.items():
-            self.log(f"{prefix}/{k}", v, on_step=False, on_epoch=True)
+        self.log("val_seg/pr_loss", pr_loss.detach(),
+                 on_step=False, on_epoch=True)
 
-        # Seg metrics (only for seg dataloader)
-        if has_seg:
+        # Seg metrics
+        if batch.get("target_start") is not None:
             seg_loss, bnd_metrics = self._compute_seg_loss(
                 features, logit_len, batch,
             )
             self.val_seg_loss(seg_loss.detach())
-            self.log(
-                f"{prefix}/seg_loss", seg_loss.detach(),
-                on_step=False, on_epoch=True,
-            )
+            self.log("val_seg/seg_loss", seg_loss.detach(),
+                     on_step=False, on_epoch=True)
             for k, v in bnd_metrics.items():
-                self.log(
-                    f"{prefix}/{k}", v,
-                    on_step=False, on_epoch=True,
-                    prog_bar=(k == "rval"),
-                )
+                self.log(f"val_seg/{k}", v, on_step=False, on_epoch=True,
+                         prog_bar=(k == "rval"))
 
     def on_validation_epoch_end(self) -> None:
         loss = self.val_seg_loss.compute()
@@ -351,6 +334,9 @@ class JointPRSegModel(LightningModule):
             sync_dist=True,
             prog_bar=True,
         )
+
+    def test_step(self, batch, batch_idx):
+        self.validation_step(batch, batch_idx)
 
     def on_before_optimizer_step(self, optimizer):
         self.log_dict(grad_norm(self, norm_type=2))
