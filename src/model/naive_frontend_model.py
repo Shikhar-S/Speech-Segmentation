@@ -177,6 +177,7 @@ class FrontendModel(torch.nn.Module):
                 f"Logits length {log_probs.shape} is shorter than "
                 f"text length {text.shape}, for utt_id: {utt_id}"
             )
+            return None, None
         align_label, align_prob = torchaudio.functional.forced_align(
             log_probs,
             text,

@@ -212,6 +212,7 @@ class PowsmInference:
         self.nbest = nbest
         self.lang_sym = lang_sym
         self.task_sym = task_sym
+        self.predict_time = False
 
     @torch.no_grad()
     @typechecked
@@ -295,14 +296,14 @@ class PowsmInference:
         self, intermediate_outs: List[Tuple[int, torch.Tensor]]
     ) -> Dict[int, List[List[str]]]:
 
-        exclude_ids = [self.model.blank_id, self.model.sos, self.model.eos]
+        exclude_ids = {self.model.blank_id, self.model.sos, self.model.eos}
         res = {}
         token_list = self.beam_search.token_list
 
         for layer_idx, encoder_out in intermediate_outs:
             y = self.model.ctc.argmax(encoder_out)  # (B, Tmax)
             y = [predid.tolist() for predid in y]
-            y = [[token_list[x] for x in pred] for pred in y]
+            y = [[token_list[x] for x in pred if x not in exclude_ids] for pred in y]
             res[layer_idx] = y
 
         return res

@@ -49,9 +49,7 @@ def evaluate_fa_predictions(predictions):
     # Evaluate
     metrics = evaluator.evaluate_batch(fa_predictions, ground_truth)
     print("\nEvaluation metrics:")
-    evaluator.pretty_print(metrics, verbosity=2)
-    predictions = load_fa_predictions(args.prediction_file)
-    evaluate_fa_predictions(predictions)
+    evaluator.pretty_print(metrics)
 
 
 def main():

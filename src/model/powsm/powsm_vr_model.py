@@ -103,7 +103,7 @@ class PowsmVariablerateModel(nn.Module):
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
         log_probs = self.powsm_model.ctc.log_softmax(encoder_out)  # (B, Tmax, odim)
         assert log_probs.size(0) == 1, "Forced alignment needs batch size 1"
-        assert not (text == self.blank_id).any(), "Target has blank tokens."
+        assert not (text == self.get_blank_id()).any(), "Target has blank tokens."
         if text_lengths.item() > encoder_out_lens.item():
             log.error(
                 f"Target length {text_lengths.item()} is longer than "
@@ -111,7 +111,7 @@ class PowsmVariablerateModel(nn.Module):
                 f"Utterance id is :{utt_id}"
             )
         align_label, align_prob = torchaudio.functional.forced_align(
-            log_probs, text, encoder_out_lens, text_lengths, blank=self.blank_id
+            log_probs, text, encoder_out_lens, text_lengths, blank=self.get_blank_id()
         )
         return align_label, align_prob
 
@@ -134,6 +134,8 @@ def build_powsm_vr(
         builder = build_powsm_ctc
     elif architecture == "encdec":
         builder = build_powsm
+    else:
+        raise ValueError(f"Unknown architecture: {architecture}")
     model = builder(
         *args,
         work_dir=work_dir,

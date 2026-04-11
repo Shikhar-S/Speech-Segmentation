@@ -136,6 +136,10 @@ class Wav2Vec2PRModel(torch.nn.Module):
                     p.requires_grad = False
                 else:
                     trainable_params["encoder"].append(p)
+            elif n.startswith("layer_weights") or n.startswith(
+                "conditioning_layer"
+            ):
+                trainable_params["encoder"].append(p)
             else:
                 # freeze other parts:
                 p.requires_grad = False

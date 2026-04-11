@@ -368,6 +368,10 @@ class XeusPRModel(torch.nn.Module):
                     p.requires_grad = False
                 else:
                     trainable_params["encoder"].append(p)
+            elif n.startswith("layer_weights"):
+                trainable_params["encoder"].append(p)
+            elif n.startswith("preencoder"):
+                trainable_params["encoder"].append(p)
             else:
                 # freeze other parts:
                 p.requires_grad = False
