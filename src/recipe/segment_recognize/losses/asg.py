@@ -42,6 +42,15 @@ except Exception:
     k2 = None  # type: ignore
     _K2_AVAILABLE = False
 
+try:
+    from src.recipe.segment_recognize.losses.asg_triton import (
+        asg_loss as _asg_loss_triton,
+    )
+
+    _TRITON_AVAILABLE = True
+except Exception:
+    _TRITON_AVAILABLE = False
+
 
 # -------------------------------------------------------------------
 # Pure-PyTorch DP implementation
@@ -384,6 +393,46 @@ class AutoSegmentationCriterion(nn.Module):
             min_hlens.append(len(y))
         return ys, torch.tensor(
             min_hlens, dtype=torch.long, device=device,
+        )
+
+
+# -------------------------------------------------------------------
+# Triton-fused implementation
+# -------------------------------------------------------------------
+
+
+class AutoSegmentationCriterionTriton(AutoSegmentationCriterion):
+    """Triton-fused ASG. Falls back to DP when triton is absent."""
+
+    def _forward_core(
+        self,
+        emissions: torch.Tensor,
+        ys: List[List[int]],
+        hlens: torch.Tensor,
+    ) -> torch.Tensor:
+        if not _TRITON_AVAILABLE:
+            return super()._forward_core(
+                emissions, ys, hlens,
+            )
+
+        B = emissions.size(0)
+        device = emissions.device
+        ylens_list = [len(y) for y in ys]
+        L_max = max(ylens_list)
+        targets = torch.zeros(
+            B, L_max, dtype=torch.long, device=device,
+        )
+        for b, y in enumerate(ys):
+            targets[b, : len(y)] = torch.tensor(
+                y, dtype=torch.long,
+            )
+        ylens_t = torch.tensor(
+            ylens_list, dtype=torch.long, device=device,
+        )
+
+        return _asg_loss_triton(
+            emissions, targets, hlens, ylens_t,
+            self.transitions,
         )
 
 

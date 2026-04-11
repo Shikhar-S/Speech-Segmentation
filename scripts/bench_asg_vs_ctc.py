@@ -14,6 +14,7 @@ import torch.nn as nn
 from src.recipe.segment_recognize.losses.asg import (
     AutoSegmentationCriterion,
     AutoSegmentationCriterionK2,
+    AutoSegmentationCriterionTriton,
 )
 
 
@@ -97,6 +98,12 @@ def main():
     except ImportError:
         has_k2 = False
 
+    try:
+        import triton  # noqa: F401
+        has_triton = device == "cuda"
+    except ImportError:
+        has_triton = False
+
     configs = [
         # (B, T, L, V, label)
         (1,  50,   5,  10, "B=1  T=50  L=5  V=10"),
@@ -107,19 +114,15 @@ def main():
         (1,  100,  5, 100, "B=1  T=100 L=5  V=100"),
     ]
 
-    cols = "ASG-DP (ms)"
-    if has_k2:
-        cols += f"{'ASG-k2 (ms)':>20}"
-    cols = (
-        f"{'Config':<28} "
-        f"{'ASG-DP (ms)':>20} "
-    )
+    # Build header dynamically
+    cols = f"{'Config':<28} {'ASG-DP (ms)':>20} "
+    if has_triton:
+        cols += f"{'ASG-Triton (ms)':>20} "
     if has_k2:
         cols += f"{'ASG-k2 (ms)':>20} "
-    cols += (
-        f"{'CTC (ms)':>20} "
-        f"{'DP/CTC':>10}"
-    )
+    cols += f"{'CTC (ms)':>20} {'DP/CTC':>10}"
+    if has_triton:
+        cols += f"{'Tri/CTC':>10}"
     if has_k2:
         cols += f"{'k2/CTC':>10}"
 
@@ -147,6 +150,23 @@ def main():
             warmup=args.warmup,
             repeats=args.repeats,
         )
+
+        # ASG (Triton)
+        tri_mean, tri_std = None, None
+        if has_triton:
+            asg_tri = AutoSegmentationCriterionTriton(
+                num_labels=V,
+                use_transitions=True,
+                use_double_scores=False,
+            ).to(device)
+            tri_mean, tri_std = bench(
+                lambda: run_asg(
+                    asg_tri, emissions, targets,
+                    hlens, ylens,
+                ),
+                warmup=args.warmup,
+                repeats=args.repeats,
+            )
 
         # ASG (k2)
         k2_mean, k2_std = None, None
@@ -179,6 +199,10 @@ def main():
             f"{label:<28} "
             f"{dp_mean:8.2f} +/- {dp_std:5.2f}   "
         )
+        if has_triton:
+            row += (
+                f"{tri_mean:8.2f} +/- {tri_std:5.2f}   "
+            )
         if has_k2:
             row += (
                 f"{k2_mean:8.2f} +/- {k2_std:5.2f}   "
@@ -186,15 +210,18 @@ def main():
         row += f"{ctc_mean:8.2f} +/- {ctc_std:5.2f}   "
         dp_ratio = dp_mean / max(ctc_mean, 1e-6)
         row += f"{dp_ratio:8.1f}x"
+        if has_triton:
+            tri_ratio = tri_mean / max(ctc_mean, 1e-6)
+            row += f"{tri_ratio:8.1f}x"
         if has_k2:
             k2_ratio = k2_mean / max(ctc_mean, 1e-6)
             row += f"{k2_ratio:8.1f}x"
         print(row)
 
     print("=" * len(cols))
-    notes = (
-        "\nASG-DP: pure-PyTorch sequential DP."
-    )
+    notes = "\nASG-DP: batched PyTorch DP."
+    if has_triton:
+        notes += " ASG-Triton: fused Triton kernel."
     if has_k2:
         notes += " ASG-k2: k2 FSA intersection."
     notes += " CTC: PyTorch fused C++ kernel.\n"
