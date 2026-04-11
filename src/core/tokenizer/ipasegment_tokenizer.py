@@ -75,6 +75,8 @@ class IPASegmentTokenizer(BaseTokenizer):
         if vocab is not None:
             self._vocab = vocab
             self._ids_to_tokens = {v: k for k, v in self._vocab.items()}
+            assert pad_token in self._vocab, f"pad_token '{pad_token}' not in vocab"
+            assert unk_token in self._vocab, f"unk_token '{unk_token}' not in vocab"
         elif vocab_path is not None:
             self._vocab = self._load_vocab(Path(vocab_path))
             self._ids_to_tokens = {v: k for k, v in self._vocab.items()}

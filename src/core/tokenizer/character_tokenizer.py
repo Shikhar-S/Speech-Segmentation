@@ -207,6 +207,7 @@ class CharacterTokenizer(BaseTokenizer):
                 next_id += 1
         self._vocab = vocab
         self._ids_to_tokens = {v: k for k, v in vocab.items()}
+        return self._vocab
 
     @staticmethod
     def save_vocab(vocab: Dict[str, int], path: Union[str, Path]) -> None:
@@ -258,14 +259,20 @@ if __name__ == "__main__":
         "ˈtɛstɪŋ",
     ]
 
+    import tempfile
+
     print("Building vocabulary from sample texts...")
     tokenizer = CharacterTokenizer()
     tokenizer.build_vocab(sample_texts)
     print(f"Vocabulary size: {len(tokenizer._vocab)}")
     print(f"Vocabulary: {tokenizer._vocab}")
 
-    print("\nCreating tokenizer from vocab dict...")
-    tokenizer = CharacterTokenizer(vocab=tokenizer._vocab)
+    # Save vocab to a temp file, then reload via constructor
+    vocab_path = Path(tempfile.mkdtemp()) / "vocab.json"
+    CharacterTokenizer.save_vocab(tokenizer._vocab, vocab_path)
+
+    print("\nCreating tokenizer from vocab file...")
+    tokenizer = CharacterTokenizer(vocab_path=vocab_path)
 
     test_text = "həˈloʊ"
     encoded = tokenizer.encode(test_text)

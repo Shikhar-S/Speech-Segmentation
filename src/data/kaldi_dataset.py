@@ -94,7 +94,10 @@ class KaldiDataset(Dataset):
         key2lang = {}
         with open(path) as f:
             for line in f:
-                key, tag = line.strip().split()[:2]
+                line = line.strip()
+                if not line:
+                    continue
+                key, tag = line.split()[:2]
                 if key.endswith("_pr"):
                     key = key[:-3]
                 key2lang[key] = tag.split("><")[0][1:].strip()
@@ -180,7 +183,6 @@ class KaldiDataset(Dataset):
             "split": "test",
             "metadata_idx": idx,
             "target": transcription,
-            "text": transcription,
         }
 
 

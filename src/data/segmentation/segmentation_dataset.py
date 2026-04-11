@@ -7,7 +7,7 @@ The loader converts each row into a list of ``SegmentationUnit`` objects
 keyed by ``utt_id``.
 """
 
-from typing import Optional
+from typing import List, Optional, Union
 
 import datasets
 import torch
@@ -105,7 +105,7 @@ class SegmentationDataModule(L.LightningDataModule):
         train_split: str = "train",
         val_split: str = "val",
         test_split: str = "test",
-        predict_split: Optional[str] = None,
+        predict_split: Optional[Union[str, List[str]]] = None,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -172,8 +172,11 @@ class SegmentationDataModule(L.LightningDataModule):
         return self._dl(self.test_dataset)
 
     def predict_dataloader(self):
+        predict_split = self.predict_split
+        if isinstance(predict_split, str):
+            predict_split = [predict_split]
         predict_datasets=[]
-        for split in self.predict_split:
+        for split in predict_split:
             ds = getattr(self, f"{split}_dataset")
             if ds is not None:
                 predict_datasets.append(ds)

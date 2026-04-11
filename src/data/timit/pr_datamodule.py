@@ -70,8 +70,10 @@ def phones_to_token_ids(
     return [vocab.get(p, unk_id) for p in phones]
 
 
-def choose_label_type(epitran_mix_ratio: float) -> str:
-    use_epitran = random.random() < epitran_mix_ratio  # in [0.0, 1.0)
+def choose_label_type(
+    epitran_mix_ratio: float, rng: random.Random
+) -> str:
+    use_epitran = rng.random() < epitran_mix_ratio  # in [0.0, 1.0)
     return "epitran" if use_epitran else "timit"
 
 
@@ -102,7 +104,7 @@ class TimitPRDataset(Dataset):
             epitran_lang: Epitran language code, e.g., "eng-Latn".
         """
         super().__init__()
-        random.seed(42)
+        self._rng = random.Random(42)
         self.timit_root = Path(timit_root)
         self.metadata_path = Path(metadata_path)
         self.split = split
@@ -136,7 +138,9 @@ class TimitPRDataset(Dataset):
                 speech = speech[:max_samples]
 
         if self.split == "train" and self.epitran_mix_ratio > 0.0:
-            label_source = choose_label_type(self.epitran_mix_ratio)
+            label_source = choose_label_type(
+                self.epitran_mix_ratio, self._rng
+            )
         else:
             label_source = "timit"
 

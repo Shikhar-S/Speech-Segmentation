@@ -37,7 +37,7 @@ class Task:
             "state_dict", ckpt
         )  # handle raw state_dict checkpoints too
         load_info = model.load_state_dict(state_dict, strict=False)
-        if load_info:
+        if load_info.missing_keys or load_info.unexpected_keys:
             log.info(f"Missing keys when loading checkpoint: {load_info.missing_keys}")
             log.info(
                 f"Unexpected keys when loading checkpoint: {load_info.unexpected_keys}"
@@ -161,8 +161,12 @@ class Task:
             # Write predictions
             pred_file = self.task_cfg.get("pred_file", None)
             if pred_file is not None:
-                os.makedirs(os.path.dirname(pred_file), exist_ok=True)
-                json.dump(preds, open(pred_file, "w", encoding="utf-8"), indent=2)
+                # NOTE: os.path.dirname returns "" for bare filenames
+                pred_dir = os.path.dirname(pred_file)
+                if pred_dir:
+                    os.makedirs(pred_dir, exist_ok=True)
+                with open(pred_file, "w", encoding="utf-8") as f:
+                    json.dump(preds, f, indent=2)
                 log.info(f"Wrote predictions to {pred_file}")
 
         return metrics, object_dict

@@ -114,7 +114,10 @@ def run_distributed_inference_(
     ext = "jsonl"  # switch to jsonl
     out_file = f"{base}.{SLURM_TASK_ID}.{ext}"
     print(f"OUTPUT_FILE: {out_file}", flush=True)
-    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    # NOTE: os.path.dirname returns "" for bare filenames
+    out_dir = os.path.dirname(out_file)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     open(out_file, "w").close()  # !!overwrite!!
     ############DEVICE DISTRIBUTION#########
     device = inference_config.get("device", "auto")
@@ -133,6 +136,7 @@ def run_distributed_inference_(
             f"Limiting inference to {N} samples (out of {len(dataset)} total).",
             flush=True,
         )
+    del dataset
     N_shard = math.ceil(N / SLURM_NUM_TASKS)  # items per slurm worker
     shard_start = SLURM_TASK_ID * N_shard
     shard_end = min(shard_start + N_shard, N)  # exclusive

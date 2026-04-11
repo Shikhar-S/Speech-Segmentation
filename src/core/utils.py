@@ -71,10 +71,6 @@ def resample_dataset(
     force_resample=False,
 ):
     """Resample all audio in `metadata_df[path_key]` from src_sr -> tgt_sr into tgt_data_dir on GPU, if available."""
-    if os.path.exists(tgt_data_dir) and not force_resample:
-        logging.info(f"Found existing resampled data at {tgt_data_dir}, skipping.")
-        return
-
     os.makedirs(tgt_data_dir, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     resamplers = {}
