@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**PhoneBench** is a phonetic model benchmarking framework built on PyTorch Lightning + Hydra. It evaluates phone recognition and segmentation across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). The main model family is **PowSM** (Phoneme-oriented Weighted Speech Model), a CTC-Attention hybrid encoder-decoder.
+**PhoneBench** is a phonetic model benchmarking framework built on PyTorch Lightning + Hydra. It evaluates phone recognition and segmentation across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). The primary encoders are **XEUS** (cross-lingual speech encoder) and **PhoneticXEUS** (XEUS with interCTC self-conditioning at layers 4, 8, 12). Legacy encoder: **PowSM** (CTC-Attention hybrid encoder-decoder).
 
 ## Environment Setup
 
@@ -46,6 +46,7 @@ Before submitting SLURM jobs, always run the recipe module directly to catch imp
 ```bash
 python -m src.recipe.segmentation.model_module
 python -m src.recipe.phone_recognition.model_module
+python -m src.recipe.segment_recognize.model_module
 ```
 
 ## General Instruction on Coding Style
@@ -70,24 +71,50 @@ All config lives in `configs/`. The entry point is `configs/main.yaml`, which is
 
 `task.py` orchestrates train/test/predict phases, checkpoint loading, and distributed inference. It uses `src/utils/instantiators.py` to dynamically instantiate datamodules, models, callbacks, and loggers from Hydra config.
 
-### Model Stack (`src/model/powsm/`)
+### Model Stack (`src/model/`)
 
-**`powsm_model.py`** – Main Lightning module. Components (all optional/swappable via config):
-- `frontend.py` – Audio feature extraction (Fbank, etc.)
-- `specaug.py` – SpecAugment data augmentation
-- `e_branchformer.py` – Default encoder (EBranchformer)
-- `transformer_decoder.py` – Attention decoder
-- `ctc.py` – CTC loss module
+**Encoders** (swappable via `configs/model/net/`):
+- `xeusphoneme/` – **XEUS** (`xeuspr.yaml`) and **PhoneticXEUS** (`phoneticxeus.yaml`, interCTC at layers 4, 8, 12). Primary encoders for current experiments.
+- `powsm/` – **PowSM** (EBranchformer CTC-Attention hybrid). Legacy encoder.
+- `wav2vec2phoneme/`, `wavlm/`, `whisper/` – Other encoder backends.
+
+**Shared encoder interface** (all nets expose):
+- `encode(speech, lengths)` → `(features, feature_lens)`
+- `encoder_output_size()` → `int`
+- `points_by_frames()` → `int` (audio samples per encoder frame, typically 640)
+- `_calc_ctc_loss(features, lens, text, text_lens)` → `(loss, stats)`
+- `ctc.ctc_lo` — linear projection to vocab logits
 
 ### Data Layer (`src/data/`)
 
-Datasets load from Kaldi-style ark/scp files (`kaldi_dataset.py`) or JSON. Key datasets: TIMIT, Buckeye, CMU L2Arctic, EDACC, FLEURS, Vaani, UltraSuite. The TIMIT datamodule supports mixing Epitran (IPA) labels with original ARPAbet labels via `epitran_mix_ratio`.
+Datasets load from Kaldi-style ark/scp files (`kaldi_dataset.py`) or HuggingFace Hub. Key datasets: TIMIT, Buckeye, VoxAngeles, DoReCo, FLEURS. The TIMIT datamodule supports mixing Epitran (IPA) labels with original ARPAbet labels via `epitran_mix_ratio`.
+
+For joint training, `JointPRSegDataModule` (`joint_prseg_dataset.py`) combines a PR datamodule and a segmentation datamodule with weighted sampling. Batches are `{"segmentation": sub_batch | None, "recognition": sub_batch | None}`.
 
 ### Recipe Modules (`src/recipe/`)
 
 Task-specific Lightning modules (model + data glue):
 - `phone_recognition/` – Phone recognition models and error analysis
-- `segmentation/` – Segmentation models (`SegmentationModel`, `SegmentationLoss`, `SegmentationInference`), evaluation
+- `segmentation/` – Standalone segmentation (`SegmentationModel`, `SegmentationLoss`, `SegmentationInference`)
+- `joint/` – `JointPRSegModel`: monolithic joint PR + segmentation with inline losses
+- `segment_recognize/` – `SegmentRecognizeModel`: composable joint PR + segmentation using modular `LossModule` classes in `layers/`. Preferred for new experiments. See below.
+
+### Composable Loss System (`src/recipe/segment_recognize/`)
+
+`SegmentRecognizeModel` replaces `JointPRSegModel` with a composable architecture. Losses are self-contained `LossModule(nn.Module)` classes that own their parameters, criteria, metric trackers, and eval logic.
+
+**`layers/base.py` — `LossModule`**: Base class. Subclasses implement `forward()` → `{"loss": tensor, ...}` and optionally `eval_metrics()`. Each module has `train_loss`/`val_loss` MeanMetric trackers and a `log_output()` helper.
+
+**Concrete losses** (`layers/`):
+- `BCEBoundaryLoss` — owns `boundary_head: nn.Linear(D, 1)`, `BoundaryLoss` criterion, `SegmentationEvaluator` for P/R/F1/R-value
+- `FASegmentationLoss` — uses `net.ctc.ctc_lo` (via `**ctx`) for frame-level forced-alignment loss
+- `CTCRecognitionLoss` — delegates to `net._calc_ctc_loss` (via `**ctx`)
+
+**Model composition**: Losses registered in `nn.ModuleDict` (`seg_losses`, `pr_losses`). Training step iterates over each group. Losses are instantiated from Hydra config with runtime-injected `encoder_dim`, `effective_pbf`, `audio_sr`.
+
+**Adding a new loss**: Write a `LossModule` subclass, add to config under `seg_losses` or `pr_losses`. No model code changes.
+
+**Configs**: `configs/model/segment_recognize.yaml`, `configs/experiment/train/sr_*.yaml`. Reuses `configs/data/joint_prseg.yaml` (same batch format).
 
 ### Distributed Inference (`src/core/distributed_inference.py`)
 
@@ -163,7 +190,9 @@ Key rules:
 
 ## Experiment Log
 
-BCE segmentation experiment results and run paths: [`exp/experiment_log.md`](exp/experiment_log.md)
+Experiment results, run paths, and evaluation tables: [`exp/experiment_log.md`](exp/experiment_log.md)
+
+Aggregated evaluation metrics (all experiments x datasets): [`exp/all_eval_results.json`](exp/all_eval_results.json)
 
 ## Experimentation Workflow
 
@@ -185,7 +214,7 @@ When running experiments (training, inference, evaluation):
 
 ## Cluster / Job Submission
 
-SLURM batch scripts: `scripts/daixpr.batch`, `scripts/deltaxpr.batch`
+SLURM batch scripts: `scripts/daixpr.batch` (Delta-AI), `scripts/deltaxpr.batch` (Delta), `scripts/babel.batch` (Babel), `scripts/daixpr_inference.batch` (inference)
 
 ## Analysis Notebooks & Error Analysis Utils
 
