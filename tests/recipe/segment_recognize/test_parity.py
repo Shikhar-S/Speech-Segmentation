@@ -112,8 +112,11 @@ def _make_pair():
     sr.seg_losses["bce"].boundary_head.load_state_dict(
         joint.boundary_head.state_dict(),
     )
-    # Copy upsample weights.
-    sr.upsample.load_state_dict(joint.upsample.state_dict())
+    # SR uses nn.Identity() at resolution=1; make joint's Linear
+    # act as identity so both produce the same features.
+    with torch.no_grad():
+        joint.upsample.weight.copy_(torch.eye(ENCODER_DIM))
+        joint.upsample.bias.zero_()
 
     return joint, sr
 

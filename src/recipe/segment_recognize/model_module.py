@@ -1,8 +1,4 @@
-"""Segment + Recognize model with composable losses.
-
-Drop-in replacement for ``JointPRSegModel`` that factors each loss
-into a self-contained ``LossModule``.  Losses are registered via
-Hydra config and composed at runtime.
+"""Multitasking Segmentation + Recognition model.
 
 Usage:
     python -m src.recipe.segment_recognize.model_module
@@ -17,13 +13,24 @@ from lightning import LightningModule
 from lightning.pytorch.utilities import grad_norm
 from torchmetrics import MeanMetric, MinMetric
 
-from src.recipe.segmentation.model_module import (
-    convert_pointstamps_to_frame_indices,
-)
+def convert_pointstamps_to_frame_indices(
+    start: torch.Tensor,
+    end: torch.Tensor,
+    points_by_frames: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Convert target start and end to indices based on net's resolution."""
+    # At 40ms shift, 25 logmel features per second (16000 points),
+    # 640 points per frames
+    # P / (points/frames) = F
+    start_idx = torch.floor(start / points_by_frames).long()
+    end_idx = torch.floor(end / points_by_frames).long()
+    # NOTE(shikhar): Since we reduce the resolution at this step,
+    # there may be overlaps. In the loss, target weight is shared.
+    return start_idx, end_idx
 
 
 class SegmentRecognizeModel(LightningModule):
-    """Joint phone recognition + segmentation with composable losses.
+    """Multitasking Segmentation + Recognition model.
 
     Losses are provided as Hydra config dicts and instantiated at
     construction time.  Each ``LossModule`` owns its parameters,
@@ -35,8 +42,8 @@ class SegmentRecognizeModel(LightningModule):
         scheduler: Optional LR scheduler constructor.
         seg_losses: Hydra config dict for segmentation losses.
         pr_losses: Hydra config dict for recognition losses.
-        resolution: Temporal upsample factor for segmentation.
-        audio_sr: Audio sample rate for timestamp conversions.
+        resolution: Temporal upsample factor for segmentation (upsample at output by this factor).
+        audio_sr: Audio sample rate for timestamp conversions (upsample at input to this rate).
     """
 
     def __init__(
@@ -56,27 +63,25 @@ class SegmentRecognizeModel(LightningModule):
         self.resolution = resolution
 
         dim = net.encoder_output_size()
-        self.upsample = nn.Linear(dim, dim * resolution)
+        self.upsample = nn.Linear(dim, dim * resolution) if resolution > 1 else nn.Identity()
 
         # Runtime-derived values injected into each loss.
         pbf = net.points_by_frames() / resolution
-        inject = dict(
+        injection_args = dict(
             encoder_dim=dim,
             effective_pbf=pbf,
             audio_sr=audio_sr,
         )
         self.seg_losses = nn.ModuleDict(
-            _instantiate_losses(seg_losses, inject),
+            _instantiate_losses(seg_losses, injection_args),
         )
         self.pr_losses = nn.ModuleDict(
-            _instantiate_losses(pr_losses, inject),
+            _instantiate_losses(pr_losses, injection_args),
         )
 
         # Group-level tracking for checkpoint monitoring.
         self.val_seg_loss = MeanMetric()
         self.val_seg_loss_best = MinMetric()
-
-    # -- Encoder helpers -----------------------------------------
 
     @property
     def effective_pbf(self) -> float:
@@ -92,14 +97,14 @@ class SegmentRecognizeModel(LightningModule):
         features, out_lens = self.net.encode(speech, lengths)
         if isinstance(features, tuple):
             features = features[0]
-        return self._upsample_features(features, out_lens)
+        return self._maybe_upsample_features(features, out_lens)
 
-    def _upsample_features(
+    def _maybe_upsample_features(
         self,
         features: torch.Tensor,
         lengths: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Apply learned temporal upsampling."""
+        """Apply learned temporal upsampling, based on resolution."""
         B, T, D = features.shape
         R = self.resolution
         features = (
@@ -120,8 +125,6 @@ class SegmentRecognizeModel(LightningModule):
         )
         batch["target_start_idx"] = start_idx
         batch["target_end_idx"] = end_idx
-
-    # -- Training / validation -----------------------------------
 
     def training_step(
         self, batch: dict[str, Any], batch_idx: int,
@@ -157,40 +160,42 @@ class SegmentRecognizeModel(LightningModule):
         )
         return loss
 
+    def _normalize_val_batch(
+        self, batch: dict[str, Any],
+    ) -> None:
+        """Remap segmentation-only val keys to the unified schema.
+
+        TODO(shikhar): Simplify from dataloader side.
+        """
+        if "text" not in batch and "target" in batch:
+            batch["text"] = batch.pop("target")
+            batch["text_length"] = batch.pop("target_length")
+        batch.setdefault(
+            "lang_sym", ["<eng>"] * batch["speech"].shape[0],
+        )
+
     def validation_step(
         self, batch: Any, batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
         """Run all losses on a validation batch."""
-        if "text" not in batch and "target" in batch:
-            batch["text"] = batch.pop("target")
-            batch["text_length"] = batch.pop("target_length")
-        B = batch["speech"].shape[0]
-        batch.setdefault("lang_sym", ["<eng>"] * B)
-
+        # TODO(shikhar): Refactor to a single _step fn with mode=valid/train/test
+        self._normalize_val_batch(batch)
         features, logit_len = self._encode(
             batch["speech"], batch["speech_length"],
         )
-
-        # PR losses on every val batch.
-        for lm in self.pr_losses.values():
-            out = lm(features, logit_len, batch, net=self.net)
-            lm.log_output(
-                self, "val_seg", out, on_step=False,
-            )
-
-        # Seg losses only when timestamps are present.
+        zero = torch.tensor(0.0, device=self.device)
+        self._apply_losses(
+            self.pr_losses, features, logit_len, batch,
+            zero, "val_seg", on_step=False,
+        )
         if batch.get("target_start") is None:
             return
         self._prepare_seg_targets(batch)
-        seg_total = torch.tensor(0.0, device=self.device)
-        for lm in self.seg_losses.values():
-            out = lm(features, logit_len, batch, net=self.net)
-            seg_total = seg_total + lm.weight * out["loss"]
-            metrics = lm.eval_metrics(out, logit_len, batch)
-            lm.log_output(
-                self, "val_seg", out, metrics, on_step=False,
-            )
+        seg_total = self._apply_losses(
+            self.seg_losses, features, logit_len, batch,
+            zero, "val_seg", on_step=False,
+        )
         self.val_seg_loss(seg_total.detach())
         self.log(
             "val_seg/seg_loss", seg_total.detach(),
@@ -199,10 +204,7 @@ class SegmentRecognizeModel(LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         """Track best validation segmentation loss."""
-        if (
-            self.val_seg_loss.mean_value.item() == 0
-            and self.val_seg_loss.weight.item() == 0
-        ):
+        if self.val_seg_loss.weight.item() == 0:
             return
         loss = self.val_seg_loss.compute()
         self.val_seg_loss_best(loss)
@@ -214,7 +216,6 @@ class SegmentRecognizeModel(LightningModule):
         )
 
     def test_step(self, batch: Any, batch_idx: int) -> None:
-        """Delegate to validation_step."""
         self.validation_step(batch, batch_idx)
 
     def on_before_optimizer_step(self, optimizer: Any) -> None:
@@ -240,8 +241,6 @@ class SegmentRecognizeModel(LightningModule):
                 },
             }
         return {"optimizer": optimizer}
-
-    # -- Internal ------------------------------------------------
 
     def _apply_losses(
         self,
