@@ -16,12 +16,6 @@ from src.model.xeusphoneme.xeuspr_inference import XeusPRInference
 from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger
 
-# TODO(shikhar): hacky for testing
-from src.model.xeusphoneme.resources.phonetic_substitutions import (
-    ENGLISH_ACCENT_SUBSTITUTIONS as ENGLISH_PHONEME_SUBSTITUTIONS,
-    get_substitutions,
-)
-
 log = RankedLogger(__name__, rank_zero_only=False)
 
 
@@ -125,46 +119,6 @@ def build_diacritic_distance_matrix(vocab: list[str]) -> torch.Tensor:
     return dist_matrix
 
 
-def build_manual_distance_matrix(vocab: list[str]) -> torch.Tensor:
-    """
-    Distance matrix derived from ENGLISH_PHONEME_SUBSTITUTIONS / get_substitutions:
-
-    For each source symbol x (treated as an "English phoneme" key), define its neighbor set
-    as the UNION over all languages of get_substitutions(lang, x), intersected with vocab.
-
-    Distance is:
-      - 0 if y is in that union-substitution set for x (and symmetric closure is applied)
-      - 1 otherwise
-
-    Notes:
-      - We also include x itself via get_substitutions' behavior.
-      - We symmetrize to make dist[i,j]==dist[j,i].
-    """
-    V = len(vocab)
-    sid = {s: i for i, s in enumerate(vocab)}
-    langs = list(ENGLISH_PHONEME_SUBSTITUTIONS.keys())
-
-    dist_matrix = torch.full((V, V), float("inf"), dtype=torch.float32)
-    dist_matrix.fill_diagonal_(0.0)
-
-    # Build directed edges x -> y if y is a substitution of x in ANY language (union).
-    edges = [set() for _ in range(V)]
-    for x in vocab:
-        i = sid[x]
-        union_syms = set()
-        for lang in langs:
-            union_syms.update(get_substitutions(lang, x))
-        edges[i] = {sid[y] for y in union_syms if y in sid}
-
-    # Symmetric closure: i~j if i->j or j->i
-    for i in range(V):
-        for j in edges[i]:
-            dist_matrix[i, j] = 0.0
-            dist_matrix[j, i] = 0.0
-
-    return dist_matrix
-
-
 def matrix_to_neighbor_lists(
     dist: torch.Tensor,
     topk: int,
@@ -196,38 +150,6 @@ def matrix_to_neighbor_lists(
         neighbor_ids[p, :n] = others
         neighbor_dists[p, :n] = dist[p, others]
     return neighbor_ids, neighbor_dists
-
-
-def build_language_specific_distance_matrix(
-    vocab: list[str], lang_code: str
-) -> torch.Tensor:
-    """
-    Distance matrix for one language: 0 between phoneme pairs that are
-    substitutions of each other for that language (from get_substitutions),
-    1 otherwise. Diagonal 0, symmetric.
-    """
-    V = len(vocab)
-    sid = {s: i for i, s in enumerate(vocab)}
-    dist_matrix = torch.full((V, V), float("inf"), dtype=torch.float32)
-    dist_matrix.fill_diagonal_(0.0)
-    edges = [set() for _ in range(V)]
-    for x in vocab:
-        i = sid[x]
-        subs = get_substitutions(lang_code, x)
-        edges[i] = {sid[y] for y in subs if y in sid}
-    for i in range(V):
-        for j in edges[i]:
-            dist_matrix[i, j] = 0.0
-            dist_matrix[j, i] = 0.0
-    return dist_matrix
-
-
-def build_all_language_distance_matrices(vocab: list[str]) -> Dict[str, torch.Tensor]:
-    """Returns dict lang_code -> (V, V) distance matrix for each language in ENGLISH_PHONEME_SUBSTITUTIONS."""
-    return {
-        lang: build_language_specific_distance_matrix(vocab, lang)
-        for lang in ENGLISH_PHONEME_SUBSTITUTIONS.keys()
-    }
 
 
 def build_oracle_distance_matrix(vocab: list[str], mapping_file: str) -> torch.Tensor:
@@ -350,24 +272,6 @@ def build_xeus_pr(
         dist_matrix = build_diacritic_distance_matrix(token_list)
         nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
         ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
-    elif ctc_config.get("ctc_type", "builtin") == "manual_distance":
-        dist_matrix = build_manual_distance_matrix(token_list)
-        nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
-        ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
-    elif ctc_config.get("ctc_type", "builtin") == "manual_distance_per_lang":
-        dist_by_lang = build_all_language_distance_matrices(token_list)
-        V = len(token_list)
-        # Identity (self-only): no other neighbors; use (V, 1) with -1 to avoid allocating (V, topk-1)
-        identity_ids = torch.full((V, 1), -1, dtype=torch.long)
-        identity_dists = torch.zeros((V, 1), dtype=torch.float32)
-        per_lang = {
-            lang: matrix_to_neighbor_lists(dist_by_lang[lang], topk=topk, blank_id=0)
-            for lang in dist_by_lang
-        }
-        ctc_config["artctc_neighbors_by_lang"] = {
-            "global": (identity_ids, identity_dists),
-            **per_lang,
-        }
     elif ctc_config.get("ctc_type", "builtin") == "oracle_branching":
         mapping_file = ctc_config.pop("oracle_mapping")
         if not mapping_file:
@@ -406,12 +310,8 @@ def build_xeus_pr(
     # Build optional attention decoder
     decoder = None
     if decoder_config:
-        from src.model.powsm.transformer_decoder import TransformerDecoder
-
-        decoder = TransformerDecoder(
-            vocab_size=vocab_size,
-            encoder_output_size=encoder.output_size(),
-            **decoder_config,
+        raise ValueError(
+            "TransformerDecoder has been removed from the codebase"
         )
 
     # Build model

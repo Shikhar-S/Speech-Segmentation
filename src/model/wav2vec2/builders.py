@@ -9,7 +9,6 @@ from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger
 from src.model.xeusphoneme.builders import (
     build_diacritic_distance_matrix,
-    build_manual_distance_matrix,
     build_panphon_distance_matrix,
     matrix_to_neighbor_lists,
 )
@@ -139,10 +138,6 @@ def build_wav2vec2pr(
         ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
     elif ctc_config.get("ctc_type", "builtin") == "diacritic_distance":
         dist_matrix = build_diacritic_distance_matrix(token_list)
-        nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
-        ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
-    elif ctc_config.get("ctc_type", "builtin") == "manual_distance":
-        dist_matrix = build_manual_distance_matrix(token_list)
         nids, ndists = matrix_to_neighbor_lists(dist_matrix, topk=topk, blank_id=0)
         ctc_config["artctc_neighbors_by_lang"] = {"global": (nids, ndists)}
     ctc = CTC(

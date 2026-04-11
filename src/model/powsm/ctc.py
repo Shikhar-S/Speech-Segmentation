@@ -114,19 +114,8 @@ class CTC(torch.nn.Module):
                 log.info(f"Using vectorized articulatory CTC without scheduling")
             else:
                 # use the scheduling variant
-                from src.model.powsm.scheduled_articulatory_ctc import (
-                    ScheduledArticulatoryCTC,
-                )
-
-                self.ctc_loss = ScheduledArticulatoryCTC(
-                    neighbors_by_lang=artctc_neighbors_by_lang,
-                    beta=artctc_beta,
-                    penalty_init=penalty_init,
-                    penalty_final=penalty_final,
-                    penalty_halflife=penalty_halflife,
-                )
-                log.info(
-                    f"Using scheduled articulatory CTC with scheduling parameters: {penalty_init}, {penalty_final}, {penalty_halflife}"
+                raise ValueError(
+                    "ScheduledArticulatoryCTC has been removed from the codebase."
                 )
 
         else:
@@ -196,11 +185,11 @@ class CTC(torch.nn.Module):
                 indices = torch.isfinite(ctc_grad)
                 size = indices.long().sum()
                 if size == 0:
-                    # Return as is
                     log.warning(
                         "All samples in this mini-batch got nan grad."
                         " Returning nan value instead of CTC loss"
                     )
+                    return loss
                 elif size != th_pred.size(1):
                     log.warning(
                         f"{th_pred.size(1) - size}/{th_pred.size(1)}"

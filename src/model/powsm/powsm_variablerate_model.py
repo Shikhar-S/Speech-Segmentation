@@ -12,7 +12,6 @@ from src.model.powsm.ctc import CTC
 from src.model.powsm.frontend import DefaultFrontend, GlobalMVN
 from src.model.powsm.specaug import SpecAug
 from src.model.powsm.e_branchformer import EBranchformerEncoder
-from src.model.powsm.transformer_decoder import TransformerDecoder
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=False)
@@ -34,12 +33,18 @@ class PowsmVariablerateModel(PowsmModel):
         return self.points_by_frames_
 
     def encode(self, speech, speech_lengths):
-        feat, featlen = super().encode(speech, speech_lengths)
+        result = super().encode(speech, speech_lengths)
+        if isinstance(result[0], tuple):
+            (feat, intermediate_outs), featlen = result
+        else:
+            feat, featlen = result
         feat = self.sampling_net(feat)
         feat = feat.view(
             feat.size(0), -1, int(feat.size(2) / self.sampling_ratio)
         ).contiguous()
         featlen = (featlen.float() * self.sampling_ratio).long()
+        if isinstance(result[0], tuple):
+            return (feat, intermediate_outs), featlen
         return feat, featlen
 
 
@@ -85,11 +90,8 @@ def build_powsm_vr_from_files(
     encoder_output_size = encoder.output_size()
 
     # 5. Decoder
-    assert args.decoder == "transformer", "Only Transformer decoder is supported!"
-    decoder = TransformerDecoder(
-        vocab_size=vocab_size,
-        encoder_output_size=encoder_output_size,
-        **args.decoder_conf,
+    raise ValueError(
+        "TransformerDecoder has been removed. Use CTC-only mode."
     )
 
     # 6. CTC

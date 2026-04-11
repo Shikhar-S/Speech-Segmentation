@@ -14,7 +14,6 @@ from espnet2.asr.encoder.transformer_encoder import TransformerEncoder
 from src.model.powsm.ctc import CTC
 from src.model.powsm.utils import force_gatherable
 from src.model.powsm.e_branchformer import EBranchformerEncoder
-from src.model.powsm.transformer_decoder import TransformerDecoder
 from src.model.powsm.builders_common import (
     load_token_list,
     load_config,
@@ -412,7 +411,7 @@ class PowsmModel(torch.nn.Module):
         # Filter out invalid samples where text is not available
         is_valid = [self.na not in y for y in ys_pad]
         if not any(is_valid):
-            return torch.tensor(0.0), None
+            return torch.tensor(0.0, device=encoder_out.device), None
 
         encoder_out = encoder_out[is_valid]
         encoder_out_lens = encoder_out_lens[is_valid]
@@ -446,6 +445,7 @@ class PowsmModel(torch.nn.Module):
                 - CTC logits: (Batch, Length, Vocab)
                 - Encoder output lengths: (Batch,)
         """
+        # NOTE: encode() may return (encoder_out, intermediate_outs) tuple when inter-CTC is enabled.
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
         logits = self.ctc.ctc_lo(encoder_out)
         return logits, encoder_out_lens
@@ -490,6 +490,7 @@ class PowsmModel(torch.nn.Module):
         # -1 is used as padding index in collate fn
         text = torch.where(text == -1, self.ignore_id, text)
         text = text[:, : text_lengths.max()]  # for data-parallel
+        # NOTE: encode() may return (encoder_out, intermediate_outs) tuple when inter-CTC is enabled.
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
         log_probs = self.ctc.log_softmax(encoder_out)  # (B, Tmax, odim)
         assert log_probs.size(0) == 1, "Forced alignment needs batch size 1"
@@ -500,6 +501,7 @@ class PowsmModel(torch.nn.Module):
                 f"encoder output length {encoder_out_lens.item()}."
                 f"Utterance id is :{utt_id}"
             )
+            return None, None
         align_label, align_prob = torchaudio.functional.forced_align(
             log_probs, text, encoder_out_lens, text_lengths, blank=self.blank_id
         )
@@ -547,14 +549,14 @@ def build_powsm_from_files(
         encoder = EBranchformerEncoder(input_size=input_size, **args.encoder_conf)
     elif args.encoder == "transformer":
         encoder = TransformerEncoder(input_size=input_size, **args.encoder_conf)
+    else:
+        raise ValueError(f"Unknown encoder type: {args.encoder}")
     encoder_output_size = encoder.output_size()
 
     # 5. Decoder
-    assert args.decoder == "transformer", "Only Transformer decoder is supported!"
-    decoder = TransformerDecoder(
-        vocab_size=vocab_size,
-        encoder_output_size=encoder_output_size,
-        **args.decoder_conf,
+    raise ValueError(
+        "TransformerDecoder has been removed. "
+        "Use CTC-only mode (architecture='enc')."
     )
 
     # 6. CTC
