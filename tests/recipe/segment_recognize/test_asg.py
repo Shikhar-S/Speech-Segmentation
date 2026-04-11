@@ -334,6 +334,49 @@ def test_batch_order_invariance():
     )
 
 
+def test_batched_mixed_lengths():
+    """Batched DP matches per-utterance DP with varied hlens/ylens."""
+    V, T = 4, 10
+    torch.manual_seed(12)
+    model = _make_model(num_labels=V)
+    with torch.no_grad():
+        model.transitions.normal_(std=0.4)
+
+    emissions = torch.randn(4, T, V)
+    targets = torch.tensor([
+        [1, 2, 3, 0],
+        [2, 1, 0, 0],
+        [3, 2, 1, 1],
+        [1, 0, 0, 0],
+    ])
+    hlens = torch.tensor([T, 7, 9, 5])
+    ylens = torch.tensor([3, 2, 4, 1])
+
+    # Batched result from the model
+    loss_batched = model(emissions, targets, hlens, ylens)
+
+    # Per-utterance reference using private methods
+    dtype = (
+        torch.float64
+        if model.use_double_scores
+        else emissions.dtype
+    )
+    em = emissions.to(dtype)
+    trans = model.transitions.to(dtype)
+    ys, _ = model._preprocess_targets(targets, ylens)
+    ref = []
+    for b in range(4):
+        e = em[b, : hlens[b].item()]
+        num = model._numerator(e, ys[b], trans)
+        den = model._denominator(e, trans)
+        ref.append(-num + den)
+    loss_ref = torch.stack(ref)
+
+    torch.testing.assert_close(
+        loss_batched, loss_ref, atol=1e-5, rtol=1e-5,
+    )
+
+
 def test_k2_fallback_dp_parity():
     """K2 fallback (DP path) produces identical results to DP."""
     V, T = 4, 6

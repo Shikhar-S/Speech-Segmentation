@@ -126,7 +126,11 @@ class AutoSegmentationCriterion(nn.Module):
         ys: List[List[int]],
         hlens: torch.Tensor,
     ) -> torch.Tensor:
-        """DP forward: per-utterance numerator and denominator.
+        """Batched DP forward: numerator and denominator.
+
+        Vectorises across both the batch dimension and label
+        positions so the only remaining Python loop is over time
+        steps (inherent sequential DP dependency).
 
         Args:
             emissions: ``(B, T, V)`` sorted/filtered emissions.
@@ -144,14 +148,124 @@ class AutoSegmentationCriterion(nn.Module):
         emissions = emissions.to(dtype)
         trans = self.transitions.to(dtype)
 
-        losses = []
-        for b in range(emissions.size(0)):
-            e = emissions[b, : hlens[b].item()]
-            num = self._numerator(e, ys[b], trans)
-            den = self._denominator(e, trans)
-            losses.append(-num + den)
+        B = emissions.size(0)
+        device = emissions.device
+        ylens_list = [len(y) for y in ys]
+        L_max = max(ylens_list)
+        targets = torch.zeros(
+            B, L_max, dtype=torch.long, device=device,
+        )
+        for b, y in enumerate(ys):
+            targets[b, : len(y)] = torch.tensor(
+                y, dtype=torch.long,
+            )
+        ylens = torch.tensor(
+            ylens_list, dtype=torch.long, device=device,
+        )
 
-        return torch.stack(losses)
+        num = self._batched_numerator(
+            emissions, targets, ylens, hlens, trans,
+        )
+        den = self._batched_denominator(
+            emissions, hlens, trans,
+        )
+        return -num + den
+
+    def _batched_numerator(
+        self,
+        emissions: torch.Tensor,
+        targets: torch.Tensor,
+        ylens: torch.Tensor,
+        hlens: torch.Tensor,
+        trans: torch.Tensor,
+    ) -> torch.Tensor:
+        """Constrained forward score, batched over utterances.
+
+        ``alpha[b, i]`` = log-sum-exp score of all paths ending
+        at target position ``i`` at the current time step, for
+        utterance ``b``.
+
+        Args:
+            emissions: ``(B, T, V)`` emission scores.
+            targets: ``(B, L_max)`` padded target indices.
+            ylens: ``(B,)`` target lengths.
+            hlens: ``(B,)`` emission lengths.
+            trans: ``(V, V)`` transition scores.
+
+        Returns:
+            ``(B,)`` log-sum-exp numerator scores.
+        """
+        B, T, _ = emissions.shape
+        L = targets.shape[1]
+        NEG = torch.tensor(
+            -1e10, device=emissions.device,
+            dtype=emissions.dtype,
+        )
+
+        # Pre-gather emission scores at target positions.
+        idx = targets.unsqueeze(1).expand(-1, T, -1)
+        emit = emissions.gather(2, idx)          # (B, T, L)
+
+        # Pre-compute transition scores.
+        stay_tr = trans[targets, targets]         # (B, L)
+        prev_t = torch.cat(
+            [targets[:, :1], targets[:, :-1]], dim=1,
+        )
+        adv_tr = trans[prev_t, targets]           # (B, L)
+
+        alpha = NEG.expand(B, L).clone()
+        alpha[:, 0] = emit[:, 0, 0]
+
+        for t in range(1, T):
+            stay = alpha + stay_tr
+            adv = NEG.expand(B, L).clone()
+            adv[:, 1:] = alpha[:, :-1] + adv_tr[:, 1:]
+            alpha_next = (
+                torch.logaddexp(stay, adv)
+                + emit[:, t, :]
+            )
+            mask = (t < hlens).unsqueeze(1)
+            alpha = torch.where(mask, alpha_next, alpha)
+
+        return alpha[
+            torch.arange(B, device=alpha.device),
+            ylens - 1,
+        ]
+
+    def _batched_denominator(
+        self,
+        emissions: torch.Tensor,
+        hlens: torch.Tensor,
+        trans: torch.Tensor,
+    ) -> torch.Tensor:
+        """Partition function, batched over utterances.
+
+        ``beta[b, j]`` = log-sum-exp score of all paths ending
+        in label ``j`` at the current time step, for utterance
+        ``b``.
+
+        Args:
+            emissions: ``(B, T, V)`` emission scores.
+            hlens: ``(B,)`` emission lengths.
+            trans: ``(V, V)`` transition scores.
+
+        Returns:
+            ``(B,)`` log-partition scores.
+        """
+        B, T, _ = emissions.shape
+        beta = emissions[:, 0, :]                # (B, V)
+
+        for t in range(1, T):
+            beta_next = (
+                torch.logsumexp(
+                    beta.unsqueeze(2) + trans, dim=1,
+                )
+                + emissions[:, t, :]
+            )
+            mask = (t < hlens).unsqueeze(1)
+            beta = torch.where(mask, beta_next, beta)
+
+        return torch.logsumexp(beta, dim=1)
 
     def _numerator(
         self,
