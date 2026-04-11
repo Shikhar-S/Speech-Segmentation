@@ -380,3 +380,49 @@ def test_boundary_gradient(boundary_loss_fn):
     out["loss"].backward()
     assert logits.grad is not None
     assert logits.grad.isfinite().all()
+
+
+def test_boundary_duplicate_positions(boundary_loss_fn):
+    """Two phones starting at the same frame: label should be 1, not 2."""
+    B, S = 1, 6
+    logits = torch.randn(B, S)
+    # Both phones start at frame 2
+    t_start = torch.tensor([[2, 2, 5]], dtype=torch.long)
+    logit_lens = torch.tensor([S], dtype=torch.long)
+    run_boundary_comparison(
+        boundary_loss_fn, logits, logit_lens, t_start,
+    )
+
+
+def test_boundary_negative_indices(boundary_loss_fn):
+    """Negative start indices must be ignored (not wrap around)."""
+    B, S = 1, 8
+    logits = torch.randn(B, S)
+    t_start = torch.tensor([[-1, 3]], dtype=torch.long)
+    logit_lens = torch.tensor([S], dtype=torch.long)
+    t_lens = torch.tensor([2], dtype=torch.long)
+    run_boundary_comparison(
+        boundary_loss_fn, logits, logit_lens, t_start, t_lens,
+    )
+
+
+def test_boundary_empty_targets(boundary_loss_fn):
+    """t_lens=0: no phones, every frame should have label=0."""
+    B, S = 1, 6
+    logits = torch.randn(B, S)
+    t_start = torch.tensor([[99]], dtype=torch.long)
+    logit_lens = torch.tensor([S], dtype=torch.long)
+    t_lens = torch.tensor([0], dtype=torch.long)
+    run_boundary_comparison(
+        boundary_loss_fn, logits, logit_lens, t_start, t_lens,
+    )
+
+
+def test_boundary_single_frame(boundary_loss_fn):
+    """Minimal case: 1 frame, 1 phone boundary at frame 0."""
+    logits = torch.randn(1, 1)
+    t_start = torch.tensor([[0]], dtype=torch.long)
+    logit_lens = torch.tensor([1], dtype=torch.long)
+    run_boundary_comparison(
+        boundary_loss_fn, logits, logit_lens, t_start,
+    )
