@@ -381,6 +381,8 @@ class SegmentationEvaluator:
                         gts_.append(g)
                 preds = preds_
                 gts = gts_
+                # NOTE: syms is filtered independently of the paired preds/gts
+                # filtering above, which may cause misalignment if labels diverge.
                 if syms:
                     syms = [s for s in syms if s not in skip_symbols]
 
@@ -451,7 +453,10 @@ class SegmentationEvaluator:
                     merged_symbols[sym]["end_all"].append(stats["end_mean"])
                     merged_symbols[sym]["dur_all"].append(stats["dur_mean"])
 
-            aggregated["symbol_errors"] = {
+            # NOTE: Unweighted mean-of-means — each utterance's symbol mean has
+        # equal weight regardless of instance count. Weighting by count would
+        # give more accurate aggregates.
+        aggregated["symbol_errors"] = {
                 sym: {
                     "count": data["count"],
                     "pbe_mean": np.mean(data["pbe_all"]),

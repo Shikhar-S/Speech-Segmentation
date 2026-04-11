@@ -194,6 +194,10 @@ class AsrModel(nn.Module):
             to be un-padded and concatenated within 1 dimension.
         """
         # Compute CTC log-prob
+        # NOTE: When use_ctc_hybrid_head=True, ctc_output produces
+        # vocab_size-1 dims but this method does not merge back the
+        # blank prediction (unlike forward_cr_ctc). CTC loss receives
+        # wrong-sized input in that case.
         ctc_output = self.ctc_output(encoder_out)  # (N, T, C)
         ctc_output = F.log_softmax(ctc_output, dim=-1)
 

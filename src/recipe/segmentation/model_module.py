@@ -48,6 +48,8 @@ def _ctc_boundary_flags(
     labels = logits[:valid_len].argmax(dim=-1).tolist()
     flags = [False] * valid_len
     prev = blank_id
+    # NOTE: Does not detect repeated-phone boundaries (e.g., "A blank A"
+    # produces one boundary instead of two). Only tracks label changes.
     for i, lab in enumerate(labels):
         if lab != blank_id and lab != prev:
             flags[i] = True

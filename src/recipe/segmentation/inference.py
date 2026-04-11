@@ -183,6 +183,7 @@ def _boundary_flags_to_units(
                 label=0,
             ))
             start = i
+    # NOTE: When valid_len == 0, this creates a zero-duration segment.
     units.append(SegmentationUnit(
         start=start * points / sr,
         end=valid_len * points / sr,

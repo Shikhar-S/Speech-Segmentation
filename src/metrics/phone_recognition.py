@@ -281,6 +281,8 @@ class PhoneRecognitionEvaluator:
         language: str,
     ) -> None:
         """Append summary metrics to a CSV file."""
+        # NOTE: os.path.dirname returns "" for bare filenames, causing
+        # os.makedirs("") to fail.
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         write_header = (
             not os.path.exists(output_file) or os.path.getsize(output_file) == 0
