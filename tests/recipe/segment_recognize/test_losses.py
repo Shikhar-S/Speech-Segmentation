@@ -1,4 +1,4 @@
-"""Unit tests for individual LossModule implementations."""
+"""Unit tests for individual TaskHead implementations."""
 
 import torch
 import torch.nn as nn
@@ -6,15 +6,15 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from src.recipe.segment_recognize.layers.base import LossModule
-from src.recipe.segment_recognize.layers.bce_boundary import (
-    BCEBoundaryLoss,
+from src.recipe.segment_recognize.heads.base import TaskHead
+from src.recipe.segment_recognize.heads.bce_boundary import (
+    BCEBoundaryHead,
 )
-from src.recipe.segment_recognize.layers.fa_segmentation import (
-    FASegmentationLoss,
+from src.recipe.segment_recognize.heads.fa_segmentation import (
+    FASegmentationHead,
 )
-from src.recipe.segment_recognize.layers.ctc_recognition import (
-    CTCRecognitionLoss,
+from src.recipe.segment_recognize.heads.ctc_recognition import (
+    CTCRecognitionHead,
 )
 
 
@@ -49,7 +49,7 @@ def _dummy_net():
 
 
 def _seg_batch():
-    """Batch dict expected by seg losses."""
+    """Batch dict expected by seg heads."""
     return {
         "speech": torch.randn(B, T * POINTS),
         "speech_length": torch.full((B,), T * POINTS, dtype=torch.long),
@@ -67,7 +67,7 @@ def _seg_batch():
 
 
 def _pr_batch():
-    """Batch dict expected by PR losses."""
+    """Batch dict expected by PR heads."""
     return {
         "speech": torch.randn(B, T * POINTS),
         "speech_length": torch.full((B,), T * POINTS, dtype=torch.long),
@@ -77,11 +77,11 @@ def _pr_batch():
     }
 
 
-# -- BCEBoundaryLoss -------------------------------------------
+# -- BCEBoundaryHead ------------------------------------------
 
 
 def test_bce_forward_returns_loss():
-    lm = BCEBoundaryLoss(encoder_dim=ENCODER_DIM)
+    lm = BCEBoundaryHead(encoder_dim=ENCODER_DIM)
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
     out = lm(feat, lens, _seg_batch())
@@ -92,7 +92,7 @@ def test_bce_forward_returns_loss():
 
 
 def test_bce_eval_metrics_keys():
-    lm = BCEBoundaryLoss(encoder_dim=ENCODER_DIM)
+    lm = BCEBoundaryHead(encoder_dim=ENCODER_DIM)
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
     out = lm(feat, lens, _seg_batch())
@@ -103,7 +103,7 @@ def test_bce_eval_metrics_keys():
 
 
 def test_bce_boundary_head_grad():
-    lm = BCEBoundaryLoss(encoder_dim=ENCODER_DIM)
+    lm = BCEBoundaryHead(encoder_dim=ENCODER_DIM)
     feat = torch.randn(B, T, ENCODER_DIM, requires_grad=True)
     lens = torch.full((B,), T, dtype=torch.long)
     out = lm(feat, lens, _seg_batch())
@@ -112,11 +112,11 @@ def test_bce_boundary_head_grad():
     assert lm.boundary_head.weight.grad.abs().sum() > 0
 
 
-# -- FASegmentationLoss ----------------------------------------
+# -- FASegmentationHead ----------------------------------------
 
 
 def test_fa_forward_returns_loss_and_accuracy():
-    lm = FASegmentationLoss()
+    lm = FASegmentationHead()
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
@@ -127,7 +127,7 @@ def test_fa_forward_returns_loss_and_accuracy():
 
 
 def test_fa_eval_metrics():
-    lm = FASegmentationLoss()
+    lm = FASegmentationHead()
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
@@ -136,11 +136,11 @@ def test_fa_eval_metrics():
     assert "fa_accuracy" in metrics
 
 
-# -- CTCRecognitionLoss ----------------------------------------
+# -- CTCRecognitionHead ----------------------------------------
 
 
 def test_ctc_forward_delegates_to_net():
-    lm = CTCRecognitionLoss()
+    lm = CTCRecognitionHead()
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
@@ -151,7 +151,7 @@ def test_ctc_forward_delegates_to_net():
 
 
 def test_ctc_eval_metrics_extracts_scalars():
-    lm = CTCRecognitionLoss()
+    lm = CTCRecognitionHead()
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
@@ -165,12 +165,12 @@ def test_ctc_eval_metrics_extracts_scalars():
 
 
 def test_loss_module_weight():
-    lm = BCEBoundaryLoss(encoder_dim=ENCODER_DIM, weight=0.5)
+    lm = BCEBoundaryHead(encoder_dim=ENCODER_DIM, weight=0.5)
     assert lm.weight == 0.5
 
 
 def test_log_output_calls_pl_log():
-    lm = BCEBoundaryLoss(encoder_dim=ENCODER_DIM)
+    lm = BCEBoundaryHead(encoder_dim=ENCODER_DIM)
     pl = MagicMock(spec=["log"])
     out = {"loss": torch.tensor(1.0)}
     metrics = {"precision": 0.8, "rval": 0.7}
@@ -183,13 +183,13 @@ def test_log_output_calls_pl_log():
 
 def test_kwargs_absorbed():
     """Extra kwargs (from inject dict) don't raise."""
-    lm = BCEBoundaryLoss(
+    lm = BCEBoundaryHead(
         encoder_dim=16, effective_pbf=320.0,
         audio_sr=32000, unknown_param=42,
     )
     assert lm.audio_sr == 32000
 
-    lm2 = CTCRecognitionLoss(
+    lm2 = CTCRecognitionHead(
         encoder_dim=16, effective_pbf=320.0,
     )
     assert lm2.weight == 1.0

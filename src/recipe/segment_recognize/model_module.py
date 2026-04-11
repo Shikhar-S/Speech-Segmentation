@@ -33,7 +33,7 @@ class SegmentRecognizeModel(LightningModule):
     """Multitasking Segmentation + Recognition model.
 
     Losses are provided as Hydra config dicts and instantiated at
-    construction time.  Each ``LossModule`` owns its parameters,
+    construction time.  Each ``TaskHead`` owns its parameters,
     criterion, and metric trackers.
 
     Args:
@@ -278,7 +278,7 @@ def _instantiate_losses(
             (``encoder_dim``, ``effective_pbf``, ``audio_sr``).
 
     Returns:
-        Dict of instantiated ``LossModule`` objects.
+        Dict of instantiated ``TaskHead`` objects.
     """
     if not cfg:
         return {}
@@ -299,7 +299,7 @@ if __name__ == "__main__":
             "bce": {
                 "_target_": (
                     "src.recipe.segment_recognize"
-                    ".layers.bce_boundary.BCEBoundaryLoss"
+                    ".heads.bce_boundary.BCEBoundaryHead"
                 ),
                 "weight": 1.0,
             },
@@ -309,7 +309,7 @@ if __name__ == "__main__":
                 "_target_": (
                     "src.recipe.segment_recognize"
                     ".layers.ctc_recognition"
-                    ".CTCRecognitionLoss"
+                    ".CTCRecognitionHead"
                 ),
                 "weight": 1.0,
             },

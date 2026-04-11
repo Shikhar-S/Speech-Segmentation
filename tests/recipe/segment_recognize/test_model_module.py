@@ -61,11 +61,11 @@ class DummyNet(nn.Module):
 
 BCE_TARGET = (
     "src.recipe.segment_recognize"
-    ".layers.bce_boundary.BCEBoundaryLoss"
+    ".heads.bce_boundary.BCEBoundaryHead"
 )
 CTC_TARGET = (
     "src.recipe.segment_recognize"
-    ".layers.ctc_recognition.CTCRecognitionLoss"
+    ".heads.ctc_recognition.CTCRecognitionHead"
 )
 
 
@@ -209,7 +209,7 @@ def test_multiple_seg_losses():
     """Model supports multiple seg losses simultaneously."""
     fa_target = (
         "src.recipe.segment_recognize"
-        ".layers.fa_segmentation.FASegmentationLoss"
+        ".heads.fa_segmentation.FASegmentationHead"
     )
     model = _make_model(
         seg_losses={

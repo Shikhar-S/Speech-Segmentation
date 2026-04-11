@@ -1,15 +1,15 @@
-"""CTC phone-recognition loss module."""
+"""CTC phone-recognition head."""
 
 from collections.abc import Mapping
 from typing import Any
 
 import torch
 
-from src.recipe.segment_recognize.layers.base import LossModule
+from src.recipe.segment_recognize.heads.base import TaskHead
 
 
-class CTCRecognitionLoss(LossModule):
-    """CTC phone-recognition loss.
+class CTCRecognitionHead(TaskHead):
+    """CTC phone-recognition head.
 
     Owns no parameters -- delegates entirely to
     ``net._calc_ctc_loss`` (passed via context).

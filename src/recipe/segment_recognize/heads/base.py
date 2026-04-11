@@ -1,4 +1,4 @@
-"""Base class for composable loss modules."""
+"""Base class for composable task heads."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -9,11 +9,11 @@ from lightning import LightningModule
 from torchmetrics import MeanMetric
 
 
-class LossModule(nn.Module):
-    """Self-contained loss with parameters, criterion, and metrics.
+class TaskHead(nn.Module):
+    """Self-contained task head with parameters, criterion, and metrics.
 
     Subclasses implement ``forward()`` and optionally
-    ``eval_metrics()``.  The hosting model composes losses via
+    ``eval_metrics()``.  The hosting model composes heads via
     ``nn.ModuleDict``, iterating and summing
     ``weight * output["loss"]``.
 

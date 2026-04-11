@@ -10,12 +10,12 @@ net: ???
 seg_losses:
   _recursive_: false
   bce:
-    _target_: src.recipe.segment_recognize.layers.bce_boundary.BCEBoundaryLoss
+    _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
     weight: 1.0
     pos_weight: 1.0
     tolerance_ms: 20
 pr_losses:
   _recursive_: false
   ctc:
-    _target_: src.recipe.segment_recognize.layers.ctc_recognition.CTCRecognitionLoss
+    _target_: src.recipe.segment_recognize.heads.ctc_recognition.CTCRecognitionHead
     weight: 1.0

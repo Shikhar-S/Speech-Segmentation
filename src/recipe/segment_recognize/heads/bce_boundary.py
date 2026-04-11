@@ -1,4 +1,4 @@
-"""BCE boundary detection loss module."""
+"""BCE boundary detection head."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -14,13 +14,13 @@ from src.recipe.segmentation.inference import (
     _boundary_flags_to_units,
 )
 from src.recipe.segmentation.segmentation_loss import BoundaryLoss
-from src.recipe.segment_recognize.layers.base import LossModule
+from src.recipe.segment_recognize.heads.base import TaskHead
 
 
-class BCEBoundaryLoss(LossModule):
-    """Binary boundary detection loss.
+class BCEBoundaryHead(TaskHead):
+    """Binary boundary detection head.
 
-    Owns a linear head that projects encoder features to per-frame
+    Owns a linear projection that maps encoder features to per-frame
     boundary logits, plus a ``BoundaryLoss`` criterion and a
     ``SegmentationEvaluator`` for P/R/F1/R-value metrics.
 

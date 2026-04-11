@@ -73,11 +73,11 @@ class DummyNet(nn.Module):
 
 BCE_TARGET = (
     "src.recipe.segment_recognize"
-    ".layers.bce_boundary.BCEBoundaryLoss"
+    ".heads.bce_boundary.BCEBoundaryHead"
 )
 CTC_TARGET = (
     "src.recipe.segment_recognize"
-    ".layers.ctc_recognition.CTCRecognitionLoss"
+    ".heads.ctc_recognition.CTCRecognitionHead"
 )
 
 

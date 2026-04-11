@@ -1,4 +1,4 @@
-"""Frame-wise forced-alignment segmentation loss module."""
+"""Frame-wise forced-alignment segmentation head."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -6,11 +6,11 @@ from typing import Any
 import torch
 
 from src.recipe.segmentation.segmentation_loss import SegmentationLoss
-from src.recipe.segment_recognize.layers.base import LossModule
+from src.recipe.segment_recognize.heads.base import TaskHead
 
 
-class FASegmentationLoss(LossModule):
-    """Frame-level forced-alignment loss.
+class FASegmentationHead(TaskHead):
+    """Frame-level forced-alignment head.
 
     No owned parameters -- uses ``net.ctc.ctc_lo`` (passed via
     context) to project encoder features into CTC logits, then
