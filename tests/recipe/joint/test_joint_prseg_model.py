@@ -320,3 +320,16 @@ def test_normalize_pr_item():
     assert "text" in item
     assert isinstance(item["text"], torch.Tensor)
     assert item["text_length"] == 3
+
+
+def test_on_validation_epoch_end_no_seg_updates():
+    """on_validation_epoch_end does not crash when val_seg_loss was
+    never updated -- i.e. no segmentation batches in the epoch
+    (bug M39)."""
+    model = _make_model()
+    # val_seg_loss has not been updated: mean_value=0, weight=0.
+    # The method should early-return instead of computing NaN.
+    model.on_validation_epoch_end()
+    # If we get here without error, the guard clause works.
+    # Also verify the metric was not accidentally updated.
+    assert model.val_seg_loss.weight.item() == 0

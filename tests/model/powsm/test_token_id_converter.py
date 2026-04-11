@@ -67,3 +67,34 @@ def test_build_powsm_tokenizer_invokes_snapshot(monkeypatch, tmp_path):
         "local_dir_use_symlinks": False,
     }
     assert converter.token_list[1] == "foo"
+
+
+def test_whitespace_token_preserved(tmp_path):
+    """Space character as a token is preserved (bug M25 fix)."""
+    tokens_file = tmp_path / "tokens.txt"
+    # Line with a single space: first char kept, rest rstripped -> " "
+    tokens_file.write_text("<unk>\n \nA\n", encoding="utf-8")
+
+    converter = tic.TokenIDConverter(token_list=tokens_file)
+
+    assert " " in converter.token_list
+    assert converter.token2id[" "] == 1
+    assert converter.get_num_vocabulary_size() == 3
+
+
+def test_build_powsm_tokenizer_whitespace(tmp_path):
+    """build_powsm_tokenizer_from_files preserves space token (M25)."""
+    tokens_file = tmp_path / "tokens.txt"
+    tokens_file.write_text("<unk>\n \nB\n", encoding="utf-8")
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        yaml.safe_dump({"token_list": str(tokens_file)}),
+        encoding="utf-8",
+    )
+
+    converter = tic.build_powsm_tokenizer_from_files(str(config_file))
+
+    assert " " in converter.token_list
+    assert converter.token_list[1] == " "
+    assert converter.get_num_vocabulary_size() == 3
