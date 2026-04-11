@@ -99,10 +99,18 @@ def run_distributed_inference_(
         limit_samples: if set, limit the number of samples to process (useful for testing)
     """
 
-    dataset_cfg = OmegaConf.to_container(dataset_cfg, resolve=True)
-    inference_config = OmegaConf.to_container(inference_config, resolve=True)
-    if inference_call_args is not None:
-        inference_call_args = OmegaConf.to_container(inference_call_args, resolve=True)
+    if OmegaConf.is_config(dataset_cfg):
+        dataset_cfg = OmegaConf.to_container(dataset_cfg, resolve=True)
+    if OmegaConf.is_config(inference_config):
+        inference_config = OmegaConf.to_container(
+            inference_config, resolve=True
+        )
+    if inference_call_args is not None and OmegaConf.is_config(
+        inference_call_args
+    ):
+        inference_call_args = OmegaConf.to_container(
+            inference_call_args, resolve=True
+        )
 
     # fail fast
     assert out_file, "Please provide an out_file to save results."

@@ -325,29 +325,27 @@ def test_trainable_params_decoder_in_head():
     not _xeus_config_exists, reason=f"Xeus config not found at {XEUS_CONFIG}"
 )
 def test_builder_creates_transformer_decoder():
-    """build_xeus_pr() with decoder_config creates a TransformerDecoder."""
+    """TransformerDecoder was removed; passing decoder_config raises."""
     from src.model.xeusphoneme.builders import build_xeus_pr
 
-    model = build_xeus_pr(
-        config_file=XEUS_CONFIG,
-        checkpoint=None,
-        vocab_file=XEUS_VOCAB,
-        ctc_config={"ctc_type": "builtin"},
-        ctc_weight=0.3,
-        decoder_config={
-            "attention_heads": 4,
-            "linear_units": 512,
-            "num_blocks": 2,
-            "dropout_rate": 0.1,
-            "positional_dropout_rate": 0.1,
-            "input_layer": "embed",
-            "use_output_layer": True,
-            "normalize_before": True,
-        },
-    )
-    assert model.decoder is not None, "Expected a decoder instance"
-    assert model.ctc_weight == 0.3
-    assert hasattr(model, "criterion_att")
+    with pytest.raises(ValueError, match="TransformerDecoder has been removed"):
+        build_xeus_pr(
+            config_file=XEUS_CONFIG,
+            checkpoint=None,
+            vocab_file=XEUS_VOCAB,
+            ctc_config={"ctc_type": "builtin"},
+            ctc_weight=0.3,
+            decoder_config={
+                "attention_heads": 4,
+                "linear_units": 512,
+                "num_blocks": 2,
+                "dropout_rate": 0.1,
+                "positional_dropout_rate": 0.1,
+                "input_layer": "embed",
+                "use_output_layer": True,
+                "normalize_before": True,
+            },
+        )
 
 
 @pytest.mark.skipif(
