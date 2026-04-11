@@ -175,7 +175,7 @@ class TestAlignmentEvaluator(unittest.TestCase):
 
         self.assertEqual(results["total_segments"], 2)
         self.assertEqual(results["total_samples"], 4)  # 2 segments * 2 phonemes
-        self.assertIn("mean_f1", results)
+        self.assertIn("f1", results)
 
     def test_batch_with_symbols(self):
         """Test batch evaluation with symbol analysis."""
@@ -252,7 +252,7 @@ class TestAlignmentEvaluator(unittest.TestCase):
         batch_gt = {"seg1": make_results([(0.0, 0.1), (0.1, 0.2)])}
         results = self.evaluator.evaluate_batch(batch_pred, batch_gt)
 
-        self.assertIn("mean_rval", results)
+        self.assertIn("rval", results)
 
 
 class TestEdgeCases(unittest.TestCase):
@@ -427,8 +427,8 @@ class TestFreeModeEvaluator(unittest.TestCase):
 
         results = self.evaluator.evaluate_batch(batch_pred, batch_gt)
 
-        self.assertIn("mean_f1", results)
-        self.assertIn("mean_rval", results)
+        self.assertIn("f1", results)
+        self.assertIn("rval", results)
         self.assertEqual(results["total_segments"], 2)
         # total_samples uses n_gt: 4 + 2 = 6
         self.assertEqual(results["total_samples"], 6)
