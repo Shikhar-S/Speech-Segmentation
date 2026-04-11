@@ -92,22 +92,22 @@ Task-specific Lightning modules (model + data glue):
 - `phone_recognition/` – Phone recognition models and error analysis
 - `segmentation/` – Standalone segmentation (`SegmentationModel`, `SegmentationLoss`, `SegmentationInference`)
 - `joint/` – `JointPRSegModel`: monolithic joint PR + segmentation with inline losses
-- `segment_recognize/` – `SegmentRecognizeModel`: composable joint PR + segmentation using modular `LossModule` classes in `layers/`. Preferred for new experiments. See below.
+- `segment_recognize/` – `SegmentRecognizeModel`: composable joint PR + segmentation using modular `TaskHead` classes in `heads/`. Preferred for new experiments. See below.
 
 ### Composable Loss System (`src/recipe/segment_recognize/`)
 
-`SegmentRecognizeModel` replaces `JointPRSegModel` with a composable architecture. Losses are self-contained `LossModule(nn.Module)` classes that own their parameters, criteria, metric trackers, and eval logic.
+`SegmentRecognizeModel` replaces `JointPRSegModel` with a composable architecture. Task heads are self-contained `TaskHead(nn.Module)` classes that own their parameters, criteria, metric trackers, and eval logic.
 
-**`layers/base.py` — `LossModule`**: Base class. Subclasses implement `forward()` → `{"loss": tensor, ...}` and optionally `eval_metrics()`. Each module has `train_loss`/`val_loss` MeanMetric trackers and a `log_output()` helper.
+**`heads/base.py` — `TaskHead`**: Base class. Subclasses implement `forward()` → `{"loss": tensor, ...}` and optionally `eval_metrics()`. Each head has `train_loss`/`val_loss` MeanMetric trackers and a `log_output()` helper.
 
-**Concrete losses** (`layers/`):
-- `BCEBoundaryLoss` — owns `boundary_head: nn.Linear(D, 1)`, `BoundaryLoss` criterion, `SegmentationEvaluator` for P/R/F1/R-value
-- `FASegmentationLoss` — uses `net.ctc.ctc_lo` (via `**ctx`) for frame-level forced-alignment loss
-- `CTCRecognitionLoss` — delegates to `net._calc_ctc_loss` (via `**ctx`)
+**Concrete heads** (`heads/`):
+- `BCEBoundaryHead` — owns `boundary_head: nn.Linear(D, 1)`, `BoundaryLoss` criterion, `SegmentationEvaluator` for P/R/F1/R-value
+- `FASegmentationHead` — uses `net.ctc.ctc_lo` (via `**ctx`) for frame-level forced-alignment loss
+- `CTCRecognitionHead` — delegates to `net._calc_ctc_loss` (via `**ctx`)
 
-**Model composition**: Losses registered in `nn.ModuleDict` (`seg_losses`, `pr_losses`). Training step iterates over each group. Losses are instantiated from Hydra config with runtime-injected `encoder_dim`, `effective_pbf`, `audio_sr`.
+**Model composition**: Heads registered in `nn.ModuleDict` (`seg_losses`, `pr_losses`). Training step iterates over each group. Heads are instantiated from Hydra config with runtime-injected `encoder_dim`, `effective_pbf`, `audio_sr`.
 
-**Adding a new loss**: Write a `LossModule` subclass, add to config under `seg_losses` or `pr_losses`. No model code changes.
+**Adding a new head**: Write a `TaskHead` subclass, add to config under `seg_losses` or `pr_losses`. No model code changes.
 
 **Configs**: `configs/model/segment_recognize.yaml`, `configs/experiment/train/sr_*.yaml`. Reuses `configs/data/joint_prseg.yaml` (same batch format).
 
