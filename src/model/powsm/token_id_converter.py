@@ -79,7 +79,7 @@ def build_powsm_tokenizer_from_files(
     args = argparse.Namespace(**args)
     if isinstance(args.token_list, str):
         with open(args.token_list, encoding="utf-8") as f:
-            token_list = [line.rstrip() for line in f]
+            token_list = [line[0] + line[1:].rstrip() for line in f]
         args.token_list = list(token_list)
     elif isinstance(args.token_list, (tuple, list)):
         token_list = list(args.token_list)

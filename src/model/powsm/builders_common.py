@@ -38,7 +38,7 @@ def load_token_list(
     """
     if isinstance(token_list_source, str):
         with open(token_list_source, encoding="utf-8") as f:
-            token_list = [line.rstrip() for line in f]
+            token_list = [line[0] + line[1:].rstrip() for line in f]
         return list(token_list)
     elif isinstance(token_list_source, (tuple, list)):
         return list(token_list_source)

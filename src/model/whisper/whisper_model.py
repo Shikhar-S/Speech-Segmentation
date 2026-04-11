@@ -43,6 +43,11 @@ def preprocess_inputs_whisper(
     Returns:
         input_features: (B, n_mels, T_mel) tensor ready for Whisper encoder.
     """
+    if isinstance(speech, torch.Tensor) and speech.ndim == 1:
+        raise RuntimeError(
+            f"Expected 2D speech tensor (batch, time), got 1D:"
+            f" {speech.shape}"
+        )
     if isinstance(speech, torch.Tensor):
         speech = speech if speech.ndim == 1 else list(speech)
 

@@ -326,6 +326,9 @@ class JointPRSegModel(LightningModule):
                          prog_bar=(k == "rval"))
 
     def on_validation_epoch_end(self) -> None:
+        if (self.val_seg_loss.mean_value.item() == 0
+                and self.val_seg_loss.weight.item() == 0):
+            return
         loss = self.val_seg_loss.compute()
         self.val_seg_loss_best(loss)
         self.log(

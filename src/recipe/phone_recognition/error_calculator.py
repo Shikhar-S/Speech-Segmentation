@@ -22,6 +22,7 @@ class ErrorCalculator:
             token_list.index(sym_space) if sym_space in token_list else None
         )
         self.ignore_set = {ignore_id, blank_id, self.idx_space}
+        self.evaluator = None
         if log_phone_metrics:
             self.evaluator = PhoneRecognitionEvaluator(normalize_ipa=True)
 

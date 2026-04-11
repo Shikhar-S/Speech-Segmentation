@@ -29,7 +29,6 @@ class BuckeyeAlignmentSegment:
     text: str
     phones: List[str]
     phone_timestamps: List[Tuple[float, float]]
-    speaker_id: str
 
 
 def pause_segments(words, min_pause: float) -> List[Tuple[float, float]]:

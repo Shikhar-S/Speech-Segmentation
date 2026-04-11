@@ -50,6 +50,11 @@ def preprocess_inputs_wavlm(
     Raises:
         RuntimeError: If the processor does not return attention_mask.
     """
+    if isinstance(speech, torch.Tensor) and speech.ndim == 1:
+        raise RuntimeError(
+            f"Expected 2D speech tensor (batch, time), got 1D:"
+            f" {speech.shape}"
+        )
     if isinstance(speech, torch.Tensor):
         speech = speech if speech.ndim == 1 else list(speech)
 

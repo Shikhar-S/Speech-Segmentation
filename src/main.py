@@ -72,6 +72,8 @@ def main(cfg: DictConfig) -> Optional[float]:
 
     # run task
     metric_dict, _ = run_task(cfg)
+    if metric_dict is None:
+        return None
     # safely retrieve metric value for hydra-based hyperparameter optimization
     metric_value = get_metric_value(
         metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
