@@ -419,3 +419,119 @@ def test_all_invalid_returns_zero():
     )
     assert loss.shape == (1,)
     assert loss.item() == 0.0
+
+
+# -- k2 implementation tests ----------------------------------
+
+_k2 = None
+try:
+    import k2 as _k2  # noqa: F811
+except ImportError:
+    pass
+
+_skip_no_k2 = (
+    _k2 is None,
+    "k2 not installed",
+)
+
+
+def _make_k2_model(**kw):
+    defaults = dict(
+        num_labels=3,
+        repeat_idx=0,
+        use_transitions=True,
+        use_double_scores=False,
+    )
+    defaults.update(kw)
+    return AutoSegmentationCriterionK2(**defaults)
+
+
+@torch.no_grad()
+def _share_transitions(src, dst):
+    dst.transitions.copy_(src.transitions)
+
+
+def test_k2_dp_parity_real():
+    """k2 path matches DP when k2 IS available."""
+    if _skip_no_k2[0]:
+        __import__("pytest").skip(_skip_no_k2[1])
+
+    V, T = 3, 4
+    torch.manual_seed(20)
+
+    dp = _make_model(num_labels=V)
+    with torch.no_grad():
+        dp.transitions.normal_(std=0.5)
+
+    k2m = _make_k2_model(num_labels=V)
+    _share_transitions(dp, k2m)
+
+    emissions = torch.randn(2, T, V)
+    targets = torch.tensor([[1, 2, 0], [2, 1, 0]])
+    hlens = torch.tensor([T, 3])
+    ylens = torch.tensor([2, 2])
+
+    loss_dp = dp(emissions, targets, hlens, ylens)
+    loss_k2 = k2m(emissions, targets, hlens, ylens)
+    torch.testing.assert_close(
+        loss_dp, loss_k2, atol=1e-3, rtol=1e-3,
+    )
+
+
+def test_k2_gradient_flows_to_transitions():
+    """Gradients flow to transitions through the k2 path."""
+    if _skip_no_k2[0]:
+        __import__("pytest").skip(_skip_no_k2[1])
+
+    V, T = 3, 5
+    torch.manual_seed(21)
+    model = _make_k2_model(num_labels=V)
+    with torch.no_grad():
+        model.transitions.normal_(std=0.3)
+
+    emissions = torch.randn(1, T, V, requires_grad=True)
+    loss = model(
+        emissions,
+        torch.tensor([[1, 2]]),
+        torch.tensor([T]),
+        torch.tensor([2]),
+    )
+    loss.sum().backward()
+
+    assert model.transitions.grad is not None
+    assert model.transitions.grad.isfinite().all()
+    assert (model.transitions.grad.abs() > 0).any(), (
+        "transition gradients are all zero"
+    )
+    assert emissions.grad is not None
+    assert emissions.grad.isfinite().all()
+
+
+def test_k2_brute_force():
+    """k2 ASG matches brute-force reference."""
+    if _skip_no_k2[0]:
+        __import__("pytest").skip(_skip_no_k2[1])
+
+    V, T = 3, 4
+    torch.manual_seed(22)
+    emissions = torch.randn(1, T, V)
+    target_raw = [1, 2]
+
+    model = _make_k2_model(num_labels=V)
+    with torch.no_grad():
+        model.transitions.normal_(std=0.5)
+
+    loss = model(
+        emissions,
+        torch.tensor([target_raw]),
+        torch.tensor([T]),
+        torch.tensor([len(target_raw)]),
+    )
+
+    preprocessed = _preprocess_target(target_raw)
+    ref = _brute_force_asg(
+        emissions[0], preprocessed, model.transitions,
+    )
+    torch.testing.assert_close(
+        loss[0], ref, atol=1e-3, rtol=1e-3,
+    )

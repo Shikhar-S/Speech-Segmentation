@@ -28,10 +28,11 @@ Two implementations:
 """
 
 import logging
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 try:
     import k2  # type: ignore
@@ -298,47 +299,57 @@ class AutoSegmentationCriterionK2(AutoSegmentationCriterion):
         )
         emissions = emissions.to(dtype)
 
-        # Pad emissions with -inf at index 0 (k2 epsilon slot).
-        em_k2 = emissions.new_full((B, T, V + 1), float("-inf"))
+        # Pad emissions with -inf at index 0 (k2 epsilon).
+        em_k2 = emissions.new_full(
+            (B, T, V + 1), float("-inf"),
+        )
         em_k2[:, :, 1:] = emissions
 
-        # Build transitions in k2 label space (shifted by 1).
-        tr_k2 = em_k2.new_full((V + 1, V + 1), -1e10)
-        tr_k2[1:, 1:] = self.transitions.to(dtype)
+        # Differentiable transition matrix in k2 label space.
+        tr_k2 = F.pad(
+            self.transitions.to(dtype),
+            (1, 0, 1, 0),
+            value=-1e10,
+        )
 
-        segs = torch.stack([
-            torch.tensor(
-                [i, 0, int(hlens[i])],
-                device=device, dtype=torch.int32,
-            )
-            for i in range(B)
-        ])
+        segs = torch.zeros(B, 3, dtype=torch.int32)
+        segs[:, 0] = torch.arange(B, dtype=torch.int32)
+        segs[:, 2] = hlens.cpu().to(torch.int32)
         dense = k2.DenseFsaVec(em_k2, segs)
 
-        # Denominator: any-path graph, same for all utterances.
-        den_fsa = _build_den_graph(V, tr_k2)
+        # Denominator: any-path graph, same for all utts.
+        den_fsa = _build_den_graph(V).to(device)
+        _set_differentiable_scores(den_fsa, tr_k2, V)
         den_graphs = k2.create_fsa_vec(
             [den_fsa.clone() for _ in range(B)],
-        ).to(device)
-        den_scores = k2.get_tot_scores(
-            k2.intersect_dense(
-                den_graphs, dense, output_beam=10.0,
-            ),
+        )
+        den_lattice = k2.intersect_dense(
+            den_graphs, dense, output_beam=10.0,
+        )
+        den_scores = den_lattice.get_tot_scores(
             log_semiring=True,
             use_double_scores=self.use_double_scores,
         )
 
         # Numerator: one constrained graph per utterance.
-        num_graphs = k2.create_fsa_vec([
-            _build_num_graph(
-                [t + 1 for t in ys[b]], tr_k2,
+        num_fsas = []
+        for b in range(B):
+            tgt_k2 = [t + 1 for t in ys[b]]
+            nfsa = _build_num_graph(tgt_k2).to(device)
+            tgt_t = torch.tensor(
+                [0] + tgt_k2,
+                device=device,
+                dtype=torch.long,
             )
-            for b in range(B)
-        ]).to(device)
-        num_scores = k2.get_tot_scores(
-            k2.intersect_dense(
-                num_graphs, dense, output_beam=10.0,
-            ),
+            _set_differentiable_scores(
+                nfsa, tr_k2, V, tgt_t,
+            )
+            num_fsas.append(nfsa)
+        num_graphs = k2.create_fsa_vec(num_fsas)
+        num_lattice = k2.intersect_dense(
+            num_graphs, dense, output_beam=10.0,
+        )
+        num_scores = num_lattice.get_tot_scores(
             log_semiring=True,
             use_double_scores=self.use_double_scores,
         )
@@ -351,57 +362,96 @@ class AutoSegmentationCriterionK2(AutoSegmentationCriterion):
 # -------------------------------------------------------------------
 
 
+def _set_differentiable_scores(
+    fsa: "k2.Fsa",
+    tr_k2: torch.Tensor,
+    num_labels: int,
+    target_tensor: Optional[torch.Tensor] = None,
+) -> None:
+    """Replace FSA arc scores with differentiable transitions.
+
+    For **denominator** graphs (``target_tensor is None``),
+    states 1..V directly represent k2-space labels, so the
+    source state index *is* the ``from`` label.
+
+    For **numerator** graphs, ``target_tensor`` maps each state
+    index to the k2-space label at that target position
+    (``target_tensor[0] = 0`` as a dummy for the start state).
+
+    Args:
+        fsa: FSA on the target device (topology-only, all
+            scores 0).
+        tr_k2: ``(V+1, V+1)`` padded transition matrix,
+            connected to the autograd graph.
+        num_labels: Original vocabulary size *V*.
+        target_tensor: Optional ``(L+1,)`` label map for
+            numerator graphs.
+    """
+    V = num_labels
+    arcs = fsa.arcs.values()
+    src = arcs[:, 0].long()
+    lbl = arcs[:, 2].long()
+
+    if target_tensor is not None:
+        L = target_tensor.shape[0] - 1
+        internal = (src > 0) & (src <= L) & (lbl > 0)
+        from_lbl = target_tensor[src.clamp(0, L)]
+    else:
+        internal = (
+            (src > 0) & (src <= V) & (lbl > 0)
+        )
+        from_lbl = src.clamp(0, V)
+
+    scores = (
+        tr_k2[from_lbl, lbl.clamp(0, V)].float()
+        * internal.float()
+    )
+    fsa.scores = scores
+
+
 def _build_num_graph(
     target_k2: List[int],
-    transitions_k2: torch.Tensor,
 ) -> "k2.Fsa":
-    """Numerator FSA: allows paths spelling out *target_k2*.
+    """Numerator topology for *target_k2* (all scores 0).
 
-    States 0 (start) → 1..L (target positions). At each position,
-    a self-loop (stay) or advance arc to the next position.
+    States 0 (start) -> 1..L (target positions) -> L+1 (final).
     """
     L = len(target_k2)
+    final = L + 1
     lines: List[str] = []
     lines.append(f"0 1 {target_k2[0]} 0.0")
     for i in range(L):
         si = i + 1
         yi = target_k2[i]
-        lines.append(
-            f"{si} {si} {yi} "
-            f"{transitions_k2[yi, yi].item()}"
-        )
+        lines.append(f"{si} {si} {yi} 0.0")
         if i + 1 < L:
             yj = target_k2[i + 1]
-            lines.append(
-                f"{si} {i + 2} {yj} "
-                f"{transitions_k2[yi, yj].item()}"
-            )
-    lines.append(f"{L} 0.0")
-    return k2.Fsa.from_str("\n".join(lines), acceptor=True)
+            lines.append(f"{si} {i + 2} {yj} 0.0")
+    lines.append(f"{L} {final} -1 0.0")
+    lines.append(f"{final}")
+    return k2.Fsa.from_str(
+        "\n".join(lines), acceptor=True,
+    )
 
 
-def _build_den_graph(
-    num_labels: int,
-    transitions_k2: torch.Tensor,
-) -> "k2.Fsa":
-    """Denominator FSA: allows any label sequence.
+def _build_den_graph(num_labels: int) -> "k2.Fsa":
+    """Denominator topology (all scores 0).
 
-    State 0 (start) → states 1..V (one per label, all final).
-    Full transitions between all label states.
+    State 0 (start) -> states 1..V -> V+1 (final).
     """
     V = num_labels
+    final = V + 1
     lines: List[str] = []
     for j in range(1, V + 1):
         lines.append(f"0 {j} {j} 0.0")
     for i in range(1, V + 1):
         for j in range(1, V + 1):
-            lines.append(
-                f"{i} {j} {j} "
-                f"{transitions_k2[i, j].item()}"
-            )
-    for j in range(1, V + 1):
-        lines.append(f"{j} 0.0")
-    return k2.Fsa.from_str("\n".join(lines), acceptor=True)
+            lines.append(f"{i} {j} {j} 0.0")
+        lines.append(f"{i} {final} -1 0.0")
+    lines.append(f"{final}")
+    return k2.Fsa.from_str(
+        "\n".join(lines), acceptor=True,
+    )
 
 
 if __name__ == "__main__":
