@@ -15,9 +15,10 @@ We bypass ``Dataset.save_to_disk`` for two reasons:
    per-row serially is ~hours. Sharding over ``multiprocessing.Pool`` cuts
    that to minutes.
 
-Each worker builds a small Dataset from its chunk of records, calls
-``embed_table_storage`` to inline the audio bytes, and writes the shard via
-``pyarrow.parquet.write_table``. The helper returns once all shards finish.
+Workers receive only ``(start, end, out_path)`` tuples and read their slice
+from a module-level records list inherited from the parent via fork's COW
+memory. This avoids pickling millions of dicts through the multiprocessing
+input queue, which deadlocked the cv_ali run (4.7M records / 2368 shards).
 """
 
 from __future__ import annotations
@@ -43,23 +44,28 @@ _THREAD_LIMIT_VARS = (
     "NUMEXPR_NUM_THREADS",
 )
 
+# Module-level handles inherited by forked workers (no pickling cost).
+_RECORDS: List[Dict] = []
+_FEATURES: datasets.Features = None  # type: ignore[assignment]
+
 
 def _init_worker() -> None:
     for var in _THREAD_LIMIT_VARS:
         os.environ.setdefault(var, "1")
 
 
-def _write_shard(args: Tuple[int, int, List[Dict], datasets.Features, str]) -> int:
-    """Worker: build sub-Dataset, embed audio bytes, write parquet shard."""
-    idx, total, records, features, out_path = args
-    ds = datasets.Dataset.from_list(records, features=features)
+def _write_shard(args: Tuple[int, int, str]) -> int:
+    """Worker: slice global records, embed audio bytes, write parquet shard."""
+    start, end, out_path = args
+    chunk = _RECORDS[start:end]
+    ds = datasets.Dataset.from_list(chunk, features=_FEATURES)
     embedded = embed_table_storage(ds.data.table)
     # Small row groups + page index keep each row group under HF dataset
     # viewer's 300 MB scan limit. With ~300 KB/row (embedded audio), 200
     # rows/group ≈ 60 MB.
     pq.write_table(embedded, out_path, row_group_size=200,
                    write_page_index=True)
-    return len(records)
+    return end - start
 
 
 def write_parquet_shards(
@@ -86,6 +92,8 @@ def write_parquet_shards(
     Returns:
         Total rows written.
     """
+    global _RECORDS, _FEATURES
+
     data_dir = output_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -94,21 +102,18 @@ def write_parquet_shards(
         log.warning("[%s] no records; skipping", split_name)
         return 0
 
-    n_shards = max(1, (n + rows_per_shard - 1) // rows_per_shard)
-    chunks = [
-        records[i * rows_per_shard : (i + 1) * rows_per_shard]
-        for i in range(n_shards)
-    ]
+    # Stash on the module so forked workers see it without pickling.
+    _RECORDS = records
+    _FEATURES = features
 
+    n_shards = max(1, (n + rows_per_shard - 1) // rows_per_shard)
     tasks = [
         (
-            i,
-            n_shards,
-            chunk,
-            features,
+            i * rows_per_shard,
+            min((i + 1) * rows_per_shard, n),
             str(data_dir / f"{split_name}-{i:05d}-of-{n_shards:05d}.parquet"),
         )
-        for i, chunk in enumerate(chunks)
+        for i in range(n_shards)
     ]
 
     log.info(
@@ -121,4 +126,9 @@ def write_parquet_shards(
         for written in pool.imap_unordered(_write_shard, tasks):
             total += written
     log.info("[%s] wrote %d rows", split_name, total)
+
+    # Release the global so subsequent splits don't keep the previous list
+    # alive across forks.
+    _RECORDS = []
+    _FEATURES = None  # type: ignore[assignment]
     return total
