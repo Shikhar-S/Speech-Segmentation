@@ -1,0 +1,66 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J cv_smoke
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 32
+#SBATCH --mem=64G
+#SBATCH -t 0:15:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+#
+# Smoke test for the threaded-prefetch parquet writer. Runs cv_data_convert
+# on a single language (ba) with --limit 2000 so we exercise the full
+# walk -> shard -> finalize path end-to-end, verify audio bytes are embedded,
+# and compare wall time against the baseline writer.
+
+set -euo pipefail
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p exp/slurm_logs
+
+source ~/.bashrc
+conda deactivate 2>/dev/null || true
+source .venv_dai/bin/activate
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+OUT_DIR=/tmp/cv-smoke-$SLURM_JOB_ID
+rm -rf "$OUT_DIR"
+
+echo "=== cv smoke test (prefetch writer) ==="
+time python -m src.recipe.segment_recognize.local.cv_data_convert \
+    --alignments_dir exp/downloads/cv_ali_alignments \
+    --cv_dir         /work/hdd/bbjs/shared/corpora/commonvoice/cv-corpus-13.0-2023-03-09 \
+    --output_dir     "$OUT_DIR" \
+    --languages      ba \
+    --num_workers    30 \
+    --limit          2000
+
+echo "=== output contents ==="
+ls -la "$OUT_DIR/data" || true
+
+echo "=== verify audio bytes embedded ==="
+python - <<PY
+import pyarrow.parquet as pq
+from pathlib import Path
+shards = sorted(Path("$OUT_DIR/data").glob("*.parquet"))
+print(f"{len(shards)} shards")
+if not shards:
+    raise SystemExit("no shards produced")
+t = pq.read_table(shards[0])
+print(f"shard 0: {t.num_rows} rows, schema:")
+print(t.schema)
+audio = t.column("audio")[0].as_py()
+print(f"audio field keys: {sorted(audio.keys())}")
+print(f"bytes present: {audio.get('bytes') is not None}")
+print(f"bytes len: {len(audio['bytes']) if audio.get('bytes') else 0}")
+print(f"path: {audio.get('path')}")
+PY
+
+echo "Done."

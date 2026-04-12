@@ -135,35 +135,17 @@ print(f"TOTAL version-mismatch: {v_cv13_rows + v_cvali_rows} rows, "
       f"{hrs(v_cv13_dur + v_cvali_dur):.1f} h")
 print()
 
-# --- Deadlock losses (45 missing train shards) ---
-print("=" * 78)
-print("LOST: worker deadlock (45 missing train shards, ~90k rows)")
-print("=" * 78)
-train_total_rows = tot["train"]["rows"]
-train_total_dur = tot["train"]["dur"]
-train_mean = train_total_dur / train_total_rows if train_total_rows > 0 else 0
-missing_rows = 45 * 2000  # shard size
-missing_dur = missing_rows * train_mean
-print(f"Train kept: {train_total_rows} rows, {hrs(train_total_dur):.1f} h "
-      f"(mean clip = {train_mean:.2f}s)")
-print(f"Missing shards: 45 × 2000 = {missing_rows} rows (estimated)")
-print(f"Missing hours : {hrs(missing_dur):.1f} h "
-      f"({100*missing_rows/(train_total_rows+missing_rows):.1f}% of train)")
-print()
-
 # --- Grand totals ---
 print("=" * 78)
 print("GRAND SUMMARY")
 print("=" * 78)
-print(f"Kept:                {grand_rows:>10} rows  {hrs(grand_dur):>8.1f} h")
-print(f"Lost (version):      {v_cv13_rows+v_cvali_rows:>10} rows  "
+print(f"Kept:            {grand_rows:>10} rows  {hrs(grand_dur):>8.1f} h")
+print(f"Lost (version): {v_cv13_rows+v_cvali_rows:>10} rows  "
       f"{hrs(v_cv13_dur + v_cvali_dur):>8.1f} h")
-print(f"Lost (deadlock):     {missing_rows:>10} rows  {hrs(missing_dur):>8.1f} h")
-total_lost_rows = v_cv13_rows + v_cvali_rows + missing_rows
-total_lost_hrs = v_cv13_dur + v_cvali_dur + missing_dur
-print(f"Total lost:          {total_lost_rows:>10} rows  {hrs(total_lost_hrs):>8.1f} h")
+total_lost_rows = v_cv13_rows + v_cvali_rows
+total_lost_hrs = v_cv13_dur + v_cvali_dur
 ceiling = grand_rows + total_lost_rows
-print(f"Ideal ceiling:       {ceiling:>10} rows  "
+print(f"Ideal ceiling:   {ceiling:>10} rows  "
       f"{hrs(grand_dur + total_lost_hrs):>8.1f} h")
 print(f"Yield: {100*grand_rows/ceiling:.1f}% rows, "
       f"{100*grand_dur/(grand_dur+total_lost_hrs):.1f}% hours")

@@ -81,11 +81,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 SCHEMA = datasets.Features(
     {
         "utt_id": datasets.Value("string"),
-        # Path-only: avoids embedding audio bytes into the parquet shards
-        # at save_to_disk time (Audio() always embeds, which is too slow
-        # for our scale). The dataloader handles both string paths and
-        # decoded Audio dicts.
-        "audio": datasets.Value("string"),
+        "audio": datasets.Audio(sampling_rate=16000),
         "text": datasets.Value("string"),
         "phones": datasets.Sequence(datasets.Value("string")),
         "phone_starts": datasets.Sequence(datasets.Value("float64")),

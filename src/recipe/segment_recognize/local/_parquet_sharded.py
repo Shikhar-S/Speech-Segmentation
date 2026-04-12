@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -64,6 +65,44 @@ def _write_shard(args: Tuple[int, int, str]) -> int:
     # Small row groups + page index keep each row group under HF dataset
     # viewer's 300 MB scan limit. With ~300 KB/row (embedded audio), 200
     # rows/group ≈ 60 MB.
+    pq.write_table(embedded, out_path, row_group_size=200,
+                   write_page_index=True)
+    return end - start
+
+
+# Per-worker thread count for parallel NFS audio reads. NFS reads are
+# latency-bound (~20-40ms per mp3), so serial reads in embed_table_storage
+# were the cv bottleneck. 32 threads/worker × 30 workers ≈ 960 parallel NFS
+# ops, which the GPFS layer under /work/hdd handles comfortably.
+_IO_THREADS = 32
+
+
+def _read_audio_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _write_shard_prefetch(args: Tuple[int, int, str]) -> int:
+    """Like _write_shard but pre-reads mp3 bytes via a thread pool.
+
+    For the cv corpus (4.7M mp3 on NFS) the serial read loop inside
+    ``embed_table_storage`` is the dominant cost. We sidestep it by replacing
+    each ``audio`` field (a path string) with the Arrow-native ``{bytes,
+    path}`` dict form before constructing the Dataset. ``embed_table_storage``
+    then has nothing to fetch — it becomes a no-op copy — and all the NFS
+    latency is hidden behind ``ThreadPoolExecutor``.
+    """
+    start, end, out_path = args
+    chunk = _RECORDS[start:end]
+    paths = [r["audio"] for r in chunk]
+    with ThreadPoolExecutor(max_workers=_IO_THREADS) as ex:
+        audio_bytes = list(ex.map(_read_audio_bytes, paths))
+    new_chunk = [
+        {**rec, "audio": {"bytes": b, "path": p}}
+        for rec, b, p in zip(chunk, audio_bytes, paths)
+    ]
+    ds = datasets.Dataset.from_list(new_chunk, features=_FEATURES)
+    embedded = embed_table_storage(ds.data.table)
     pq.write_table(embedded, out_path, row_group_size=200,
                    write_page_index=True)
     return end - start
@@ -188,7 +227,7 @@ def write_parquet_shards_tagged(
     workers = min(num_workers, n_shards)
     with Pool(processes=workers, initializer=_init_worker) as pool:
         total = 0
-        for written in pool.imap_unordered(_write_shard, tasks):
+        for written in pool.imap_unordered(_write_shard_prefetch, tasks):
             total += written
     log.info("[%s/%s] wrote %d rows", split_name, tag, total)
 
