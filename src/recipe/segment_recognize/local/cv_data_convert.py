@@ -36,8 +36,9 @@ from typing import Dict, List, Optional
 csv.field_size_limit(sys.maxsize)
 
 import datasets
-from datasets import DatasetDict
 from tqdm import tqdm
+
+from src.recipe.segment_recognize.local._parquet_sharded import write_parquet_shards
 
 log = logging.getLogger("cv_data_convert")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -46,7 +47,11 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 SCHEMA = datasets.Features(
     {
         "utt_id": datasets.Value("string"),
-        "audio": datasets.Audio(sampling_rate=16000),
+        # Path-only: avoids embedding audio bytes into the parquet shards
+        # at save_to_disk time (Audio() always embeds, which is too slow
+        # for our scale). The dataloader handles both string paths and
+        # decoded Audio dicts.
+        "audio": datasets.Value("string"),
         "text": datasets.Value("string"),
         "phones": datasets.Sequence(datasets.Value("string")),
         "phone_starts": datasets.Sequence(datasets.Value("float64")),
@@ -59,7 +64,10 @@ SCHEMA = datasets.Features(
 )
 
 ALL_LANGS = ("ba", "be", "ca", "de", "en", "es", "fr", "it", "rw", "sw")
+# Source TSVs in CommonVoice are named {train,dev,test}.tsv; we rename
+# ``dev`` -> ``val`` on output to match buckeye/timit convention.
 DEFAULT_SPLITS = ("train", "dev", "test")
+OUT_SPLIT_MAP = {"train": "train", "dev": "val", "test": "test"}
 
 
 # Regex parser tailored to the cv_ali long-format Praat TextGrid layout:
@@ -113,11 +121,12 @@ def build_clip_lookup(
     validated.tsv vs train.tsv) — order ``splits`` accordingly.
     """
     lookup: Dict[str, Dict] = {}
-    for split in splits:
-        tsv_path = cv_lang_dir / f"{split}.tsv"
+    for src_split in splits:
+        tsv_path = cv_lang_dir / f"{src_split}.tsv"
         if not tsv_path.is_file():
             log.warning("Missing TSV: %s", tsv_path)
             continue
+        out_split = OUT_SPLIT_MAP.get(src_split, src_split)
         n_added = 0
         with open(tsv_path, encoding="utf-8") as f:
             reader = csv.DictReader(f, delimiter="\t")
@@ -131,14 +140,14 @@ def build_clip_lookup(
                 if stem in lookup:
                     continue
                 lookup[stem] = {
-                    "split": split,
+                    "split": out_split,
                     "client_id": row.get("client_id", ""),
                     "sentence": row.get("sentence", ""),
                     "clip_name": clip_name,
                 }
                 n_added += 1
-        log.info("  %s.tsv: added %d new clips (total lookup size %d)",
-                 split, n_added, len(lookup))
+        log.info("  %s.tsv -> %s: added %d new clips (total lookup size %d)",
+                 src_split, out_split, n_added, len(lookup))
     return lookup
 
 
@@ -170,7 +179,8 @@ def convert_language(
     if not lookup:
         return {}
 
-    by_split: Dict[str, List[Dict]] = {s: [] for s in splits}
+    out_splits = [OUT_SPLIT_MAP.get(s, s) for s in splits]
+    by_split: Dict[str, List[Dict]] = {s: [] for s in out_splits}
     n_bad_tg = n_seen = 0
     clips_dir_str = str(clips_dir)
 
@@ -227,22 +237,19 @@ def merge(
 def save_dataset(
     splits_to_records: Dict[str, List[Dict]],
     output_dir: Path,
-    hf_repo: Optional[str],
+    num_workers: int,
 ) -> None:
-    splits = {
-        s: datasets.Dataset.from_list(recs, features=SCHEMA)
-        for s, recs in splits_to_records.items() if recs
-    }
-    if not splits:
+    wrote = 0
+    for split_name, recs in splits_to_records.items():
+        wrote += write_parquet_shards(
+            records=recs,
+            features=SCHEMA,
+            output_dir=output_dir,
+            split_name=split_name,
+            num_workers=num_workers,
+        )
+    if wrote == 0:
         log.error("No records produced; nothing written.")
-        return
-    ddict = DatasetDict(splits)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    ddict.save_to_disk(str(output_dir))
-    log.info("Saved DatasetDict to %s (splits: %s)", output_dir, list(splits))
-    if hf_repo is not None:
-        ddict.push_to_hub(hf_repo)
-        log.info("Pushed to Hub repo %s", hf_repo)
 
 
 def main() -> None:
@@ -254,7 +261,8 @@ def main() -> None:
                    help="Comma-separated language codes.")
     p.add_argument("--splits", default=",".join(DEFAULT_SPLITS),
                    help="Comma-separated CV split names.")
-    p.add_argument("--hf_repo", default=None)
+    p.add_argument("--num_workers", type=int, default=64,
+                   help="Parallel processes for the embed+write step.")
     p.add_argument("--limit", type=int, default=0,
                    help="Max rows per (lang, split) combination (0 = all).")
     args = p.parse_args()
@@ -268,7 +276,7 @@ def main() -> None:
             lang, args.alignments_dir, args.cv_dir, splits, args.limit,
         ))
 
-    save_dataset(accum, args.output_dir, args.hf_repo)
+    save_dataset(accum, args.output_dir, args.num_workers)
 
 
 if __name__ == "__main__":

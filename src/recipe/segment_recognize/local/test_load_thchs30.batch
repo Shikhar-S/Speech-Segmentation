@@ -1,0 +1,62 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J test_load
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=32G
+#SBATCH -t 0:10:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+#
+# Check whether exp/downloads/thchs30-seg/ (save_to_disk output) is
+# loadable via the existing SegmentationDataModule without any changes.
+
+set -euo pipefail
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p exp/slurm_logs
+
+source ~/.bashrc
+conda deactivate 2>/dev/null || true
+source .venv_dai/bin/activate
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+python <<'PY'
+import torch
+from src.data.segmentation.segmentation_dataset import SegmentationDataModule
+
+class DummyTokenizer:
+    def tokens2ids(self, phones):
+        return [i for i in range(len(phones))]
+
+print("Instantiating SegmentationDataModule with local path...")
+dm = SegmentationDataModule(
+    hf_repo="exp/downloads/thchs30-seg",
+    tokenizer=DummyTokenizer(),
+    batch_size=2,
+    num_workers=0,
+)
+print("Calling setup()...")
+dm.setup()
+print(f"train_dataset: {len(dm.train_dataset) if dm.train_dataset else 'NONE'}")
+print(f"val_dataset:   {len(dm.val_dataset) if dm.val_dataset else 'NONE'}")
+print(f"test_dataset:  {len(dm.test_dataset) if dm.test_dataset else 'NONE'}")
+
+print("Fetching one train batch...")
+dl = dm.train_dataloader()
+batch = next(iter(dl))
+print("Batch keys:", list(batch.keys()))
+print("speech shape:", batch["speech"].shape)
+print("speech_length:", batch["speech_length"].tolist())
+print("target shape:", batch["target"].shape)
+print("target_length:", batch["target_length"].tolist())
+print("utt_id:", batch["utt_id"])
+print("OK")
+PY

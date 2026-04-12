@@ -27,8 +27,9 @@ from typing import Dict, List, Optional
 
 import datasets
 import pyarrow.parquet as pq
-from datasets import DatasetDict
 from tqdm import tqdm
+
+from src.recipe.segment_recognize.local._parquet_sharded import write_parquet_shards
 
 log = logging.getLogger("librispeech_data_convert")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -144,22 +145,19 @@ def convert_split(
 def save_dataset(
     splits_to_records: Dict[str, List[Dict]],
     output_dir: Path,
-    hf_repo: Optional[str],
+    num_workers: int,
 ) -> None:
-    splits = {
-        s: datasets.Dataset.from_list(recs, features=SCHEMA)
-        for s, recs in splits_to_records.items() if recs
-    }
-    if not splits:
+    wrote = 0
+    for split_name, recs in splits_to_records.items():
+        wrote += write_parquet_shards(
+            records=recs,
+            features=SCHEMA,
+            output_dir=output_dir,
+            split_name=split_name,
+            num_workers=num_workers,
+        )
+    if wrote == 0:
         log.error("No records produced; nothing written.")
-        return
-    ddict = DatasetDict(splits)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    ddict.save_to_disk(str(output_dir))
-    log.info("Saved DatasetDict to %s (splits: %s)", output_dir, list(splits))
-    if hf_repo is not None:
-        ddict.push_to_hub(hf_repo)
-        log.info("Pushed to Hub repo %s", hf_repo)
 
 
 def main() -> None:
@@ -167,7 +165,8 @@ def main() -> None:
     p.add_argument("--alignments_dir", required=True, type=Path)
     p.add_argument("--speech_dir", required=True, type=Path)
     p.add_argument("--output_dir", required=True, type=Path)
-    p.add_argument("--hf_repo", default=None)
+    p.add_argument("--num_workers", type=int, default=64,
+                   help="Parallel processes for the embed+write step.")
     p.add_argument(
         "--splits",
         default=",".join(ALL_SPLITS),
@@ -186,7 +185,7 @@ def main() -> None:
         splits_to_records[split_label] = convert_split(
             parquet_path, args.speech_dir, split_label, args.limit
         )
-    save_dataset(splits_to_records, args.output_dir, args.hf_repo)
+    save_dataset(splits_to_records, args.output_dir, args.num_workers)
 
 
 if __name__ == "__main__":

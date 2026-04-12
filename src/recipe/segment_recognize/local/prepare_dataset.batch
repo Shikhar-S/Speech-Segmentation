@@ -40,6 +40,13 @@ mkdir -p "exp/slurm_logs"
 source ~/.bashrc
 conda deactivate 2>/dev/null || true
 source .venv_dai/bin/activate
+
+# Match src/main.py: pin numerical-backend threads so 64-worker multiproc
+# doesn't oversubscribe cores.
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 echo "Environment setup complete."
 
 case "$DATASET" in

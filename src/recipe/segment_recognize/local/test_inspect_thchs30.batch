@@ -1,0 +1,58 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J test_inspect
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=32G
+#SBATCH -t 0:10:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+
+set -euo pipefail
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p exp/slurm_logs
+
+source ~/.bashrc
+conda deactivate 2>/dev/null || true
+source .venv_dai/bin/activate
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+python <<'PY'
+import datasets
+
+ds = datasets.load_dataset("exp/downloads/thchs30-seg", split="train")
+print(f"=== thchs30-seg / train: {len(ds)} rows ===")
+print(f"Features: {ds.features}")
+print()
+
+for i in range(3):
+    row = ds[i]
+    audio = row["audio"]
+    arr = audio["array"]
+    sr = audio["sampling_rate"]
+    phones = row["phones"]
+    starts = row["phone_starts"]
+    ends = row["phone_ends"]
+    print(f"--- row {i} ---")
+    print(f"  utt_id:     {row['utt_id']}")
+    print(f"  speaker_id: {row['speaker_id']}")
+    print(f"  language:   {row['language']}")
+    print(f"  split:      {row['split']}")
+    print(f"  text:       {row['text'][:60]!r}")
+    print(f"  duration:   {row['duration']:.2f}s")
+    print(f"  audio:      {arr.shape[0]} samples @ {sr} Hz ({arr.shape[0]/sr:.2f}s)")
+    print(f"              min={arr.min():.3f} max={arr.max():.3f} mean={arr.mean():.4f}")
+    print(f"  n phones:   {len(phones)}")
+    print(f"  phones[:8]: {phones[:8]}")
+    print(f"  starts[:8]: {[f'{s:.3f}' for s in starts[:8]]}")
+    print(f"  ends[:8]:   {[f'{e:.3f}' for e in ends[:8]]}")
+    print()
+PY
