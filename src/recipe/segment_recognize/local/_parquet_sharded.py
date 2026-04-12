@@ -54,7 +54,11 @@ def _write_shard(args: Tuple[int, int, List[Dict], datasets.Features, str]) -> i
     idx, total, records, features, out_path = args
     ds = datasets.Dataset.from_list(records, features=features)
     embedded = embed_table_storage(ds.data.table)
-    pq.write_table(embedded, out_path)
+    # Small row groups + page index keep each row group under HF dataset
+    # viewer's 300 MB scan limit. With ~300 KB/row (embedded audio), 200
+    # rows/group ≈ 60 MB.
+    pq.write_table(embedded, out_path, row_group_size=200,
+                   write_page_index=True)
     return len(records)
 
 

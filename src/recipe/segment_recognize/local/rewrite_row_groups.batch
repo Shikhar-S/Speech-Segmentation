@@ -1,0 +1,66 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J rewrite_rg
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 32
+#SBATCH --mem=64G
+#SBATCH -t 1:00:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+#
+# Rewrite parquet shards in-place with smaller row groups + page index, so
+# the HF dataset viewer can scan them (300 MB row-group limit).
+#
+# Usage:
+#   sbatch rewrite_row_groups.batch exp/downloads/thchs30-seg/data
+#   sbatch rewrite_row_groups.batch exp/downloads/librispeech-mfa-seg/data
+#   sbatch rewrite_row_groups.batch exp/downloads/cv-aligned-seg/data
+
+set -euo pipefail
+
+DATA_DIR="${1:-}"
+if [[ -z "$DATA_DIR" ]]; then
+    echo "Usage: $0 <data_dir>" >&2
+    exit 1
+fi
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p exp/slurm_logs
+
+source ~/.bashrc
+conda deactivate 2>/dev/null || true
+source .venv_dai/bin/activate
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+DATA_DIR="$DATA_DIR" python <<'PY'
+import os
+from multiprocessing import Pool
+from pathlib import Path
+import pyarrow.parquet as pq
+
+DATA_DIR = Path(os.environ["DATA_DIR"])
+ROW_GROUP_SIZE = 200
+
+def rewrite(path: Path) -> tuple[str, int, int]:
+    table = pq.read_table(path)
+    tmp = path.with_suffix(".tmp.parquet")
+    pq.write_table(table, tmp, row_group_size=ROW_GROUP_SIZE,
+                   write_page_index=True)
+    tmp.replace(path)
+    return path.name, table.num_rows, path.stat().st_size
+
+paths = sorted(DATA_DIR.glob("*.parquet"))
+print(f"Rewriting {len(paths)} shards in {DATA_DIR} with row_group_size={ROW_GROUP_SIZE}")
+with Pool(processes=32, initializer=lambda: [os.environ.setdefault(v, "1")
+          for v in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS","NUMEXPR_NUM_THREADS")]) as pool:
+    for name, n, sz in pool.imap_unordered(rewrite, paths):
+        print(f"  {name}: {n} rows, {sz/1e6:.1f} MB")
+print("Done.")
+PY
