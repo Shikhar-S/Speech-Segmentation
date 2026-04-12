@@ -171,8 +171,12 @@ def convert_language(
         return {}
 
     by_split: Dict[str, List[Dict]] = {s: [] for s in splits}
-    n_no_audio = n_bad_tg = n_seen = 0
+    n_bad_tg = n_seen = 0
+    clips_dir_str = str(clips_dir)
 
+    # Skip per-row audio is_file() check: NFS stat is the dominant cost
+    # (~25ms each at scale). Trust the CV TSV — if a clip is listed there,
+    # the audio is on disk. Missing files would surface at decode time.
     log.info("[%s] Walking tarball %s", lang, tar_path)
     with tarfile.open(tar_path, "r|gz") as tar:  # streaming mode
         for member in tqdm(tar, desc=lang, unit="tg"):
@@ -182,10 +186,6 @@ def convert_language(
             stem = Path(member.name).stem
             cv_row = lookup.get(stem)
             if cv_row is None:
-                continue
-            audio_path = clips_dir / cv_row["clip_name"]
-            if not audio_path.is_file():
-                n_no_audio += 1
                 continue
             fobj = tar.extractfile(member)
             if fobj is None:
@@ -198,7 +198,7 @@ def convert_language(
             by_split[cv_row["split"]].append(
                 {
                     "utt_id": stem,
-                    "audio": str(audio_path),
+                    "audio": f"{clips_dir_str}/{cv_row['clip_name']}",
                     "text": cv_row["sentence"],
                     "phones": [iv["label"] for iv in intervals],
                     "phone_starts": [iv["start"] for iv in intervals],
@@ -210,8 +210,8 @@ def convert_language(
                 }
             )
     log.info(
-        "[%s] tar walked: %d TextGrids; kept per-split %s; skipped(no_audio=%d, bad_tg=%d)",
-        lang, n_seen, {s: len(r) for s, r in by_split.items()}, n_no_audio, n_bad_tg,
+        "[%s] tar walked: %d TextGrids; kept per-split %s; skipped(bad_tg=%d)",
+        lang, n_seen, {s: len(r) for s, r in by_split.items()}, n_bad_tg,
     )
     return by_split
 
