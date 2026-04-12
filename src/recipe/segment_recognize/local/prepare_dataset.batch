@@ -32,9 +32,14 @@ EXTRA="$@"
 cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
 mkdir -p "exp/slurm_logs"
 
+# NOTE: bypass setup_uv.sh and source the venv directly. setup_uv.sh runs
+# `uv pip install -r requirements-dai.txt` every invocation, which races
+# against itself when 3 prep jobs land on the same node. The venv is
+# already initialised by previous training runs, so direct activation is
+# sufficient for the data-prep scripts.
 source ~/.bashrc
-conda deactivate
-source setup_uv.sh .venv_dai requirements-dai.txt
+conda deactivate 2>/dev/null || true
+source .venv_dai/bin/activate
 echo "Environment setup complete."
 
 case "$DATASET" in
