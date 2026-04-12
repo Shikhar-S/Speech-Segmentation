@@ -1,0 +1,46 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J hf_upload
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=32G
+#SBATCH -t 2:00:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+
+set -euo pipefail
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p exp/slurm_logs
+
+source ~/.bashrc
+conda deactivate 2>/dev/null || true
+source .venv_dai/bin/activate
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+python <<'PY'
+from huggingface_hub import HfApi
+
+REPO_ID = "changelinglab/librispeech-segment"
+FOLDER  = "exp/downloads/librispeech-mfa-seg"
+
+api = HfApi()
+print(f"Creating dataset repo {REPO_ID} (exist_ok=True)...")
+api.create_repo(repo_id=REPO_ID, repo_type="dataset",
+                exist_ok=True, private=False)
+
+print(f"Uploading {FOLDER} -> {REPO_ID} ...")
+api.upload_large_folder(
+    repo_id=REPO_ID,
+    repo_type="dataset",
+    folder_path=FOLDER,
+)
+print("Upload complete.")
+PY

@@ -24,16 +24,15 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
-
 export HF_DATASETS_CACHE=/work/nvme/bbjs/sbharadwaj/hf_cache
 
 python <<'PY'
 import itertools
 import datasets
 
-ds = datasets.load_dataset("exp/downloads/librispeech-mfa-seg",
-                           split="train.clean.100", streaming=True)
-print(f"=== librispeech-mfa-seg / train.clean.100 (streaming) ===")
+ds = datasets.load_dataset("exp/downloads/cv-aligned-seg",
+                           split="train", streaming=True)
+print(f"=== cv-aligned-seg / train (streaming) ===")
 print(f"Features: {ds.features}")
 print()
 
