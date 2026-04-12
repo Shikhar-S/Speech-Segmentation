@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J segrec_download
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=32G
+#SBATCH -t 0:30:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+#
+# Submit with:
+#   sbatch src/recipe/segment_recognize/local/download.batch [--with-cv-ali]
+#
+# Forwards any extra arguments to download.sh.
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p "exp/slurm_logs"
+
+source ~/.bashrc
+conda deactivate
+source setup_uv.sh .venv_dai requirements-dai.txt
+echo "Environment setup complete."
+
+bash src/recipe/segment_recognize/local/download.sh "$@"
