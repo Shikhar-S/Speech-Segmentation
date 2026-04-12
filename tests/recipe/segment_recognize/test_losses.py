@@ -10,6 +10,11 @@ from src.recipe.segment_recognize.heads.base import TaskHead
 from src.recipe.segment_recognize.heads.bce_boundary import (
     BCEBoundaryHead,
 )
+from src.recipe.segment_recognize.heads.count_ctc import (
+    CountCTCHead,
+    _build_targets,
+    _parse_substitution,
+)
 from src.recipe.segment_recognize.heads.fa_segmentation import (
     FASegmentationHead,
 )
@@ -193,3 +198,172 @@ def test_kwargs_absorbed():
         encoder_dim=16, effective_pbf=320.0,
     )
     assert lm2.weight == 1.0
+
+
+# -- CountCTCHead ----------------------------------------------
+
+
+def _count_ctc_seg_batch():
+    """Seg-style batch with frame-aligned target_start_idx."""
+    return {
+        "speech": torch.randn(B, T * POINTS),
+        "speech_length": torch.full(
+            (B,), T * POINTS, dtype=torch.long,
+        ),
+        "text": torch.randint(1, VOCAB, (B, N_PHONES)),
+        "text_length": torch.full(
+            (B,), N_PHONES, dtype=torch.long,
+        ),
+        "target_start_idx": torch.stack(
+            [torch.arange(N_PHONES) * 3] * B,
+        ),
+    }
+
+
+def _count_ctc_pr_batch():
+    """PR-style batch (no target_start_idx)."""
+    return {
+        "speech": torch.randn(B, T * POINTS),
+        "speech_length": torch.full(
+            (B,), T * POINTS, dtype=torch.long,
+        ),
+        "text": torch.randint(1, VOCAB, (B, N_PHONES)),
+        "text_length": torch.full(
+            (B,), N_PHONES, dtype=torch.long,
+        ),
+    }
+
+
+def test_count_ctc_pair_forward():
+    lm = CountCTCHead(encoder_dim=ENCODER_DIM, substitution="1 0")
+    feat = torch.randn(B, T, ENCODER_DIM)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, _count_ctc_seg_batch())
+    assert torch.isfinite(out["loss"])
+    assert out["logits"].shape == (B, T, 3)
+    assert lm.num_classes == 3
+
+
+def test_count_ctc_single_forward():
+    lm = CountCTCHead(encoder_dim=ENCODER_DIM, substitution="1")
+    feat = torch.randn(B, T, ENCODER_DIM)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, _count_ctc_seg_batch())
+    assert torch.isfinite(out["loss"])
+    assert out["logits"].shape == (B, T, 2)
+    assert lm.num_classes == 2
+
+
+def test_count_ctc_custom_vocab():
+    lm = CountCTCHead(
+        encoder_dim=ENCODER_DIM, substitution="a b c",
+    )
+    assert lm.vocab == {"a": 1, "b": 2, "c": 3}
+    assert lm.per_phone_seq == [1, 2, 3]
+    feat = torch.randn(B, T, ENCODER_DIM)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, _count_ctc_seg_batch())
+    assert out["logits"].shape == (B, T, 4)
+
+
+def test_count_ctc_build_targets_pair():
+    text_len = torch.tensor([3, 2], dtype=torch.long)
+    targets, lengths = _build_targets(text_len, [1, 2])
+    assert targets.tolist() == [1, 2, 1, 2, 1, 2, 1, 2, 1, 2]
+    assert lengths.tolist() == [6, 4]
+
+
+def test_count_ctc_build_targets_single():
+    text_len = torch.tensor([3, 1], dtype=torch.long)
+    targets, lengths = _build_targets(text_len, [1])
+    assert targets.tolist() == [1, 1, 1, 1]
+    assert lengths.tolist() == [3, 1]
+
+
+def test_count_ctc_eval_metrics_with_boundaries():
+    lm = CountCTCHead(
+        encoder_dim=ENCODER_DIM,
+        substitution="1 0",
+        boundary_token="1",
+    )
+    feat = torch.randn(B, T, ENCODER_DIM)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, _count_ctc_seg_batch())
+    metrics = lm.eval_metrics(out, lens, _count_ctc_seg_batch())
+    assert set(metrics.keys()) == {
+        "precision", "recall", "f1", "rval",
+        "count_accuracy", "count_mae",
+    }
+
+
+def test_count_ctc_eval_metrics_no_boundary_token():
+    lm = CountCTCHead(
+        encoder_dim=ENCODER_DIM, substitution="1 0",
+    )
+    feat = torch.randn(B, T, ENCODER_DIM)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, _count_ctc_seg_batch())
+    metrics = lm.eval_metrics(out, lens, _count_ctc_seg_batch())
+    assert metrics == {}
+
+
+def test_count_ctc_eval_metrics_pr_batch():
+    lm = CountCTCHead(
+        encoder_dim=ENCODER_DIM,
+        substitution="1 0",
+        boundary_token="1",
+    )
+    feat = torch.randn(B, T, ENCODER_DIM)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, _count_ctc_pr_batch())
+    metrics = lm.eval_metrics(out, lens, _count_ctc_pr_batch())
+    assert set(metrics.keys()) == {"count_accuracy", "count_mae"}
+
+
+def test_count_ctc_grad():
+    lm = CountCTCHead(encoder_dim=ENCODER_DIM, substitution="1 0")
+    feat = torch.randn(B, T, ENCODER_DIM, requires_grad=True)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, _count_ctc_seg_batch())
+    out["loss"].backward()
+    assert lm.proj.weight.grad is not None
+    assert lm.proj.weight.grad.abs().sum() > 0
+
+
+def test_count_ctc_skip_long_targets():
+    lm = CountCTCHead(encoder_dim=ENCODER_DIM, substitution="1 0")
+    # T=20 frames, N_PHONES=4 -> L*N=8, fits.
+    # Make one utterance need 30 tokens (15 phones * 2) > 20 frames.
+    batch = _count_ctc_seg_batch()
+    batch["text_length"] = torch.tensor([N_PHONES, 15], dtype=torch.long)
+    feat = torch.randn(B, T, ENCODER_DIM, requires_grad=True)
+    lens = torch.full((B,), T, dtype=torch.long)
+    out = lm(feat, lens, batch)
+    assert torch.isfinite(out["loss"])
+    out["loss"].backward()
+
+
+def test_count_ctc_invalid_boundary_token():
+    with pytest.raises(ValueError):
+        CountCTCHead(
+            encoder_dim=ENCODER_DIM,
+            substitution="1 0",
+            boundary_token="z",
+        )
+
+
+def test_count_ctc_empty_substitution():
+    with pytest.raises(ValueError):
+        CountCTCHead(encoder_dim=ENCODER_DIM, substitution="")
+    with pytest.raises(ValueError):
+        CountCTCHead(encoder_dim=ENCODER_DIM, substitution="   ")
+
+
+def test_count_ctc_parse_substitution():
+    vocab, seq = _parse_substitution("1 0")
+    assert vocab == {"1": 1, "0": 2}
+    assert seq == [1, 2]
+
+    vocab, seq = _parse_substitution("a a b")
+    assert vocab == {"a": 1, "b": 2}
+    assert seq == [1, 1, 2]

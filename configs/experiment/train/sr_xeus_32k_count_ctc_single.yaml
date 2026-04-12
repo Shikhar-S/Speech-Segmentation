@@ -1,0 +1,75 @@
+# @package _global_
+
+# python src/main.py experiment=train/sr_xeus_32k_count_ctc_single
+
+defaults:
+  - override /data: joint_prseg
+  - override /model: segment_recognize
+  - override /model/net: xeuspr
+
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "sr_xeus_32k_count_ctc_single"
+tags: ["xeuspr", "segment_recognize", "32k", "count_ctc", "single"]
+
+seed: 42
+
+trainer:
+  devices: -1
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 0
+  max_epochs: -1
+  max_steps: 10000
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 250
+  check_val_every_n_epoch: null
+  log_every_n_steps: 100
+
+callbacks:
+  model_checkpoint:
+    monitor: val_seg/rval
+    mode: max
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping:
+    monitor: val_seg/rval
+    mode: max
+    patience: 100
+
+model:
+  audio_sr: 32000
+  optimizer:
+    lr: 0.0001
+  seg_losses:
+    bce:
+      weight: 1.0
+    count_ctc:
+      _target_: src.recipe.segment_recognize.heads.count_ctc.CountCTCHead
+      weight: 0.5
+      substitution: "1"
+      boundary_token: "1"
+      tolerance_ms: 20
+  pr_losses:
+    ctc:
+      weight: 1.0
+
+data:
+  pr_weight: 1.0
+  seg_weight: 1.0
+  batch_size: 8
+  seg_datamodule:
+    hf_repo: changelinglab/timit-segment
+    target_sr: 32000
+    max_speech_length: 8
+    batch_size: 32
+  pr_datamodule:
+    train_split: "train_timit"
+    dev_splits: ["dev_timit"]
+    batch_size: 16
+
+logger:
+  wandb:
+    tags: ${tags}
