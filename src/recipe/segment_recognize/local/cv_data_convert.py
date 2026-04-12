@@ -8,6 +8,36 @@ from the CommonVoice TSVs at
 CommonVoice release, so the join is inner — clips missing from either side
 are silently skipped and counted in the per-language summary log.
 
+Dataset summary (clean run on cv-corpus-13.0-2023-03-09 + charsiu cv_ali)::
+
+    Per-language kept utterances and hours of audio
+    -----------------------------------------------
+    lang    train_rows  train_hrs  val_rows  val_hrs  test_rows  test_hrs
+      ba       118,482      120.8       483      0.3          0       0.0
+      be       317,391      360.6     1,627      2.0        143       0.2
+      ca       863,474    1,117.2     7,345     10.2      4,309       5.9
+      de       539,246      729.7     1,825      2.5         13       0.0
+      en     1,008,669    1,354.0     3,537      4.9      1,285       1.7
+      es       277,324      343.9     1,076      1.4         50       0.1
+      fr       508,782      605.1     1,912      2.4        242       0.3
+      it       162,430      208.3       354      0.5          0       0.0
+      rw       909,252    1,115.5         0      0.0          0       0.0
+      sw        29,194       39.3     4,757      6.3        697       0.9
+    -----------------------------------------------
+    TOTAL    4,734,244    5,994.5    22,916     30.5      6,739       9.1
+    GRAND    4,763,899 rows / 6,034.1 hours (251 days)
+
+    Version-mismatch losses (inner-join drops; estimated via per-lang mean)
+    ----------------------------------------------------------------------
+    CV13-only  (have audio, no alignment):   502,799 rows /   631.5 h
+    cv_ali-only (have alignment, no audio):  490,850 rows /   631.7 h
+    TOTAL version-mismatch lost:             993,649 rows / 1,263.2 h
+
+    Yield vs ideal ceiling: 82.7% of rows, 82.7% of hours.
+    The ~17% loss is intrinsic — cv_ali was built against an older CV
+    release, and cv-corpus-13.0 has since added / rotated clips. We do a
+    strict inner join on clip id and accept the overlap.
+
 Audio path: ``<cv_dir>/<lang>/clips/<row.path>.mp3``
 
 Usage::
@@ -24,6 +54,7 @@ Usage::
 
 import argparse
 import csv
+import gc
 import logging
 import re
 import sys
@@ -38,7 +69,10 @@ csv.field_size_limit(sys.maxsize)
 import datasets
 from tqdm import tqdm
 
-from src.recipe.segment_recognize.local._parquet_sharded import write_parquet_shards
+from src.recipe.segment_recognize.local._parquet_sharded import (
+    finalize_shard_names,
+    write_parquet_shards_tagged,
+)
 
 log = logging.getLogger("cv_data_convert")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -226,32 +260,6 @@ def convert_language(
     return by_split
 
 
-def merge(
-    accum: Dict[str, List[Dict]],
-    new: Dict[str, List[Dict]],
-) -> None:
-    for split, recs in new.items():
-        accum.setdefault(split, []).extend(recs)
-
-
-def save_dataset(
-    splits_to_records: Dict[str, List[Dict]],
-    output_dir: Path,
-    num_workers: int,
-) -> None:
-    wrote = 0
-    for split_name, recs in splits_to_records.items():
-        wrote += write_parquet_shards(
-            records=recs,
-            features=SCHEMA,
-            output_dir=output_dir,
-            split_name=split_name,
-            num_workers=num_workers,
-        )
-    if wrote == 0:
-        log.error("No records produced; nothing written.")
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--alignments_dir", required=True, type=Path)
@@ -261,7 +269,7 @@ def main() -> None:
                    help="Comma-separated language codes.")
     p.add_argument("--splits", default=",".join(DEFAULT_SPLITS),
                    help="Comma-separated CV split names.")
-    p.add_argument("--num_workers", type=int, default=64,
+    p.add_argument("--num_workers", type=int, default=30,
                    help="Parallel processes for the embed+write step.")
     p.add_argument("--limit", type=int, default=0,
                    help="Max rows per (lang, split) combination (0 = all).")
@@ -269,14 +277,36 @@ def main() -> None:
 
     langs = [l.strip() for l in args.languages.split(",") if l.strip()]
     splits = [s.strip() for s in args.splits.split(",") if s.strip()]
+    out_splits = [OUT_SPLIT_MAP.get(s, s) for s in splits]
 
-    accum: Dict[str, List[Dict]] = {}
+    # Per-language pipeline: walk → write → release. The parent never holds
+    # more than one language's records in memory at once, so 30 workers can
+    # safely fork without blowing up COW memory (the full cv_ali corpus is
+    # 4.7M records / ~25 GB in python dict form, which previously deadlocked
+    # the pool when inherited by 64 workers).
     for lang in langs:
-        merge(accum, convert_language(
+        by_split = convert_language(
             lang, args.alignments_dir, args.cv_dir, splits, args.limit,
-        ))
+        )
+        for split_name, recs in by_split.items():
+            if not recs:
+                continue
+            write_parquet_shards_tagged(
+                records=recs,
+                features=SCHEMA,
+                output_dir=args.output_dir,
+                split_name=split_name,
+                tag=lang,
+                num_workers=args.num_workers,
+            )
+        by_split.clear()
+        gc.collect()
 
-    save_dataset(accum, args.output_dir, args.num_workers)
+    # Renumber tagged per-language shards into the HF-canonical layout.
+    counts = finalize_shard_names(args.output_dir, out_splits)
+    log.info("Finalized shard counts: %s", counts)
+    if sum(counts.values()) == 0:
+        log.error("No records produced; nothing written.")
 
 
 if __name__ == "__main__":

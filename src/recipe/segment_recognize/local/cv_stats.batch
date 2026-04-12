@@ -1,0 +1,170 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J cv_stats
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=32G
+#SBATCH -t 0:20:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+
+set -euo pipefail
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p exp/slurm_logs
+
+source ~/.bashrc
+conda deactivate 2>/dev/null || true
+source .venv_dai/bin/activate
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+python <<'PY'
+from pathlib import Path
+from collections import defaultdict
+import pyarrow.parquet as pq
+
+DATA = Path("exp/downloads/cv-aligned-seg/data")
+
+# (cv13_only, cv_ali_only) losses from the earlier version-mismatch analysis.
+LOSS = {
+    "ba": (24320,      0),
+    "be": (59953,  28394),
+    "ca": (200583, 265830),
+    "de": (31639,  33470),
+    "en": (32882,  73360),
+    "es": (33295,  44992),
+    "fr": (30592,  26341),
+    "it": (29959,   5206),
+    "rw": (36904,   1784),
+    "sw": (22672,  11473),
+}
+
+# Accumulators: per-split, per-language rows & total duration.
+stats = defaultdict(lambda: defaultdict(lambda: {"rows": 0, "dur": 0.0}))
+
+corrupt = []
+for path in sorted(DATA.glob("*.parquet")):
+    split = path.name.split("-", 1)[0]  # train | val | test
+    try:
+        t = pq.read_table(path, columns=["language", "duration"])
+    except Exception as e:
+        corrupt.append((path.name, str(e).split("\n")[0]))
+        continue
+    langs = t.column("language").to_pylist()
+    durs = t.column("duration").to_pylist()
+    for lang, d in zip(langs, durs):
+        s = stats[split][lang]
+        s["rows"] += 1
+        s["dur"] += float(d)
+
+if corrupt:
+    print(f"!! {len(corrupt)} corrupt shards skipped:")
+    for name, err in corrupt[:10]:
+        print(f"    {name}")
+    if len(corrupt) > 10:
+        print(f"    ... and {len(corrupt) - 10} more")
+    print()
+
+def hrs(sec): return sec / 3600.0
+
+# --- Per-language breakdown (kept) ---
+print("=" * 78)
+print("KEPT: per-language kept utterance counts and hours of audio")
+print("=" * 78)
+print(f"{'lang':>4} {'train_rows':>12} {'train_hrs':>10} {'val_rows':>10} "
+      f"{'val_hrs':>8} {'test_rows':>10} {'test_hrs':>8} {'mean_s':>8}")
+
+LANGS = sorted(LOSS.keys())
+per_lang_mean = {}
+tot = defaultdict(lambda: {"rows": 0, "dur": 0.0})
+for lang in LANGS:
+    tr = stats["train"][lang]
+    va = stats["val"][lang]
+    te = stats["test"][lang]
+    total_rows = tr["rows"] + va["rows"] + te["rows"]
+    total_dur = tr["dur"] + va["dur"] + te["dur"]
+    mean = total_dur / total_rows if total_rows > 0 else 0
+    per_lang_mean[lang] = mean
+    print(f"{lang:>4} {tr['rows']:>12} {hrs(tr['dur']):>10.1f} "
+          f"{va['rows']:>10} {hrs(va['dur']):>8.1f} "
+          f"{te['rows']:>10} {hrs(te['dur']):>8.1f} {mean:>8.2f}")
+    for sp, d in (("train", tr), ("val", va), ("test", te)):
+        tot[sp]["rows"] += d["rows"]
+        tot[sp]["dur"] += d["dur"]
+
+print("-" * 78)
+grand_rows = sum(t["rows"] for t in tot.values())
+grand_dur = sum(t["dur"] for t in tot.values())
+print(f"TOTAL kept: train={tot['train']['rows']} ({hrs(tot['train']['dur']):.1f} h) "
+      f"val={tot['val']['rows']} ({hrs(tot['val']['dur']):.1f} h) "
+      f"test={tot['test']['rows']} ({hrs(tot['test']['dur']):.1f} h)")
+print(f"GRAND kept total: {grand_rows} rows, {hrs(grand_dur):.1f} hours "
+      f"({hrs(grand_dur)/24:.1f} days)")
+print()
+
+# --- Version-mismatch losses (estimated via per-lang mean) ---
+print("=" * 78)
+print("LOST: version mismatch (inner-join drops) — estimated hours")
+print("=" * 78)
+print(f"{'lang':>4} {'cv13_only':>10} {'cv13_hrs':>10} "
+      f"{'cvali_only':>12} {'cvali_hrs':>10} {'mean_s':>8}")
+v_cv13_rows = v_cv13_dur = v_cvali_rows = v_cvali_dur = 0
+for lang in LANGS:
+    cv13_only, cvali_only = LOSS[lang]
+    m = per_lang_mean[lang]
+    cv13_hrs = cv13_only * m / 3600
+    cvali_hrs = cvali_only * m / 3600
+    print(f"{lang:>4} {cv13_only:>10} {cv13_hrs:>10.1f} "
+          f"{cvali_only:>12} {cvali_hrs:>10.1f} {m:>8.2f}")
+    v_cv13_rows += cv13_only
+    v_cv13_dur += cv13_only * m
+    v_cvali_rows += cvali_only
+    v_cvali_dur += cvali_only * m
+
+print("-" * 78)
+print(f"TOTAL CV13-only lost:  {v_cv13_rows} rows, {hrs(v_cv13_dur):.1f} h")
+print(f"TOTAL cv_ali-only lost: {v_cvali_rows} rows, {hrs(v_cvali_dur):.1f} h")
+print(f"TOTAL version-mismatch: {v_cv13_rows + v_cvali_rows} rows, "
+      f"{hrs(v_cv13_dur + v_cvali_dur):.1f} h")
+print()
+
+# --- Deadlock losses (45 missing train shards) ---
+print("=" * 78)
+print("LOST: worker deadlock (45 missing train shards, ~90k rows)")
+print("=" * 78)
+train_total_rows = tot["train"]["rows"]
+train_total_dur = tot["train"]["dur"]
+train_mean = train_total_dur / train_total_rows if train_total_rows > 0 else 0
+missing_rows = 45 * 2000  # shard size
+missing_dur = missing_rows * train_mean
+print(f"Train kept: {train_total_rows} rows, {hrs(train_total_dur):.1f} h "
+      f"(mean clip = {train_mean:.2f}s)")
+print(f"Missing shards: 45 × 2000 = {missing_rows} rows (estimated)")
+print(f"Missing hours : {hrs(missing_dur):.1f} h "
+      f"({100*missing_rows/(train_total_rows+missing_rows):.1f}% of train)")
+print()
+
+# --- Grand totals ---
+print("=" * 78)
+print("GRAND SUMMARY")
+print("=" * 78)
+print(f"Kept:                {grand_rows:>10} rows  {hrs(grand_dur):>8.1f} h")
+print(f"Lost (version):      {v_cv13_rows+v_cvali_rows:>10} rows  "
+      f"{hrs(v_cv13_dur + v_cvali_dur):>8.1f} h")
+print(f"Lost (deadlock):     {missing_rows:>10} rows  {hrs(missing_dur):>8.1f} h")
+total_lost_rows = v_cv13_rows + v_cvali_rows + missing_rows
+total_lost_hrs = v_cv13_dur + v_cvali_dur + missing_dur
+print(f"Total lost:          {total_lost_rows:>10} rows  {hrs(total_lost_hrs):>8.1f} h")
+ceiling = grand_rows + total_lost_rows
+print(f"Ideal ceiling:       {ceiling:>10} rows  "
+      f"{hrs(grand_dur + total_lost_hrs):>8.1f} h")
+print(f"Yield: {100*grand_rows/ceiling:.1f}% rows, "
+      f"{100*grand_dur/(grand_dur+total_lost_hrs):.1f}% hours")
+PY
