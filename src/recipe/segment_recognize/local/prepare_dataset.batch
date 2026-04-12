@@ -1,0 +1,71 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J segrec_prepare
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 72
+#SBATCH --mem=120G
+#SBATCH -t 2:00:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+#
+# Submit one of the three datasets per job, in parallel:
+#   sbatch src/recipe/segment_recognize/local/prepare_dataset.batch thchs30
+#   sbatch src/recipe/segment_recognize/local/prepare_dataset.batch librispeech
+#   sbatch src/recipe/segment_recognize/local/prepare_dataset.batch cv
+#
+# Extra args after the dataset name are forwarded to the convert script
+# (e.g. --limit 100 for smoke tests).
+
+set -euo pipefail
+
+DATASET="${1:-}"
+if [[ -z "$DATASET" ]]; then
+    echo "Usage: $0 {thchs30|librispeech|cv} [extra args]" >&2
+    exit 1
+fi
+shift
+EXTRA="$@"
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p "exp/slurm_logs"
+
+source ~/.bashrc
+conda deactivate
+source setup_uv.sh .venv_dai requirements-dai.txt
+echo "Environment setup complete."
+
+case "$DATASET" in
+    thchs30)
+        echo "=== THCHS-30 ==="
+        python -m src.recipe.segment_recognize.local.thchs30_data_convert \
+            --alignments_parquet exp/downloads/thchs30_alignments/data/train-00000-of-00001-c7710d0536782c3f.parquet \
+            --speech_dir         exp/downloads/thchs30_speech/data_thchs30 \
+            --output_dir         exp/downloads/thchs30-seg \
+            $EXTRA
+        ;;
+    librispeech)
+        echo "=== LibriSpeech MFA ==="
+        python -m src.recipe.segment_recognize.local.librispeech_data_convert \
+            --alignments_dir exp/downloads/librispeech_mfa_alignments/data \
+            --speech_dir     /work/hdd/bbjs/shared/corpora/librispeech/LibriSpeech \
+            --output_dir     exp/downloads/librispeech-mfa-seg \
+            $EXTRA
+        ;;
+    cv)
+        echo "=== CommonVoice cv_ali ==="
+        python -m src.recipe.segment_recognize.local.cv_data_convert \
+            --alignments_dir exp/downloads/cv_ali_alignments \
+            --cv_dir         /work/hdd/bbjs/shared/corpora/commonvoice/cv-corpus-13.0-2023-03-09 \
+            --output_dir     exp/downloads/cv-aligned-seg \
+            $EXTRA
+        ;;
+    *)
+        echo "Unknown dataset: $DATASET (expected thchs30|librispeech|cv)" >&2
+        exit 1
+        ;;
+esac
+
+echo "Done."
