@@ -25,10 +25,9 @@ Usage::
 import argparse
 import csv
 import logging
-import os
+import re
 import sys
 import tarfile
-import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -39,8 +38,6 @@ csv.field_size_limit(sys.maxsize)
 import datasets
 from datasets import DatasetDict
 from tqdm import tqdm
-
-from src.recipe.segmentation.local.voxangeles_data_convert import parse_textgrid
 
 log = logging.getLogger("cv_data_convert")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -65,15 +62,44 @@ ALL_LANGS = ("ba", "be", "ca", "de", "en", "es", "fr", "it", "rw", "sw")
 DEFAULT_SPLITS = ("train", "dev", "test")
 
 
+# Regex parser tailored to the cv_ali long-format Praat TextGrid layout:
+#     name = "phones"
+#     ...
+#     intervals [N]:
+#         xmin = <float>
+#         xmax = <float>
+#         text = "<label>"
+# Bypassing tgt + tempfile cuts ~50ms/file down to ~0.5ms/file.
+_PHONES_TIER_RE = re.compile(rb'name\s*=\s*"phones"')
+_INTERVAL_RE = re.compile(
+    rb'xmin\s*=\s*([\d.]+)\s+xmax\s*=\s*([\d.]+)\s+text\s*=\s*"([^"]*)"'
+)
+
+
 def parse_textgrid_bytes(data: bytes) -> List[Dict]:
-    """Parse TextGrid bytes (already in memory) via tgt."""
-    with tempfile.NamedTemporaryFile(suffix=".TextGrid", delete=False) as tmp:
-        tmp.write(data)
-        tmp_path = tmp.name
-    try:
-        return parse_textgrid(Path(tmp_path), tier_name="phones")
-    finally:
-        os.unlink(tmp_path)
+    """Extract the `phones` tier intervals from raw TextGrid bytes.
+
+    Empty-label intervals (silence padding) are dropped to match tgt's
+    behavior in voxangeles_data_convert.py.
+    """
+    m = _PHONES_TIER_RE.search(data)
+    if m is None:
+        return []
+    intervals: List[Dict] = []
+    # The phones tier always comes after the words tier in cv_ali; scan
+    # from the tier marker to the end of the file.
+    for iv in _INTERVAL_RE.finditer(data, m.end()):
+        label = iv.group(3).decode("utf-8", errors="replace")
+        if not label.strip():
+            continue
+        intervals.append(
+            {
+                "start": float(iv.group(1)),
+                "end": float(iv.group(2)),
+                "label": label,
+            }
+        )
+    return intervals
 
 
 def build_clip_lookup(

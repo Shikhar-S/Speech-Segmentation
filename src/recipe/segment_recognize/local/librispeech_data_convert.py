@@ -102,21 +102,22 @@ def convert_split(
     rows = table.slice(0, n_rows).to_pylist()
     trans_cache: Dict[Path, Dict[str, str]] = {}
     records: List[Dict] = []
-    n_missing = 0
+    n_bad = 0
 
+    # Skip per-row audio existence check: we trust the parquet alignments
+    # have corresponding audio. Per-row stat() against NFS is the dominant
+    # cost (~50ms each at scale). Missing files would surface later when
+    # the dataloader actually decodes them — acceptable failure mode.
     for row in tqdm(rows, desc=split_label, unit="utt"):
         utt_id = row["identifier"]
         parts = utt_id.split("-")
         if len(parts) != 3:
             log.warning("Unexpected identifier format: %s", utt_id)
-            n_missing += 1
+            n_bad += 1
             continue
         speaker, book, _ = parts
         book_dir = split_root / speaker / book
         audio_path = book_dir / f"{utt_id}.flac"
-        if not audio_path.is_file():
-            n_missing += 1
-            continue
         if book_dir not in trans_cache:
             trans_cache[book_dir] = load_trans(book_dir)
         text = trans_cache[book_dir].get(utt_id, "")
@@ -135,7 +136,8 @@ def convert_split(
                 "split": split_label,
             }
         )
-    log.info("Split '%s': built %d records, skipped %d", split_label, len(records), n_missing)
+    log.info("Split '%s': built %d records, skipped %d malformed",
+             split_label, len(records), n_bad)
     return records
 
 
