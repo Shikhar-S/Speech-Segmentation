@@ -13,6 +13,7 @@ from lightning import LightningModule
 from lightning.pytorch.utilities import grad_norm
 from torchmetrics import MeanMetric, MinMetric
 
+
 def convert_pointstamps_to_frame_indices(
     start: torch.Tensor,
     end: torch.Tensor,
@@ -63,7 +64,11 @@ class SegmentRecognizeModel(LightningModule):
         self.resolution = resolution
 
         dim = net.encoder_output_size()
-        self.upsample = nn.Linear(dim, dim * resolution) if resolution > 1 else nn.Identity()
+        self.upsample = (
+            nn.Linear(dim, dim * resolution)
+            if resolution > 1
+            else nn.Identity()
+        )
 
         # Runtime-derived values injected into each loss.
         pbf = net.points_by_frames() / resolution
@@ -107,15 +112,12 @@ class SegmentRecognizeModel(LightningModule):
         """Apply learned temporal upsampling, based on resolution."""
         B, T, D = features.shape
         R = self.resolution
-        features = (
-            self.upsample(features)
-            .view(B, T, R, D)
-            .reshape(B, T * R, D)
-        )
+        features = self.upsample(features).view(B, T, R, D).reshape(B, T * R, D)
         return features, lengths * R
 
     def _prepare_seg_targets(
-        self, batch: dict[str, Any],
+        self,
+        batch: dict[str, Any],
     ) -> None:
         """Convert sample-level timestamps to frame indices."""
         start_idx, end_idx = convert_pointstamps_to_frame_indices(
@@ -127,7 +129,9 @@ class SegmentRecognizeModel(LightningModule):
         batch["target_end_idx"] = end_idx
 
     def training_step(
-        self, batch: dict[str, Any], batch_idx: int,
+        self,
+        batch: dict[str, Any],
+        batch_idx: int,
     ) -> torch.Tensor:
         """Dispatch sub-batches to the registered loss modules."""
         pr_batch = batch.get("recognition")
@@ -136,11 +140,17 @@ class SegmentRecognizeModel(LightningModule):
 
         if pr_batch is not None:
             feat, lens = self._encode(
-                pr_batch["speech"], pr_batch["speech_length"],
+                pr_batch["speech"],
+                pr_batch["speech_length"],
             )
             loss = self._apply_losses(
-                self.pr_losses, feat, lens, pr_batch,
-                loss, prefix="train", on_step=True,
+                self.pr_losses,
+                feat,
+                lens,
+                pr_batch,
+                loss,
+                prefix="train",
+                on_step=True,
             )
 
         if seg_batch is not None:
@@ -150,18 +160,26 @@ class SegmentRecognizeModel(LightningModule):
             )
             self._prepare_seg_targets(seg_batch)
             loss = self._apply_losses(
-                self.seg_losses, feat, lens, seg_batch,
-                loss, prefix="train", on_step=True,
+                self.seg_losses,
+                feat,
+                lens,
+                seg_batch,
+                loss,
+                prefix="train",
+                on_step=True,
             )
 
         self.log(
-            "train/loss", loss.detach(),
-            on_step=True, on_epoch=True,
+            "train/loss",
+            loss.detach(),
+            on_step=True,
+            on_epoch=True,
         )
         return loss
 
     def _normalize_val_batch(
-        self, batch: dict[str, Any],
+        self,
+        batch: dict[str, Any],
     ) -> None:
         """Remap segmentation-only val keys to the unified schema.
 
@@ -171,35 +189,51 @@ class SegmentRecognizeModel(LightningModule):
             batch["text"] = batch.pop("target")
             batch["text_length"] = batch.pop("target_length")
         batch.setdefault(
-            "lang_sym", ["<eng>"] * batch["speech"].shape[0],
+            "lang_sym",
+            ["<eng>"] * batch["speech"].shape[0],
         )
 
     def validation_step(
-        self, batch: Any, batch_idx: int,
+        self,
+        batch: Any,
+        batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
         """Run all losses on a validation batch."""
         # TODO(shikhar): Refactor to a single _step fn with mode=valid/train/test
         self._normalize_val_batch(batch)
         features, logit_len = self._encode(
-            batch["speech"], batch["speech_length"],
+            batch["speech"],
+            batch["speech_length"],
         )
         zero = torch.tensor(0.0, device=self.device)
         self._apply_losses(
-            self.pr_losses, features, logit_len, batch,
-            zero, "val_seg", on_step=False,
+            self.pr_losses,
+            features,
+            logit_len,
+            batch,
+            zero,
+            "val_seg",
+            on_step=False,
         )
         if batch.get("target_start") is None:
             return
         self._prepare_seg_targets(batch)
         seg_total = self._apply_losses(
-            self.seg_losses, features, logit_len, batch,
-            zero, "val_seg", on_step=False,
+            self.seg_losses,
+            features,
+            logit_len,
+            batch,
+            zero,
+            "val_seg",
+            on_step=False,
         )
         self.val_seg_loss(seg_total.detach())
         self.log(
-            "val_seg/seg_loss", seg_total.detach(),
-            on_step=False, on_epoch=True,
+            "val_seg/seg_loss",
+            seg_total.detach(),
+            on_step=False,
+            on_epoch=True,
         )
 
     def on_validation_epoch_end(self) -> None:
@@ -257,10 +291,16 @@ class SegmentRecognizeModel(LightningModule):
             out = lm(features, feature_lens, batch, net=self.net)
             loss = loss + lm.weight * out["loss"]
             metrics = lm.eval_metrics(
-                out, feature_lens, batch,
+                out,
+                feature_lens,
+                batch,
             )
             lm.log_output(
-                self, prefix, out, metrics, on_step=on_step,
+                self,
+                prefix,
+                out,
+                metrics,
+                on_step=on_step,
             )
         return loss
 
@@ -283,8 +323,7 @@ def _instantiate_losses(
     if not cfg:
         return {}
     return {
-        name: instantiate(loss_cfg, **inject)
-        for name, loss_cfg in cfg.items()
+        name: instantiate(loss_cfg, **inject) for name, loss_cfg in cfg.items()
     }
 
 
