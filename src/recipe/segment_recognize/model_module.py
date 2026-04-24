@@ -215,8 +215,8 @@ class SegmentRecognizeModel(LightningModule):
         features, lens = self._encode(batch["speech"], batch["speech_length"])
         results: dict[str, Any] = {}
 
-        for losses in (self.seg_losses, self.pr_losses):
-            for name, head in losses.items():
+        for loss_heads in (self.seg_losses, self.pr_losses):
+            for name, head in loss_heads.items():
                 out = head.decode(features, lens, batch, net=self.net)
                 if out is not None:
                     results[name] = out

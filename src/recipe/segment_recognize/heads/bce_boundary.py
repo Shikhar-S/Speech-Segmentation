@@ -22,10 +22,8 @@ from src.recipe.segment_recognize.heads.base import TaskHead
 class BCEBoundaryHead(TaskHead):
     """Binary boundary detection head.
 
-    Owns a linear projection that maps encoder features to per-frame
-    boundary logits, plus a ``BoundaryLoss`` criterion.  The evaluator
-    used for P/R/F1/R-value is shared across heads and injected by the
-    hosting model.
+    Boundary head is a linear projection to map encoder features 
+    into per-frame binary boundary logits.
 
     Attributes:
         boundary_head: Linear projection ``(D) -> (1)``.
@@ -87,12 +85,13 @@ class BCEBoundaryHead(TaskHead):
         self,
         boundary_logits: torch.Tensor,
         feature_lens: torch.Tensor,
+        boundary_threshold: float = 0.0,
     ) -> dict[str, List[SegmentationUnit]]:
         pbf, sr = self.effective_pbf, self.audio_sr
         out: dict[str, List[SegmentationUnit]] = {}
         for b in range(boundary_logits.shape[0]):
             vlen = int(feature_lens[b])
-            flags = (boundary_logits[b, :vlen] > 0).tolist()
+            flags = (boundary_logits[b, :vlen] > boundary_threshold).tolist()
             out[str(b)] = boundaries_to_units(flags, vlen, pbf, sr)
         return out
 
@@ -120,14 +119,10 @@ class BCEBoundaryHead(TaskHead):
         features: torch.Tensor,
         feature_lens: torch.Tensor,
         batch: Mapping[str, Any],
+        boundary_threshold: float = 0.0,
         **ctx: Any,
     ) -> List[Dict[str, Any]]:
         """Decode boundary logits into per-utterance segmentation dicts."""
-        logits = self.boundary_head(features).squeeze(-1)
-        pbf, sr = self.effective_pbf, self.audio_sr
-        out: List[Dict[str, Any]] = []
-        for b in range(features.shape[0]):
-            vlen = int(feature_lens[b])
-            flags = (logits[b, :vlen] > 0).tolist()
-            out.append({"boundaries": boundaries_to_units(flags, vlen, pbf, sr)})
-        return out
+        logits = self.boundary_head(features)
+        preds_dict = self._preds_dict(logits, feature_lens, boundary_threshold)
+        return [{"utterance_id": str(i), "pred_units": units} for i, units in preds_dict.items()]
