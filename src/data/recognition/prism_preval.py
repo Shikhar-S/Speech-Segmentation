@@ -13,7 +13,7 @@ from pathlib import Path
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-class KaldiDataset(Dataset):
+class PrismPREvalDataset(Dataset):
     def __init__(
         self,
         wav_scp_file,
@@ -75,7 +75,9 @@ class KaldiDataset(Dataset):
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     key, wav_path = parts[0], parts[1]
-                    wav_path = _create_env_specific_path(wav_path, portable_wavscp)
+                    wav_path = _create_env_specific_path(
+                        wav_path, portable_wavscp
+                    )
                     wav_scp[key] = str(wav_path)
         return wav_scp
 
@@ -129,7 +131,9 @@ class KaldiDataset(Dataset):
             List of token IDs. Unknown tokens are replaced with ignore_id.
         """
         if self.vocab is None:
-            raise ValueError("Vocabulary not loaded. Provide vocab_file parameter.")
+            raise ValueError(
+                "Vocabulary not loaded. Provide vocab_file parameter."
+            )
 
         tokens = []
         for token in text.split():
@@ -164,7 +168,9 @@ class KaldiDataset(Dataset):
             waveform = torch.mean(waveform, dim=0, keepdim=True)
 
         if sr != self.sampling_rate:
-            waveform = torchaudio.functional.resample(waveform, sr, self.sampling_rate)
+            waveform = torchaudio.functional.resample(
+                waveform, sr, self.sampling_rate
+            )
 
         waveform = waveform.squeeze(0)  # (1, T) -> (T,)
         # Tokenize text if vocabulary is loaded
@@ -186,7 +192,7 @@ class KaldiDataset(Dataset):
         }
 
 
-class KaldiDataModule(L.LightningDataModule):
+class PrismPREvalDataModule(L.LightningDataModule):
     def __init__(
         self,
         wav_scp_file,
@@ -216,7 +222,7 @@ class KaldiDataModule(L.LightningDataModule):
         self.portable_wavscp = portable_wavscp
 
     def setup(self, stage=None):
-        self.dataset = KaldiDataset(
+        self.dataset = PrismPREvalDataset(
             wav_scp_file=self.wav_scp_file,
             text_file=self.text_file,
             lang_file=self.lang_file,
@@ -281,7 +287,9 @@ class KaldiDataModule(L.LightningDataModule):
             text_lengths = torch.zeros(len(batch), dtype=torch.long)
 
             for i, tokens in enumerate(text_tokens_list):
-                padded_texts[i, : len(tokens)] = torch.tensor(tokens, dtype=torch.long)
+                padded_texts[i, : len(tokens)] = torch.tensor(
+                    tokens, dtype=torch.long
+                )
                 text_lengths[i] = len(tokens)
 
             text_data["text"] = padded_texts
@@ -298,7 +306,7 @@ class KaldiDataModule(L.LightningDataModule):
         }
 
 
-def build_kaldi_datamodule(
+def build_prism_preval_datamodule(
     dataset_name,
     data_dir,
     dataset_config_path="configs/data/powsm_evalset_index.yaml",
@@ -330,7 +338,7 @@ def build_kaldi_datamodule(
         lang_file = data_dir / lang_file
     #############################################
 
-    return KaldiDataModule(
+    return PrismPREvalDataModule(
         wav_scp_file=wav_scp_file,
         text_file=text_file,
         lang_file=lang_file,
@@ -344,9 +352,16 @@ def build_kaldi_datamodule(
     )
 
 
+# Convenience fn to get dataset
+def build_prism_preval_dataset(*args, **kwargs):
+    datamodule = build_prism_preval_datamodule(*args, **kwargs)
+    datamodule.setup()
+    return datamodule.dataset
+
+
 if __name__ == "__main__":
-    # Test with: python -m src.data.kaldi_dataset
-    datamodule = build_kaldi_datamodule(
+    # Test with: python -m src.data.prism_preval
+    datamodule = build_prism_preval_datamodule(
         "doreco",
         data_dir="/work/hdd/bbjs/shared/powsm/s2t1/dump/raw",
         dataset_config_path="configs/data/powsm_evalset_index.yaml",

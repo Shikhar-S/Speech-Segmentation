@@ -19,8 +19,8 @@ from src.core.ipa_utils import ARPABET_TO_IPA
 
 
 class SegmentationDataset(Dataset):
-    def __init__(self, hf_split_dataset, tokenizer, target_sr=16000, max_speech_length=None):
-        self.dataset = hf_split_dataset
+    def __init__(self, hf_dataset, tokenizer, target_sr=16000, max_speech_length=None):
+        self.dataset = hf_dataset
         self.tokenizer = tokenizer
         self.target_sr = target_sr
         self.max_speech_length = max_speech_length
@@ -51,6 +51,7 @@ class SegmentationDataset(Dataset):
             "target_length": len(target),
             "phone_pointstamps": phone_pointstamps,
             "phone_timestamps": phone_timestamps,
+            
             "phones": phones_ipa,
             "text": row["text"],
             "utt_id": row["utt_id"],
@@ -182,6 +183,22 @@ class SegmentationDataModule(L.LightningDataModule):
                 predict_datasets.append(ds)
         assert len(predict_datasets) > 0, f"None of the predict splits {self.predict_split} found in dataset."
         return self._dl(ConcatDataset(predict_datasets))
+
+# builders
+def build_segmentation_dataset(
+    hf_repo: str,
+    split: str,
+    tokenizer,
+    train_fraction: float = 1.0,
+    **kwargs,
+) -> SegmentationDataset:
+    """Helper to build a SegmentationDataset with the given components."""
+    cache_dir=kwargs.get("cache_dir", "exp/cache/hf")
+    target_sr=kwargs.get("target_sr", 16000)
+    max_speech_length=kwargs.get("max_speech_length", None)
+    ds=datasets.load_dataset(hf_repo, split=split, cache_dir=cache_dir)
+    return SegmentationDataset(ds, tokenizer, target_sr=target_sr, max_speech_length=max_speech_length)
+
 
 if __name__ == "__main__":
     # export HF_HOME="exp/cache/hf"

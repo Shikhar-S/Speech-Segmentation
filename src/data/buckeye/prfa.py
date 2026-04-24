@@ -162,11 +162,14 @@ class BuckeyeDataset(Dataset):
         phone_ipa, phone_pointstamps = [], []
         masked_phone_ipa = []
         atleast_one_unmasked = False
-        for phone, (start, end) in zip(item["phones"], item["phone_timestamps"]):
+        for phone, (start, end) in zip(
+            item["phones"], item["phone_timestamps"]
+        ):
             start_idx = int(start * self.target_sr)
             end_idx = int(end * self.target_sr)
             should_mask = (
-                np.random.rand() < self.mask_probability and atleast_one_unmasked
+                np.random.rand() < self.mask_probability
+                and atleast_one_unmasked
             )
             if should_mask:
                 # Replace the segment with noise
@@ -176,7 +179,9 @@ class BuckeyeDataset(Dataset):
                 )
             atleast_one_unmasked = True
             phone_ipa.append(ARPABET_TO_IPA.get(phone.lower(), phone.lower()))
-            masked_phone_ipa.append(phone_ipa[-1] if not should_mask else "[NOISE]")
+            masked_phone_ipa.append(
+                phone_ipa[-1] if not should_mask else "[NOISE]"
+            )
             phone_pointstamps.append(
                 (int(start * self.target_sr), int(end * self.target_sr))
             )
@@ -220,12 +225,18 @@ def collate_fn(batch):
 
     # Initialize tensors with -1 padding
     batch_size = len(batch)
-    speech = torch.full((batch_size, max_speech_length), -1.0, dtype=torch.float32)
+    speech = torch.full(
+        (batch_size, max_speech_length), -1.0, dtype=torch.float32
+    )
     speech_length = torch.zeros(batch_size, dtype=torch.long)
     phone_id = torch.full((batch_size, max_target_length), -1, dtype=torch.long)
     target_length = torch.zeros(batch_size, dtype=torch.long)
-    target_start = torch.full((batch_size, max_target_length), -1, dtype=torch.float32)
-    target_end = torch.full((batch_size, max_target_length), -1, dtype=torch.float32)
+    target_start = torch.full(
+        (batch_size, max_target_length), -1, dtype=torch.float32
+    )
+    target_end = torch.full(
+        (batch_size, max_target_length), -1, dtype=torch.float32
+    )
     # NOTE(shikhar): init with -1 in target_end is good in downstream loss computation
     # since it helps ignore padding
 
@@ -351,7 +362,9 @@ class BuckeyeDataModule(L.LightningDataModule):
 
     def predict_dataloader(self):
         return DataLoader(
-            ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]),
+            ConcatDataset(
+                [self.train_dataset, self.val_dataset, self.test_dataset]
+            ),
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
@@ -366,14 +379,19 @@ def _naive_baseline_equal_segmentation(test_loader: DataLoader):
     """
     print("===" * 20)
     print("Naive baseline - equal segmentation")
-    from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
+    from src.metrics.segmentation_evaluator import (
+        SegmentationEvaluator,
+        SegmentationUnit,
+    )
     from tqdm import tqdm
 
     evaluator = SegmentationEvaluator(tolerance_ms=20)
     naive_predictions = {}
     ground_truth = {}
     for batch_id, test_batch in tqdm(
-        enumerate(test_loader), desc="Evaluating naive baseline", total=len(test_loader)
+        enumerate(test_loader),
+        desc="Evaluating naive baseline",
+        total=len(test_loader),
     ):
         # if batch_id > 2:
         #     break
@@ -383,7 +401,9 @@ def _naive_baseline_equal_segmentation(test_loader: DataLoader):
             leave=False,
         ):
             n_phones = test_batch["target_length"][i].item()
-            duration = test_batch["speech_length"][i].item() / 16000  # assuming 16kHz
+            duration = (
+                test_batch["speech_length"][i].item() / 16000
+            )  # assuming 16kHz
             phone_duration = duration / n_phones
             boundaries = [
                 SegmentationUnit(
@@ -439,9 +459,11 @@ def _naive_baseline_equal_segmentation(test_loader: DataLoader):
 
 if __name__ == "__main__":
     """Example usage"""
-    from src.data.buckeye.common_datamodule import BuckeyeDataModule
+    from src.data.buckeye.prfa import BuckeyeDataModule
     from src.model.powsm.token_id_converter import build_powsm_tokenizer
-    from src.model.wav2vec2phoneme.builders import build_wav2vec2phoneme_tokenizer
+    from src.model.wav2vec2phoneme.builders import (
+        build_wav2vec2phoneme_tokenizer,
+    )
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
