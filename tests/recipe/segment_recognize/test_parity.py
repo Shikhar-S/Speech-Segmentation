@@ -71,13 +71,13 @@ class DummyNet(nn.Module):
 
 # -- Helpers ----------------------------------------------------
 
-BCE_TARGET = (
-    "src.recipe.segment_recognize"
-    ".heads.bce_boundary.BCEBoundaryHead"
+from functools import partial
+
+from src.recipe.segment_recognize.heads.bce_boundary import (
+    BCEBoundaryHead,
 )
-CTC_TARGET = (
-    "src.recipe.segment_recognize"
-    ".heads.ctc_recognition.CTCRecognitionHead"
+from src.recipe.segment_recognize.heads.ctc_recognition import (
+    CTCRecognitionHead,
 )
 
 
@@ -101,10 +101,10 @@ def _make_pair():
         net=net,
         optimizer=torch.optim.Adam,
         seg_losses={
-            "bce": {"_target_": BCE_TARGET, "weight": 1.0},
+            "bce": partial(BCEBoundaryHead, weight=1.0),
         },
         pr_losses={
-            "ctc": {"_target_": CTC_TARGET, "weight": 1.0},
+            "ctc": partial(CTCRecognitionHead, weight=1.0),
         },
     )
 
@@ -122,45 +122,43 @@ def _make_pair():
 
 
 def _seg_sub_batch(B=2, T_speech=6400, T_phones=4):
+    """Seg batch with both legacy and canonical keys populated.
+
+    JointPRSegModel reads legacy keys (``text``, ``target_start``)
+    while SegmentRecognizeModel reads canonical keys
+    (``phones``, ``phone_start``).  Populating both lets parity
+    tests feed the same dict to both models.
+    """
+    phones = torch.randint(1, VOCAB, (B, T_phones))
+    phone_length = torch.full((B,), T_phones, dtype=torch.long)
+    arange = torch.arange(T_phones, dtype=torch.float32) * POINTS
+    start = torch.stack([arange] * B)
+    end = torch.stack([arange + POINTS - 1] * B)
     return {
         "speech": torch.randn(B, T_speech),
-        "speech_length": torch.full(
-            (B,), T_speech, dtype=torch.long,
-        ),
-        "text": torch.randint(1, VOCAB, (B, T_phones)),
-        "text_length": torch.full(
-            (B,), T_phones, dtype=torch.long,
-        ),
-        "target_start": torch.stack(
-            [
-                torch.arange(T_phones, dtype=torch.float32)
-                * POINTS
-            ]
-            * B,
-        ),
-        "target_end": torch.stack(
-            [
-                torch.arange(T_phones, dtype=torch.float32)
-                * POINTS
-                + POINTS
-                - 1
-            ]
-            * B,
-        ),
+        "speech_length": torch.full((B,), T_speech, dtype=torch.long),
+        "text": phones,
+        "text_length": phone_length,
+        "target_start": start,
+        "target_end": end,
+        "phones": phones,
+        "phone_length": phone_length,
+        "phone_start": start,
+        "phone_end": end,
         "utt_id": [f"seg_{i}" for i in range(B)],
     }
 
 
 def _pr_sub_batch(B=2, T_speech=4800, T_phones=3):
+    phones = torch.randint(1, VOCAB, (B, T_phones))
+    phone_length = torch.full((B,), T_phones, dtype=torch.long)
     return {
         "speech": torch.randn(B, T_speech),
-        "speech_length": torch.full(
-            (B,), T_speech, dtype=torch.long,
-        ),
-        "text": torch.randint(1, VOCAB, (B, T_phones)),
-        "text_length": torch.full(
-            (B,), T_phones, dtype=torch.long,
-        ),
+        "speech_length": torch.full((B,), T_speech, dtype=torch.long),
+        "text": phones,
+        "text_length": phone_length,
+        "phones": phones,
+        "phone_length": phone_length,
         "lang_sym": ["<eng>"] * B,
         "utt_id": [f"pr_{i}" for i in range(B)],
     }

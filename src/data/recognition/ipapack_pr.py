@@ -295,7 +295,7 @@ class IpapackDataset(Dataset):
             "accent_sym": accent,
             "split": self.split,
             "metadata_idx": idx,
-            "target": transcription,
+            "target": text_tokens,
             "text": transcription,
             "asr_text": asr_text,
             "asr_text_tokens": asr_text_tokens,

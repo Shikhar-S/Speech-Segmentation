@@ -61,7 +61,8 @@ def _normalize_seg_item(item: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_pr_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize a raw phone-recognition item into the canonical schema."""
     target = item.get("target")
-    assert target is not None, "PR item missing text_tokens"
+    assert target is not None, "PR item missing target field"
+    target = torch.as_tensor(target, dtype=torch.long)
     target_length = len(target)
     return {
         "type": "recognition",
