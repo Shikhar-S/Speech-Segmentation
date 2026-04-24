@@ -29,8 +29,12 @@ def get_w2v2ph_schedule(
     Additionally, if encoder_unfreeze_step > 0, the encoder parameters are
     frozen until that step is reached.
     """
-    assert 0.0 <= warmup_fraction <= 1.0, "warmup_fraction must be in [0.0, 1.0]"
-    assert 0.0 <= constant_fraction <= 1.0, "constant_fraction must be in [0.0, 1.0]"
+    assert (
+        0.0 <= warmup_fraction <= 1.0
+    ), "warmup_fraction must be in [0.0, 1.0]"
+    assert (
+        0.0 <= constant_fraction <= 1.0
+    ), "constant_fraction must be in [0.0, 1.0]"
     assert (
         warmup_fraction + constant_fraction <= 1.0
     ), "Sum of warmup_fraction and constant_fraction must be less than or equal to 1.0"
@@ -78,7 +82,9 @@ class PhoneRecognitionModel(LightningModule):
         dev_splits: Optional[List[str]] = None,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(logger=False, ignore=["net", "inference_strategy"])
+        self.save_hyperparameters(
+            logger=False, ignore=["net", "inference_strategy"]
+        )
         self.net = net
         self.inference_strategy = inference_strategy
         self.blank_id: Optional[int] = getattr(self.net, "blank_id", None)
@@ -93,7 +99,9 @@ class PhoneRecognitionModel(LightningModule):
         self.cers = nn.ModuleDict({s: MeanMetric() for s in self.dev_splits})
         self.val_loss_best = MinMetric()
 
-    def forward(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def forward(
+        self, batch: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
         return self.net(
             speech=batch["speech"],
             speech_lengths=batch["speech_length"],
@@ -146,21 +154,34 @@ class PhoneRecognitionModel(LightningModule):
             if k == "cer_ctc" and split in self.cers:
                 continue
             self.log(
-                f"{split}/{k}", v, on_step=log_on_step, on_epoch=True, prog_bar=False
+                f"{split}/{k}",
+                v,
+                on_step=log_on_step,
+                on_epoch=True,
+                prog_bar=False,
             )
         return out
 
-    def training_step(self, batch, batch_idx, dataloader_idx: int = 0) -> torch.Tensor:
+    def training_step(
+        self, batch, batch_idx, dataloader_idx: int = 0
+    ) -> torch.Tensor:
         return self._run_stage(batch, "train", log_on_step=True)["loss"]
 
-    def validation_step(self, batch, batch_idx, dataloader_idx: int = 0) -> None:
-        self._run_stage(batch, self.dev_splits[dataloader_idx], log_on_step=False)
+    def validation_step(
+        self, batch, batch_idx, dataloader_idx: int = 0
+    ) -> None:
+        self._run_stage(
+            batch, self.dev_splits[dataloader_idx], log_on_step=False
+        )
 
     def on_validation_epoch_end(self) -> None:
         loss = self.losses[f"{self.dev_splits[0]}loss"].compute()
         self.val_loss_best(loss)
         self.log(
-            "val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True
+            "val/loss_best",
+            self.val_loss_best.compute(),
+            sync_dist=True,
+            prog_bar=True,
         )
         self.log("val/loss", loss, sync_dist=True, prog_bar=False)
 
@@ -212,7 +233,9 @@ class PhoneRecognitionModel(LightningModule):
 
 if __name__ == "__main__":
     # python -m src.recipe.phone_recognition.model_module
-    from src.data.kaldi_pretraining_dataset import build_kaldi_datamodule
+    from src.data.recognition.ipapack_pr import (
+        build_ipapack_pr_datamodule,
+    )
     from src.model.wav2vec2.builders import build_wav2vec2pr
 
     net = build_wav2vec2pr(
@@ -223,7 +246,7 @@ if __name__ == "__main__":
     net.get_trainable_parameters()
     print("Built Wav2Vec2 model ")
 
-    datamodule = build_kaldi_datamodule(
+    datamodule = build_ipapack_pr_datamodule(
         train_splits=["dev_1k"],  # "train_accentmix_multi",
         dev_splits=[
             "dev_1k",

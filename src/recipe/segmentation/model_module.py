@@ -14,10 +14,8 @@ from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
 
 from src.recipe.segmentation.segmentation_loss import BoundaryLoss, SegmentationLoss
-from src.recipe.segmentation.inference import (
-    SegmentationInference,
-    _boundary_flags_to_units,
-)
+from src.recipe.segmentation.inference import SegmentationInference
+from src.recipe.segmentation.boundary_utils import boundaries_to_units
 from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 from src.utils import RankedLogger
 
@@ -167,7 +165,7 @@ class SegmentationModel(LightningModule):
             vlen = int(logit_len[b])
             # Predicted boundaries: convert frame flags to segments
             flags = (boundary_logits[b, :vlen] > 0).tolist()
-            pred_units = _boundary_flags_to_units(flags, vlen, pbf, sr)
+            pred_units = boundaries_to_units(flags, vlen, pbf, sr)
             # GT boundaries: build segments from start frame indices
             n_phones = int(target_len[b])
             starts = target_start_idx[b, :n_phones].tolist()
@@ -206,7 +204,7 @@ class SegmentationModel(LightningModule):
         for b in range(logits.shape[0]):
             vlen = int(logit_len[b])
             flags = _ctc_boundary_flags(logits[b], vlen, blank)
-            pred_units = _boundary_flags_to_units(flags, vlen, pbf, sr)
+            pred_units = boundaries_to_units(flags, vlen, pbf, sr)
             n = int(target_len[b])
             starts = target_start_idx[b, :n].tolist()
             gt_units = [
@@ -484,7 +482,7 @@ class SegmentationModel(LightningModule):
             valid_len = int(logit_lens[0])
             flags = (probs[:valid_len] > 0.5).tolist()
             results.append(
-                _boundary_flags_to_units(flags, valid_len, pbf, sr)
+                boundaries_to_units(flags, valid_len, pbf, sr)
             )
         return results
 

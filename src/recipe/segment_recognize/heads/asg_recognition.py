@@ -1,11 +1,20 @@
 """ASG phone-recognition head."""
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
 
+from src.metrics.segmentation_evaluator import SegmentationEvaluator
+from src.recipe.phone_recognition.greedy_ctc_strategy import (
+    ctc_collapse_vectorized,
+)
+from src.recipe.segmentation.boundary_utils import (
+    argmax_to_boundaries,
+    boundaries_to_units,
+    boundary_rval_metrics,
+)
 from src.recipe.segment_recognize.heads.base import TaskHead
 from src.recipe.segment_recognize.losses.asg import (
     AutoSegmentationCriterion,
@@ -22,26 +31,34 @@ class ASGRecognitionHead(TaskHead):
 
     Args:
         encoder_dim: Encoder output dimensionality (injected).
+        evaluator: Shared boundary-level metric evaluator (injected).
         num_labels: Vocabulary size including the repeat token.
         repeat_idx: Index used for the repeat token.
         use_transitions: Learn label-to-label transition scores.
         use_double_scores: Use float64 for DP precision.
+        effective_pbf: Audio samples per encoder frame.
+        audio_sr: Audio sample rate in Hz.
         weight: Loss weight in the multi-task sum.
     """
 
     log_name = "asg"
+    prog_bar_keys = frozenset({"rval"})
 
     def __init__(
         self,
         encoder_dim: int,
+        evaluator: SegmentationEvaluator,
         num_labels: int,
         repeat_idx: int = 0,
         use_transitions: bool = True,
         use_double_scores: bool = False,
+        effective_pbf: float = 640.0,
+        audio_sr: int = 16000,
         weight: float = 1.0,
         **kwargs: Any,
     ) -> None:
         super().__init__(weight)
+        self.repeat_idx = repeat_idx
         self.proj = nn.Linear(encoder_dim, num_labels)
         self.criterion = AutoSegmentationCriterion(
             num_labels=num_labels,
@@ -49,6 +66,9 @@ class ASGRecognitionHead(TaskHead):
             use_transitions=use_transitions,
             use_double_scores=use_double_scores,
         )
+        self.evaluator = evaluator
+        self.effective_pbf = effective_pbf
+        self.audio_sr = audio_sr
 
     def forward(
         self,
@@ -62,16 +82,71 @@ class ASGRecognitionHead(TaskHead):
         Args:
             features: ``(B, T, D)`` encoder output.
             feature_lens: ``(B,)`` valid frame counts.
-            batch: Must contain ``text`` and ``text_length``.
+            batch: Must contain ``target`` and ``target_length``.
 
         Returns:
-            Dict with ``loss`` (scalar).
+            Dict with ``loss`` and ``logits``.
         """
         logits = self.proj(features)
         loss_per_utt = self.criterion(
             logits,
-            batch["text"],
+            batch["target"],
             feature_lens,
-            batch["text_length"],
+            batch["target_length"],
         )
-        return {"loss": loss_per_utt.mean()}
+        return {"loss": loss_per_utt.mean(), "logits": logits}
+
+    @torch.no_grad()
+    def _rval_metrics(
+        self,
+        output: dict[str, Any],
+        feature_lens: torch.Tensor,
+        batch: Mapping[str, Any],
+    ) -> dict[str, float]:
+        """Run boundary rval when supervision is present, else {}."""
+        if "phone_start_idx" not in batch:
+            return {}
+        return boundary_rval_metrics(
+            output["logits"], feature_lens, batch,
+            self.evaluator, self.effective_pbf, self.audio_sr,
+            blank_id=self.repeat_idx,
+        )
+
+    def eval_metrics(
+        self,
+        output: dict[str, Any],
+        feature_lens: torch.Tensor,
+        batch: Mapping[str, Any],
+    ) -> dict[str, float]:
+        """Boundary rval metrics from argmax phone predictions."""
+        return self._rval_metrics(output, feature_lens, batch)
+
+    @torch.no_grad()
+    def decode(
+        self,
+        features: torch.Tensor,
+        feature_lens: torch.Tensor,
+        batch: Mapping[str, Any],
+        **ctx: Any,
+    ) -> List[Dict[str, Any]]:
+        """Greedy ASG decode + per-frame boundaries.
+
+        Returns one dict per utterance with ``phone_ids`` and
+        segmentation ``boundaries`` derived from argmax phone-change
+        frames (with ``repeat_idx`` treated as blank).
+        """
+        y_hat = torch.argmax(self.proj(features), dim=-1)
+        collapsed = ctc_collapse_vectorized(y_hat, blank_id=self.repeat_idx)
+        pbf, sr = self.effective_pbf, self.audio_sr
+        out: List[Dict[str, Any]] = []
+        for b, ids in enumerate(collapsed):
+            vlen = int(feature_lens[b])
+            preds = y_hat[b, :vlen].tolist()
+            flags = argmax_to_boundaries(
+                preds, vlen, blank_id=self.repeat_idx,
+            )
+            out.append({
+                "phone_ids": ids,
+                "boundaries": boundaries_to_units(flags, vlen, pbf, sr),
+            })
+        return out

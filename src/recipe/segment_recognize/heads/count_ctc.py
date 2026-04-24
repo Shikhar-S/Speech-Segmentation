@@ -15,17 +15,19 @@ against ground-truth boundaries (when available).
 """
 
 from collections.abc import Mapping
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 
-from src.metrics.segmentation_evaluator import (
-    SegmentationEvaluator,
-    SegmentationUnit,
+from src.metrics.segmentation_evaluator import SegmentationEvaluator
+from src.recipe.phone_recognition.greedy_ctc_strategy import (
+    ctc_collapse_vectorized,
 )
-from src.recipe.segmentation.inference import (
-    _boundary_flags_to_units,
+from src.recipe.segmentation.boundary_utils import (
+    boundaries_to_units,
+    evaluate_boundaries,
+    phone_starts_to_gt_units,
 )
 from src.recipe.segment_recognize.heads.base import TaskHead
 from src.utils import RankedLogger
@@ -69,41 +71,29 @@ def _parse_substitution(
 
 
 def _build_targets(
-    text_length: torch.Tensor,
+    target_length: torch.Tensor,
     per_phone_seq: List[int],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Build flat CTC targets by replacing each phone with ``per_phone_seq``.
 
     Args:
-        text_length: ``(B,)`` number of phones per utterance.
+        target_length: ``(B,)`` number of phones per utterance.
         per_phone_seq: Class ids that replace each phone (length L).
 
     Returns:
         targets_flat: ``(sum(L * N_i),)`` 1-D long tensor.
-        target_lengths: ``(B,)`` long tensor of ``L * text_length``.
+        target_lengths: ``(B,)`` long tensor of ``L * target_length``.
     """
     L = len(per_phone_seq)
-    target_lengths = L * text_length
+    target_lengths = L * target_length
     pat = torch.tensor(per_phone_seq, dtype=torch.long)
-    pieces = [pat.repeat(int(n)) for n in text_length.tolist()]
+    pieces = [pat.repeat(int(n)) for n in target_length.tolist()]
     targets_flat = (
         torch.cat(pieces)
         if pieces
         else torch.empty(0, dtype=torch.long)
     )
     return targets_flat, target_lengths
-
-
-def _ctc_collapse(preds: List[int]) -> List[int]:
-    """Standard CTC collapse: drop consecutive duplicates, then blanks."""
-    collapsed: List[int] = []
-    prev: Optional[int] = None
-    for p in preds:
-        if p != prev:
-            prev = p
-            if p != _BLANK_ID:
-                collapsed.append(p)
-    return collapsed
 
 
 class CountCTCHead(TaskHead):
@@ -124,7 +114,7 @@ class CountCTCHead(TaskHead):
         boundary_class_id: Class id of ``boundary_token`` (or ``None``).
         proj: ``Linear(encoder_dim, num_classes)`` projection.
         ctc_loss: ``nn.CTCLoss`` instance with ``blank=0``.
-        evaluator: ``SegmentationEvaluator`` for boundary metrics.
+        evaluator: Shared ``SegmentationEvaluator`` for boundary metrics.
     """
 
     log_name = "count_ctc"
@@ -133,11 +123,11 @@ class CountCTCHead(TaskHead):
     def __init__(
         self,
         encoder_dim: int,
+        evaluator: SegmentationEvaluator,
         substitution: str = "1 0",
         boundary_token: Optional[str] = None,
         effective_pbf: float = 640.0,
         audio_sr: int = 16000,
-        tolerance_ms: int = 20,
         weight: float = 1.0,
         zero_infinity: bool = True,
         **kwargs: Any,
@@ -165,9 +155,7 @@ class CountCTCHead(TaskHead):
             reduction="none",
             zero_infinity=zero_infinity,
         )
-        self.evaluator = SegmentationEvaluator(
-            tolerance_ms=tolerance_ms,
-        )
+        self.evaluator = evaluator
         self.effective_pbf = effective_pbf
         self.audio_sr = audio_sr
 
@@ -183,16 +171,16 @@ class CountCTCHead(TaskHead):
         Args:
             features: ``(B, T, D)`` encoder output.
             feature_lens: ``(B,)`` valid frame counts.
-            batch: Must contain ``text_length``.
+            batch: Must contain ``target_length``.
 
         Returns:
             Dict with ``loss`` and ``logits`` (the latter for eval).
         """
-        text_length = batch["text_length"]
+        target_length = batch["target_length"]
         logits = self.proj(features)  # (B, T, C)
 
         L = len(self.per_phone_seq)
-        required = L * text_length
+        required = L * target_length
         valid = required <= feature_lens
 
         if not valid.any():
@@ -218,10 +206,10 @@ class CountCTCHead(TaskHead):
 
         logits_v = logits[valid]
         feat_lens_v = feature_lens[valid]
-        text_len_v = text_length[valid]
+        phone_len_v = target_length[valid]
 
         targets_flat, target_lens = _build_targets(
-            text_len_v.cpu(), self.per_phone_seq,
+            phone_len_v.cpu(), self.per_phone_seq,
         )
         targets_flat = targets_flat.to(features.device)
         target_lens = target_lens.to(features.device)
@@ -239,31 +227,14 @@ class CountCTCHead(TaskHead):
 
         return {"loss": loss, "logits": logits}
 
-    def _decode_boundaries(
+    def _boundary_flags(
         self,
-        logits: torch.Tensor,
+        logits_b: torch.Tensor,
         valid_len: int,
-    ) -> Tuple[List[bool], int]:
-        """Argmax-decode logits and extract boundary flags + count.
-
-        Args:
-            logits: ``(T, C)`` raw logits for one utterance.
-            valid_len: Number of valid (non-padded) frames.
-
-        Returns:
-            is_boundary: Boolean flags marking frames whose argmax is
-                ``boundary_class_id``.
-            phone_count: Number of boundary tokens after CTC collapse.
-        """
-        boundary_id = self.boundary_class_id
-        assert boundary_id is not None, (
-            "_decode_boundaries called without a boundary_token configured."
-        )
-        preds = logits[:valid_len].argmax(dim=-1).tolist()
-        collapsed = _ctc_collapse(preds)
-        phone_count = sum(1 for c in collapsed if c == boundary_id)
-        is_boundary = [p == boundary_id for p in preds]
-        return is_boundary, phone_count
+    ) -> List[bool]:
+        """Per-frame flags: ``True`` where argmax equals ``boundary_class_id``."""
+        preds = logits_b[:valid_len].argmax(dim=-1).tolist()
+        return [p == self.boundary_class_id for p in preds]
 
     @torch.no_grad()
     def eval_metrics(
@@ -275,65 +246,68 @@ class CountCTCHead(TaskHead):
         """Count + boundary metrics.
 
         Always reports ``count_accuracy`` and ``count_mae``.  When
-        ``target_start_idx`` is present in the batch, additionally
+        ``phone_start_idx`` is present in the batch, additionally
         computes ``precision``, ``recall``, ``f1`` and ``rval`` via
-        ``SegmentationEvaluator``.  Returns an empty dict when no
+        the shared evaluator.  Returns an empty dict when no
         ``boundary_token`` is configured.
         """
-        if self.boundary_class_id is None:
+        bid = self.boundary_class_id
+        if bid is None:
             return {}
 
         logits = output["logits"]
-        text_length = batch["text_length"]
+        target_length = batch["target_length"]
         pbf, sr = self.effective_pbf, self.audio_sr
         B = logits.shape[0]
-        has_gt = "target_start_idx" in batch
 
-        preds_dict: dict[str, list[SegmentationUnit]] = {}
-        gt_dict: dict[str, list[SegmentationUnit]] = {}
-        count_correct = 0
-        count_abs_err_sum = 0
-
-        for b in range(B):
-            vlen = int(feature_lens[b])
-            is_boundary, pred_count = self._decode_boundaries(
-                logits[b], vlen,
-            )
-            gt_count = int(text_length[b])
-            count_abs_err_sum += abs(pred_count - gt_count)
-            if pred_count == gt_count:
-                count_correct += 1
-
-            preds_dict[str(b)] = _boundary_flags_to_units(
-                is_boundary, vlen, pbf, sr,
-            )
-
-            if has_gt:
-                n = int(text_length[b])
-                starts = batch["target_start_idx"][b, :n].tolist()
-                gt_dict[str(b)] = [
-                    SegmentationUnit(
-                        start=starts[i] * pbf / sr,
-                        end=(
-                            starts[i + 1] if i + 1 < n else vlen
-                        )
-                        * pbf
-                        / sr,
-                        label=0,
-                    )
-                    for i in range(n)
-                ]
+        argmax = logits.argmax(dim=-1)
+        collapsed = ctc_collapse_vectorized(argmax, blank_id=_BLANK_ID)
+        pred_counts = [sum(1 for c in ids if c == bid) for ids in collapsed]
+        gt_counts = target_length.tolist()
+        count_abs_err_sum = sum(
+            abs(p - int(g)) for p, g in zip(pred_counts, gt_counts)
+        )
+        count_correct = sum(
+            1 for p, g in zip(pred_counts, gt_counts) if p == int(g)
+        )
 
         metrics: dict[str, float] = {
             "count_accuracy": count_correct / B,
             "count_mae": count_abs_err_sum / B,
         }
-        if has_gt:
-            results = self.evaluator.evaluate_batch(
-                preds_dict, gt_dict,
-            )
-            for k in ("precision", "recall", "f1", "rval"):
-                metrics[k] = self.evaluator._get_metric(
-                    results, k, 0.0,
-                )
+
+        if "phone_start_idx" not in batch:
+            return metrics
+
+        preds_dict: dict[str, list] = {}
+        for b in range(B):
+            vlen = int(feature_lens[b])
+            flags = self._boundary_flags(logits[b], vlen)
+            preds_dict[str(b)] = boundaries_to_units(flags, vlen, pbf, sr)
+        gt_dict = phone_starts_to_gt_units(
+            batch["phone_start_idx"], target_length, feature_lens, pbf, sr,
+        )
+        metrics.update(evaluate_boundaries(self.evaluator, preds_dict, gt_dict))
         return metrics
+
+    @torch.no_grad()
+    def decode(
+        self,
+        features: torch.Tensor,
+        feature_lens: torch.Tensor,
+        batch: Mapping[str, Any],
+        **ctx: Any,
+    ) -> List[Dict[str, Any]]:
+        """Decode argmax boundaries into per-utterance segmentation dicts."""
+        if self.boundary_class_id is None:
+            raise NotImplementedError(
+                "CountCTCHead.decode requires a boundary_token."
+            )
+        logits = self.proj(features)
+        pbf, sr = self.effective_pbf, self.audio_sr
+        out: List[Dict[str, Any]] = []
+        for b in range(features.shape[0]):
+            vlen = int(feature_lens[b])
+            flags = self._boundary_flags(logits[b], vlen)
+            out.append({"boundaries": boundaries_to_units(flags, vlen, pbf, sr)})
+        return out

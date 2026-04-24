@@ -95,10 +95,10 @@ class SegmentRecognizeModel(LightningModule):
         # Resolution reduction can produce overlapping indices; the
         # seg loss shares target weight across the overlap.
         pbf = self.effective_pbf
-        batch["phone_start_idx"] = torch.floor(
-            batch["phone_start"] / pbf
+        batch["target_start_idx"] = torch.floor(
+            batch["target_start"] / pbf
         ).long()
-        batch["phone_end_idx"] = torch.floor(batch["phone_end"] / pbf).long()
+        batch["target_end_idx"] = torch.floor(batch["target_end"] / pbf).long()
 
     def _apply_losses(
         self,
