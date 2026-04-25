@@ -13,21 +13,31 @@ class ForcedAlignmentInference:
     def __init__(self, blank_idx=0):
         self.blank_idx = blank_idx
     
-    def __call__(self, logprobs, input_lengths, target, target_lengths, **kwargs):
-        label, score = forced_align(logprobs, target, input_lengths, target_lengths, blank=self.blank_idx)
-        return label, score
+    def __call__(self, logprobs, input_lengths, target, **kwargs):
+        """
+        Args:
+            logprobs: (B, T, C) log probabilities from the model
+            input_lengths: (B,) lengths of the input sequences
+            target: list of lists of int, target phone sequences for each utterance
+        """
+        labels=[]
+        scores=[]
+        bs=logprobs.size(0)
+        for bidx in range(bs):
+            tgt=torch.tensor(target[bidx], dtype=torch.long, device=logprobs.device).unsqueeze(0)
+            tgtlen=torch.tensor(len(target[bidx]), dtype=torch.long, device=logprobs.device).unsqueeze(0)
+            logp=logprobs[bidx:bidx+1,:input_lengths[bidx],:]
+            label, score = forced_align(logp, tgt, input_lengths[bidx:bidx+1], tgtlen, blank=self.blank_idx)
+            labels.append(label[0])
+            scores.append(score[0])
+        return labels, scores
         
-
 if __name__=='__main__':
-    # TODO(shikhar): check this works!
-    B, S, C = 2, 5, 3
-    T = 4
+    B, S, C = 2, 10, 3
     logprobs = torch.randn(B, S, C).log_softmax(dim=-1)
-    input_lengths = torch.tensor([5, 4])
-    target = torch.tensor([[1, 2, 0, 0], [1, 0, 0, 0]])
-    target_lengths = torch.tensor([2, 1])
-    
-    strategy = ForcedAlignmentInference(blank_idx=0)
-    labels, scores = strategy(logprobs, input_lengths, target, target_lengths)
+    input_lengths = torch.tensor([6, 8])
+    target = [[1, 2, 1], [2, 1]]
+    aligner = ForcedAlignmentInference(blank_idx=0)
+    labels, scores = aligner(logprobs, input_lengths, target)
     print("Aligned labels:", labels)
     print("Alignment scores:", scores)
