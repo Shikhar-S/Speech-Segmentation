@@ -12,7 +12,7 @@ from src.recipe.common.greedy_ctc_strategy import GreedyCTCInference
 from src.recipe.common.boundary_utils import (
     frame_label_to_units,
     evaluate_boundaries,
-    phone_starts_to_gt_units,
+    target_boundaries_to_gt_units,
 )
 from src.recipe.segment_recognize.heads.base import TaskHead
 # NOTE(shikhar): This head only works for pxeus and xeus nets for now.
@@ -131,8 +131,10 @@ class CTCRecognitionHead(TaskHead):
         preds_dict = {}
         for b, res in enumerate(decoded):
             preds_dict[str(b)] = res["boundaries"]
-        gt_dict = phone_starts_to_gt_units(
-            batch["target_start_idx"], batch["target_length"],
+        gt_dict = target_boundaries_to_gt_units(
+            batch["target_start_idx"], 
+            batch["target_end_idx"], 
+            batch["target_length"],
             feature_lens, self.effective_pbf, self.audio_sr,
         )
         return evaluate_boundaries(self.evaluator, preds_dict, gt_dict)

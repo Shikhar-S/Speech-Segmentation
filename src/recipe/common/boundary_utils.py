@@ -137,6 +137,45 @@ def frame_label_to_units(
             current_label = frame_labels[i]
     return units
 
+def target_boundaries_to_gt_units(
+    target_start_idx: torch.Tensor,
+    target_end_idx: torch.Tensor,
+    target_length: torch.Tensor,
+    feature_lens: torch.Tensor,
+    points_by_frames: float,
+    sampling_rate: int,
+) -> dict[str, List[SegmentationUnit]]:
+    """Build per-utterance ground-truth segments from target starts and ends.
+
+    Args:
+        target_start_idx: ``(B, N_max)`` frame-space target-start indices.
+        target_end_idx: ``(B, N_max)`` frame-space target-end indices.
+        target_length: ``(B,)`` number of phones per utterance.
+        feature_lens: ``(B,)`` valid frame counts (used to close the last
+            segment of each utterance).
+        points_by_frames: Audio points per frame.
+        sampling_rate: Audio sampling rate in Hz.
+
+    Returns:
+        ``{str(b): [SegmentationUnit, ...]}`` keyed by batch index.
+    """
+    gt: dict[str, List[SegmentationUnit]] = {}
+    B = target_start_idx.shape[0]
+    for b in range(B):
+        n = int(target_length[b])
+        vlen = int(feature_lens[b])
+        starts = target_start_idx[b, :n].tolist()
+        ends = target_end_idx[b, :n].tolist()
+        gt[str(b)] = [
+            SegmentationUnit(
+                start=starts[i] * points_by_frames / sampling_rate,
+                end=ends[i] * points_by_frames / sampling_rate,
+            )
+            for i in range(n)
+        ]
+    return gt
+
+
 
 def phone_starts_to_gt_units(
     target_start_idx: torch.Tensor,
