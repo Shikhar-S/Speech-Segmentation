@@ -31,8 +31,30 @@ from src.data.text_tokenizer import CharTokenizer, build_text_tokenizer
 # Constants
 # ---------------------------------------------------------------------------
 
-PHONE_VOCAB = ["<blank>", "<sos>", "<eos>", "<unk>", "a", "b", "c", "d", "e", "f"]
-AUX_VOCAB = {"<blank>": 0, "<unk>": 1, "<space>": 2, "h": 3, "e": 4, "l": 5, "o": 6, "w": 7, "r": 8, "d": 9}
+PHONE_VOCAB = [
+    "<blank>",
+    "<sos>",
+    "<eos>",
+    "<unk>",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+]
+AUX_VOCAB = {
+    "<blank>": 0,
+    "<unk>": 1,
+    "<space>": 2,
+    "h": 3,
+    "e": 4,
+    "l": 5,
+    "o": 6,
+    "w": 7,
+    "r": 8,
+    "d": 9,
+}
 ENC_DIM = 64
 FEAT_DIM = 32
 AUX_VOCAB_SIZE = len(AUX_VOCAB)  # 10
@@ -58,7 +80,9 @@ class MockEncoder(nn.Module):
         self.interctc_use_conditioning = False
         self.conditioning_layer = None
 
-    def forward(self, feats, feats_lengths, masks=None, return_all_hs=False, ctc=None):
+    def forward(
+        self, feats, feats_lengths, masks=None, return_all_hs=False, ctc=None
+    ):
         out = self.proj(feats)
         return out, feats_lengths, None
 
@@ -69,7 +93,9 @@ class MockEncoder(nn.Module):
 class InterCTCMockEncoder(nn.Module):
     """Encoder that returns one intermediate output — used to test interctc paths."""
 
-    def __init__(self, input_dim=FEAT_DIM, output_dim=ENC_DIM, interctc_layer_idx=None):
+    def __init__(
+        self, input_dim=FEAT_DIM, output_dim=ENC_DIM, interctc_layer_idx=None
+    ):
         super().__init__()
         self.proj = nn.Linear(input_dim, output_dim)
         self.num_blocks = 12
@@ -77,12 +103,20 @@ class InterCTCMockEncoder(nn.Module):
         self.interctc_use_conditioning = False
         self.conditioning_layer = None
 
-    def forward(self, feats, feats_lengths, masks=None, return_all_hs=False, ctc=None):
+    def forward(
+        self, feats, feats_lengths, masks=None, return_all_hs=False, ctc=None
+    ):
         out = self.proj(feats)
         # Simulate intermediate out at every configured layer
-        intermediate_outs = [(idx, out.detach().clone()) for idx in self.interctc_layer_idx]
+        intermediate_outs = [
+            (idx, out.detach().clone()) for idx in self.interctc_layer_idx
+        ]
         # Apply conditioning if configured
-        if self.interctc_use_conditioning and ctc is not None and self.conditioning_layer is not None:
+        if (
+            self.interctc_use_conditioning
+            and ctc is not None
+            and self.conditioning_layer is not None
+        ):
             ctc_out = ctc.softmax(out)
             out = out + self.conditioning_layer(ctc_out)
         return (out, intermediate_outs), feats_lengths, None
@@ -140,7 +174,9 @@ def make_phone_batch(B=2, T=20, device="cpu"):
     speech_lengths = torch.full((B,), T, dtype=torch.long, device=device)
     max_text_len = 5
     text = torch.randint(4, PHONE_VOCAB_SIZE, (B, max_text_len), device=device)
-    text_lengths = torch.full((B,), max_text_len, dtype=torch.long, device=device)
+    text_lengths = torch.full(
+        (B,), max_text_len, dtype=torch.long, device=device
+    )
     return speech, speech_lengths, text, text_lengths
 
 
@@ -157,28 +193,42 @@ def make_aux_text(B=2, T_asr=6, device="cpu"):
 
 def test_char_tokenizer_basic():
     """CharTokenizer maps chars correctly from a JSON vocab."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
         json.dump(AUX_VOCAB, f)
         tmp_path = f.name
     tok = CharTokenizer(tmp_path)
     assert tok.vocab_size == AUX_VOCAB_SIZE
     ids = tok.tokenize("hello")
-    assert ids == [AUX_VOCAB["h"], AUX_VOCAB["e"], AUX_VOCAB["l"], AUX_VOCAB["l"], AUX_VOCAB["o"]]
+    assert ids == [
+        AUX_VOCAB["h"],
+        AUX_VOCAB["e"],
+        AUX_VOCAB["l"],
+        AUX_VOCAB["l"],
+        AUX_VOCAB["o"],
+    ]
 
 
 def test_char_tokenizer_space():
     """CharTokenizer converts spaces to <space> token."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
         json.dump(AUX_VOCAB, f)
         tmp_path = f.name
     tok = CharTokenizer(tmp_path)
     ids = tok.tokenize("h e")
-    assert ids[1] == AUX_VOCAB["<space>"], f"Expected <space>={AUX_VOCAB['<space>']}, got {ids[1]}"
+    assert (
+        ids[1] == AUX_VOCAB["<space>"]
+    ), f"Expected <space>={AUX_VOCAB['<space>']}, got {ids[1]}"
 
 
 def test_char_tokenizer_unk():
     """CharTokenizer maps unknown characters to <unk>."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
         json.dump(AUX_VOCAB, f)
         tmp_path = f.name
     tok = CharTokenizer(tmp_path)
@@ -188,7 +238,9 @@ def test_char_tokenizer_unk():
 
 def test_build_text_tokenizer_char():
     """build_text_tokenizer with tokenizer_type='char' returns CharTokenizer."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
         json.dump(AUX_VOCAB, f)
         tmp_path = f.name
     tok = build_text_tokenizer(tmp_path, tokenizer_type="char")
@@ -198,7 +250,9 @@ def test_build_text_tokenizer_char():
 
 def test_build_text_tokenizer_bad_type():
     """build_text_tokenizer raises ValueError for unknown type."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
         json.dump(AUX_VOCAB, f)
         tmp_path = f.name
     with pytest.raises(ValueError, match="Unknown tokenizer_type"):
@@ -213,7 +267,7 @@ def test_build_text_tokenizer_bad_type():
 def test_collate_fn_pads_asr_text_tokens():
     """collate_fn produces asr_text_tokens and asr_text_length when items have them."""
     import torch
-    from src.data.kaldi_pretraining_dataset import KaldiDataModule
+    from src.data.recognition.ipapack_pr import IpapackDataModule
 
     # Build a minimal KaldiDataModule just to call its collate_fn
     # (we bypass __init__ by calling collate_fn directly as a regular function)
@@ -224,7 +278,7 @@ def test_collate_fn_pads_asr_text_tokens():
             "speech_length": 100,
             "text": "foo",
             "asr_text": "foo bar",
-            "asr_text_tokens": [3, 4, 5],          # length 3
+            "asr_text_tokens": [3, 4, 5],  # length 3
             "wavpath": "",
             "lang_sym": "eng",
             "accent_sym": "<unk>",
@@ -236,7 +290,7 @@ def test_collate_fn_pads_asr_text_tokens():
             "speech_length": 80,
             "text": "baz",
             "asr_text": "baz",
-            "asr_text_tokens": [6, 7],              # length 2 — shorter
+            "asr_text_tokens": [6, 7],  # length 2 — shorter
             "wavpath": "",
             "lang_sym": "eng",
             "accent_sym": "<unk>",
@@ -244,7 +298,7 @@ def test_collate_fn_pads_asr_text_tokens():
         },
     ]
 
-    dm = KaldiDataModule.__new__(KaldiDataModule)
+    dm = IpapackDataModule.__new__(IpapackDataModule)
     dm.ignore_id = -1
     dm.batch_size = 2
     dm.max_duration_sec = 20
@@ -252,19 +306,26 @@ def test_collate_fn_pads_asr_text_tokens():
 
     result = dm.collate_fn(batch)
 
-    assert "asr_text_tokens" in result, "asr_text_tokens missing from collate output"
-    assert "asr_text_length" in result, "asr_text_length missing from collate output"
-    assert result["asr_text_tokens"].shape == (2, 3), (
-        f"Expected (2, 3), got {result['asr_text_tokens'].shape}"
-    )
+    assert (
+        "asr_text_tokens" in result
+    ), "asr_text_tokens missing from collate output"
+    assert (
+        "asr_text_length" in result
+    ), "asr_text_length missing from collate output"
+    assert result["asr_text_tokens"].shape == (
+        2,
+        3,
+    ), f"Expected (2, 3), got {result['asr_text_tokens'].shape}"
     assert result["asr_text_length"].tolist() == [3, 2]
     # Padding with ignore_id=-1
-    assert result["asr_text_tokens"][1, 2].item() == -1, "Shorter sequence should be padded with -1"
+    assert (
+        result["asr_text_tokens"][1, 2].item() == -1
+    ), "Shorter sequence should be padded with -1"
 
 
 def test_collate_fn_no_asr_tokens_skipped():
     """collate_fn does not add asr_text_tokens key if no items have it."""
-    from src.data.kaldi_pretraining_dataset import KaldiDataModule
+    from src.data.recognition.ipapack_pr import IpapackDataModule
 
     batch = [
         {
@@ -281,14 +342,16 @@ def test_collate_fn_no_asr_tokens_skipped():
         },
     ]
 
-    dm = KaldiDataModule.__new__(KaldiDataModule)
+    dm = IpapackDataModule.__new__(IpapackDataModule)
     dm.ignore_id = -1
     dm.batch_size = 1
     dm.max_duration_sec = 20
     dm.sampling_rate = 16000
 
     result = dm.collate_fn(batch)
-    assert "asr_text_tokens" not in result, "asr_text_tokens should not appear when no items have it"
+    assert (
+        "asr_text_tokens" not in result
+    ), "asr_text_tokens should not appear when no items have it"
     assert "asr_text_length" not in result
 
 
@@ -321,9 +384,9 @@ def test_phone_interctc_path_no_asr_tokens():
     # No asr_text_tokens passed — should still produce interctc loss from phone targets
     out = model(speech, sl, text, tl)
     assert torch.isfinite(out["loss"])
-    assert any(k.startswith("loss_interctc_layer") for k in out["stats"]), (
-        f"Expected loss_interctc_layer* in stats, got: {list(out['stats'].keys())}"
-    )
+    assert any(
+        k.startswith("loss_interctc_layer") for k in out["stats"]
+    ), f"Expected loss_interctc_layer* in stats, got: {list(out['stats'].keys())}"
 
 
 def test_phone_interctc_backward():
@@ -388,9 +451,9 @@ def test_phone_conditioning_layer_size():
     )
     cond = model.encoder.conditioning_layer
     assert cond is not None
-    assert cond.in_features == PHONE_VOCAB_SIZE, (
-        f"Expected {PHONE_VOCAB_SIZE}, got {cond.in_features}"
-    )
+    assert (
+        cond.in_features == PHONE_VOCAB_SIZE
+    ), f"Expected {PHONE_VOCAB_SIZE}, got {cond.in_features}"
 
 
 # ---------------------------------------------------------------------------
@@ -400,20 +463,31 @@ def test_phone_conditioning_layer_size():
 
 def test_ortho_interctc_loss_finite():
     """Ortho interctc with asr_text_tokens produces finite loss."""
-    model = make_model(interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True)
+    model = make_model(
+        interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True
+    )
     model.train()
     speech, sl, text, tl = make_phone_batch()
     asr_text, asr_text_length = make_aux_text()
-    out = model(speech, sl, text, tl, asr_text_tokens=asr_text, asr_text_length=asr_text_length)
-    assert torch.isfinite(out["loss"]), f"Loss not finite: {out['loss'].item()}"
-    assert any(k.startswith("loss_interctc_layer") for k in out["stats"]), (
-        f"loss_interctc_layer* missing from stats: {list(out['stats'].keys())}"
+    out = model(
+        speech,
+        sl,
+        text,
+        tl,
+        asr_text_tokens=asr_text,
+        asr_text_length=asr_text_length,
     )
+    assert torch.isfinite(out["loss"]), f"Loss not finite: {out['loss'].item()}"
+    assert any(
+        k.startswith("loss_interctc_layer") for k in out["stats"]
+    ), f"loss_interctc_layer* missing from stats: {list(out['stats'].keys())}"
 
 
 def test_ortho_interctc_uses_aux_ctc_head():
     """In ortho mode, interctc loss is computed via ctc_aux (different vocab), not self.ctc."""
-    model = make_model(interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True)
+    model = make_model(
+        interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True
+    )
     model.train()
     speech, sl, text, tl = make_phone_batch()
     asr_text, asr_text_length = make_aux_text()
@@ -434,7 +508,14 @@ def test_ortho_interctc_uses_aux_ctc_head():
     model.ctc_aux.forward = patched_aux
     model.ctc.forward = patched_phone
 
-    model(speech, sl, text, tl, asr_text_tokens=asr_text, asr_text_length=asr_text_length)
+    model(
+        speech,
+        sl,
+        text,
+        tl,
+        asr_text_tokens=asr_text,
+        asr_text_length=asr_text_length,
+    )
 
     # Restore
     model.ctc_aux.forward = orig_aux
@@ -447,11 +528,20 @@ def test_ortho_interctc_uses_aux_ctc_head():
 
 def test_ortho_backward_grads_through_ctc_aux():
     """Backward pass flows gradients through ctc_aux.ctc_lo."""
-    model = make_model(interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True)
+    model = make_model(
+        interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True
+    )
     model.train()
     speech, sl, text, tl = make_phone_batch()
     asr_text, asr_text_length = make_aux_text()
-    out = model(speech, sl, text, tl, asr_text_tokens=asr_text, asr_text_length=asr_text_length)
+    out = model(
+        speech,
+        sl,
+        text,
+        tl,
+        asr_text_tokens=asr_text,
+        asr_text_length=asr_text_length,
+    )
     out["loss"].backward()
     grad = model.ctc_aux.ctc_lo.weight.grad
     assert grad is not None, "No grad on ctc_aux.ctc_lo.weight"
@@ -465,14 +555,16 @@ def test_ortho_backward_grads_through_ctc_aux():
 
 def test_ortho_no_interctc_loss_when_missing_asr_tokens():
     """When ortho is set but asr_text_tokens not provided, no interctc loss is added."""
-    model = make_model(interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True)
+    model = make_model(
+        interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True
+    )
     model.train()
     speech, sl, text, tl = make_phone_batch()
     out = model(speech, sl, text, tl)  # no asr_text_tokens
     assert torch.isfinite(out["loss"])
-    assert not any(k.startswith("loss_interctc_layer") for k in out["stats"]), (
-        "interctc loss should be skipped when asr_text_tokens is missing"
-    )
+    assert not any(
+        k.startswith("loss_interctc_layer") for k in out["stats"]
+    ), "interctc loss should be skipped when asr_text_tokens is missing"
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +578,9 @@ def test_ctc_aux_in_head_param_group():
     groups = model.get_trainable_parameters()
     head_ids = {id(p) for p in groups["head"]}
     aux_ctc_lo_id = id(model.ctc_aux.ctc_lo.weight)
-    assert aux_ctc_lo_id in head_ids, "ctc_aux.ctc_lo.weight should be in 'head' param group"
+    assert (
+        aux_ctc_lo_id in head_ids
+    ), "ctc_aux.ctc_lo.weight should be in 'head' param group"
 
 
 def test_phone_ctc_still_in_head_with_aux():
@@ -495,7 +589,9 @@ def test_phone_ctc_still_in_head_with_aux():
     groups = model.get_trainable_parameters()
     head_ids = {id(p) for p in groups["head"]}
     phone_ctc_id = id(model.ctc.ctc_lo.weight)
-    assert phone_ctc_id in head_ids, "ctc.ctc_lo.weight should still be in 'head' param group"
+    assert (
+        phone_ctc_id in head_ids
+    ), "ctc.ctc_lo.weight should still be in 'head' param group"
 
 
 # ---------------------------------------------------------------------------
@@ -505,16 +601,26 @@ def test_phone_ctc_still_in_head_with_aux():
 
 def test_encode_uses_aux_ctc_in_ortho_mode():
     """encode() passes ctc_aux (not self.ctc) to the encoder in ortho mode."""
-    model = make_model(interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True)
+    model = make_model(
+        interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True
+    )
     model.eval()
 
     received_ctc = {}
 
     orig_forward = model.encoder.forward
 
-    def capturing_forward(feats, feats_lengths, masks=None, return_all_hs=False, ctc=None):
+    def capturing_forward(
+        feats, feats_lengths, masks=None, return_all_hs=False, ctc=None
+    ):
         received_ctc["ctc"] = ctc
-        return orig_forward(feats, feats_lengths, masks=masks, return_all_hs=return_all_hs, ctc=ctc)
+        return orig_forward(
+            feats,
+            feats_lengths,
+            masks=masks,
+            return_all_hs=return_all_hs,
+            ctc=ctc,
+        )
 
     model.encoder.forward = capturing_forward
 
@@ -524,9 +630,9 @@ def test_encode_uses_aux_ctc_in_ortho_mode():
 
     model.encoder.forward = orig_forward
 
-    assert received_ctc.get("ctc") is model.ctc_aux, (
-        "encode() should pass ctc_aux to encoder in ortho mode"
-    )
+    assert (
+        received_ctc.get("ctc") is model.ctc_aux
+    ), "encode() should pass ctc_aux to encoder in ortho mode"
 
 
 def test_encode_uses_phone_ctc_in_phone_mode():
@@ -537,9 +643,17 @@ def test_encode_uses_phone_ctc_in_phone_mode():
     received_ctc = {}
     orig_forward = model.encoder.forward
 
-    def capturing_forward(feats, feats_lengths, masks=None, return_all_hs=False, ctc=None):
+    def capturing_forward(
+        feats, feats_lengths, masks=None, return_all_hs=False, ctc=None
+    ):
         received_ctc["ctc"] = ctc
-        return orig_forward(feats, feats_lengths, masks=masks, return_all_hs=return_all_hs, ctc=ctc)
+        return orig_forward(
+            feats,
+            feats_lengths,
+            masks=masks,
+            return_all_hs=return_all_hs,
+            ctc=ctc,
+        )
 
     model.encoder.forward = capturing_forward
     speech, sl, _, _ = make_phone_batch()
@@ -547,9 +661,9 @@ def test_encode_uses_phone_ctc_in_phone_mode():
         model.encode(speech, sl)
 
     model.encoder.forward = orig_forward
-    assert received_ctc.get("ctc") is model.ctc, (
-        "encode() should pass self.ctc to encoder in phone mode"
-    )
+    assert (
+        received_ctc.get("ctc") is model.ctc
+    ), "encode() should pass self.ctc to encoder in phone mode"
 
 
 # ---------------------------------------------------------------------------
@@ -565,20 +679,30 @@ def _build_tiny_sp_model(tmp_dir: str) -> str:
     text_file = os.path.join(tmp_dir, "train.txt")
     model_prefix = os.path.join(tmp_dir, "tiny")
     with open(text_file, "w") as f:
-        for line in ["hello world", "foo bar baz", "the quick brown fox", "abc def ghi"]:
+        for line in [
+            "hello world",
+            "foo bar baz",
+            "the quick brown fox",
+            "abc def ghi",
+        ]:
             f.write(line + "\n")
     spm.SentencePieceTrainer.train(
         input=text_file,
         model_prefix=model_prefix,
         vocab_size=29,
         model_type="unigram",
-        pad_id=0, unk_id=1, bos_id=2, eos_id=3,
+        pad_id=0,
+        unk_id=1,
+        bos_id=2,
+        eos_id=3,
         character_coverage=1.0,
     )
     return model_prefix + ".model"
 
 
-@pytest.mark.skipif(not _xeus_config_exists, reason=f"Xeus config not found at {XEUS_CONFIG}")
+@pytest.mark.skipif(
+    not _xeus_config_exists, reason=f"Xeus config not found at {XEUS_CONFIG}"
+)
 def test_builder_with_ctc_aux_config():
     """build_xeus_pr() with ctc_aux_config creates ctc_aux on the model."""
     from src.model.xeusphoneme.builders import build_xeus_pr
@@ -586,6 +710,7 @@ def test_builder_with_ctc_aux_config():
     with tempfile.TemporaryDirectory() as tmp_dir:
         sp_model_path = _build_tiny_sp_model(tmp_dir)
         import sentencepiece as spm
+
         sp = spm.SentencePieceProcessor()
         sp.load(sp_model_path)
         expected_vocab_size = sp.get_piece_size()
@@ -606,7 +731,9 @@ def test_builder_with_ctc_aux_config():
     assert "ctc_aux_config" in model._net_config
 
 
-@pytest.mark.skipif(not _xeus_config_exists, reason=f"Xeus config not found at {XEUS_CONFIG}")
+@pytest.mark.skipif(
+    not _xeus_config_exists, reason=f"Xeus config not found at {XEUS_CONFIG}"
+)
 def test_builder_default_no_ctc_aux():
     """build_xeus_pr() without ctc_aux_config leaves ctc_aux=None (backward compat)."""
     from src.model.xeusphoneme.builders import build_xeus_pr
@@ -631,12 +758,22 @@ def test_ortho_forward_backward_gpu():
     """Ortho interctc forward+backward on CUDA is finite with grads."""
     device = "cuda"
     model = make_model(
-        interctc_ctc_type="ortho", with_aux_ctc=True, with_interctc=True, device=device
+        interctc_ctc_type="ortho",
+        with_aux_ctc=True,
+        with_interctc=True,
+        device=device,
     )
     model.train()
     speech, sl, text, tl = make_phone_batch(device=device)
     asr_text, asr_text_length = make_aux_text(device=device)
-    out = model(speech, sl, text, tl, asr_text_tokens=asr_text, asr_text_length=asr_text_length)
+    out = model(
+        speech,
+        sl,
+        text,
+        tl,
+        asr_text_tokens=asr_text,
+        asr_text_length=asr_text_length,
+    )
     assert torch.isfinite(out["loss"])
     out["loss"].backward()
     assert model.ctc_aux.ctc_lo.weight.grad is not None
@@ -653,42 +790,86 @@ if __name__ == "__main__":
         ("CharTokenizer: space → <space>", test_char_tokenizer_space),
         ("CharTokenizer: unknown → <unk>", test_char_tokenizer_unk),
         ("build_text_tokenizer: char factory", test_build_text_tokenizer_char),
-        ("build_text_tokenizer: bad type raises", test_build_text_tokenizer_bad_type),
+        (
+            "build_text_tokenizer: bad type raises",
+            test_build_text_tokenizer_bad_type,
+        ),
         # 2. collate_fn
-        ("collate_fn: pads asr_text_tokens", test_collate_fn_pads_asr_text_tokens),
-        ("collate_fn: no tokens → key absent", test_collate_fn_no_asr_tokens_skipped),
+        (
+            "collate_fn: pads asr_text_tokens",
+            test_collate_fn_pads_asr_text_tokens,
+        ),
+        (
+            "collate_fn: no tokens → key absent",
+            test_collate_fn_no_asr_tokens_skipped,
+        ),
         # 3. Phone path (backward compat)
-        ("phone path: no ctc_aux by default", test_phone_path_no_ctc_aux_default),
+        (
+            "phone path: no ctc_aux by default",
+            test_phone_path_no_ctc_aux_default,
+        ),
         ("phone path: forward finite", test_phone_path_forward_finite),
-        ("phone interctc: no asr tokens → phone targets", test_phone_interctc_path_no_asr_tokens),
+        (
+            "phone interctc: no asr tokens → phone targets",
+            test_phone_interctc_path_no_asr_tokens,
+        ),
         ("phone interctc: backward grads", test_phone_interctc_backward),
         # 4. Conditioning layer size
-        ("ortho: conditioning layer uses aux vocab size", test_ortho_conditioning_layer_size),
-        ("phone: conditioning layer uses phone vocab size", test_phone_conditioning_layer_size),
+        (
+            "ortho: conditioning layer uses aux vocab size",
+            test_ortho_conditioning_layer_size,
+        ),
+        (
+            "phone: conditioning layer uses phone vocab size",
+            test_phone_conditioning_layer_size,
+        ),
         # 5. Ortho interctc
         ("ortho interctc: finite loss", test_ortho_interctc_loss_finite),
-        ("ortho interctc: uses ctc_aux head", test_ortho_interctc_uses_aux_ctc_head),
-        ("ortho interctc: backward grads through ctc_aux", test_ortho_backward_grads_through_ctc_aux),
+        (
+            "ortho interctc: uses ctc_aux head",
+            test_ortho_interctc_uses_aux_ctc_head,
+        ),
+        (
+            "ortho interctc: backward grads through ctc_aux",
+            test_ortho_backward_grads_through_ctc_aux,
+        ),
         # 6. Missing asr tokens
-        ("ortho: no interctc when asr_tokens missing", test_ortho_no_interctc_loss_when_missing_asr_tokens),
+        (
+            "ortho: no interctc when asr_tokens missing",
+            test_ortho_no_interctc_loss_when_missing_asr_tokens,
+        ),
         # 7. Param groups
         ("param groups: ctc_aux in head", test_ctc_aux_in_head_param_group),
-        ("param groups: phone ctc still in head", test_phone_ctc_still_in_head_with_aux),
+        (
+            "param groups: phone ctc still in head",
+            test_phone_ctc_still_in_head_with_aux,
+        ),
         # 8. encode() routing
-        ("encode: uses ctc_aux in ortho mode", test_encode_uses_aux_ctc_in_ortho_mode),
-        ("encode: uses self.ctc in phone mode", test_encode_uses_phone_ctc_in_phone_mode),
+        (
+            "encode: uses ctc_aux in ortho mode",
+            test_encode_uses_aux_ctc_in_ortho_mode,
+        ),
+        (
+            "encode: uses self.ctc in phone mode",
+            test_encode_uses_phone_ctc_in_phone_mode,
+        ),
     ]
 
     if _xeus_config_exists:
         tests += [
-            ("builder: ctc_aux built from config", test_builder_with_ctc_aux_config),
+            (
+                "builder: ctc_aux built from config",
+                test_builder_with_ctc_aux_config,
+            ),
             ("builder: no ctc_aux by default", test_builder_default_no_ctc_aux),
         ]
     else:
         print(f"\n[SKIP] Builder integration tests: {XEUS_CONFIG} not found\n")
 
     if torch.cuda.is_available():
-        tests += [("GPU: ortho forward+backward", test_ortho_forward_backward_gpu)]
+        tests += [
+            ("GPU: ortho forward+backward", test_ortho_forward_backward_gpu)
+        ]
     else:
         print("[SKIP] GPU tests: CUDA not available\n")
 

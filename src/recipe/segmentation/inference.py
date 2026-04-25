@@ -8,6 +8,7 @@ from typing import List
 import torch
 import torch.nn as nn
 from src.metrics.segmentation_evaluator import SegmentationUnit
+from src.recipe.segmentation.boundary_utils import boundaries_to_units
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
@@ -158,40 +159,6 @@ class SegmentationInference:
         return SegmentationInference.post_process_alignments(self.net, labels)
 
 
-def _boundary_flags_to_units(
-    is_boundary, valid_len, points_by_frames, sampling_rate,
-) -> List[SegmentationUnit]:
-    """Convert per-frame boundary flags to SegmentationUnit segments.
-
-    Args:
-        is_boundary: List[bool] of length valid_len; True marks a phone start.
-        valid_len: Number of valid (non-padded) frames.
-        points_by_frames: Number of audio samples per frame.
-        sampling_rate: Audio sampling rate in Hz.
-    Returns:
-        List[SegmentationUnit] with label=0 (no phone-class info in BCE mode).
-    """
-    points = points_by_frames
-    sr = sampling_rate
-    units: List[SegmentationUnit] = []
-    start = 0
-    for i in range(1, valid_len):
-        if is_boundary[i]:
-            units.append(SegmentationUnit(
-                start=start * points / sr,
-                end=i * points / sr,
-                label=0,
-            ))
-            start = i
-    # NOTE: When valid_len == 0, this creates a zero-duration segment.
-    units.append(SegmentationUnit(
-        start=start * points / sr,
-        end=valid_len * points / sr,
-        label=0,
-    ))
-    return units
-
-
 class BoundaryInference:
     """Inference for the BCE boundary detection model.
 
@@ -260,7 +227,7 @@ class BoundaryInference:
         valid_len = int(logit_lens[0])
         is_boundary = (boundary_probs[:valid_len] > self.threshold).tolist()
         pbf = self.net.points_by_frames() / self.resolution
-        return _boundary_flags_to_units(
+        return boundaries_to_units(
             is_boundary, valid_len, pbf, self.audio_sr,
         )
 

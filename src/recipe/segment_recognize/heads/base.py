@@ -70,8 +70,24 @@ class TaskHead(nn.Module):
         """
         return {}
 
+    @torch.no_grad()
+    def decode(
+        self,
+        features: torch.Tensor,
+        feature_lens: torch.Tensor,
+        batch: Mapping[str, Any],
+        **ctx: Any,
+    ) -> Any:
+        """Decode encoder features at inference time.
+
+        Default returns ``None``; the hosting model's ``predict_step``
+        treats that as "skip this head".
+        """
+        return None
+
     def log_output(
         self,
+        stage: str,
         pl_module: LightningModule,
         prefix: str,
         output: dict[str, Any],
@@ -79,23 +95,27 @@ class TaskHead(nn.Module):
         on_step: bool = True,
         on_epoch: bool = True,
     ) -> None:
-        """Update tracker and log loss + eval metrics.
+        """Update loss_tracker and log loss + eval metrics.
 
         Args:
-            pl_module: The Lightning module (for ``self.log``).
-            prefix: Phase prefix (e.g. ``"train"``, ``"val_seg"``).
+            stage: Stage name (e.g. "train", "val").
+            pl_module: The Lightning module to call ``.log`` on.
+            prefix: Prefix denoting stagename and loss type (e.g. ``"train_pr"``, ``"val_seg"``).
             output: Dict returned by ``forward()``.
             eval_metrics: Dict returned by ``eval_metrics()``.
             on_step: Log after each batch.
             on_epoch: Log epoch aggregate.
         """
-        tracker = (
-            self.train_loss if "train" in prefix else self.val_loss
-        )
-        tracker(output["loss"].detach())
+        if stage=='train':
+            loss_tracker=self.train_loss
+        elif stage=='val':
+            loss_tracker=self.val_loss
+        else:
+            raise ValueError(f"Invalid stage: {stage}. Expected 'train' or 'val'.")
+        loss_tracker(output["loss"].detach())
         pl_module.log(
-            f"{prefix}/{self.log_name}_loss",
-            tracker,
+            f"{prefix}/{self.log_name}_loss", # example: train_seg/bce_loss
+            loss_tracker,
             on_step=on_step,
             on_epoch=on_epoch,
             prog_bar=True,

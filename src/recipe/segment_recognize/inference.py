@@ -47,8 +47,7 @@ class SegmentRecognizeInference:
                 [int(phone_length)], device=self.device,
             )
 
-        results = self.model.predict_step(batch, 0)
-        return {name: out[0] for name, out in results.items()}
+        return self.model.predict_step(batch, 0)
 
 
 def build_segment_recognize_inference(

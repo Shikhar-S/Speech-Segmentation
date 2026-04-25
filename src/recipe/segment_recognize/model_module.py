@@ -102,6 +102,7 @@ class SegmentRecognizeModel(LightningModule):
 
     def _apply_losses(
         self,
+        stage: str,
         losses: nn.ModuleDict,
         features: torch.Tensor,
         feature_lens: torch.Tensor,
@@ -115,7 +116,7 @@ class SegmentRecognizeModel(LightningModule):
             out = head(features, feature_lens, batch, net=self.net)
             total = total + head.weight * out["loss"]
             metrics = head.eval_metrics(out, feature_lens, batch)
-            head.log_output(self, prefix, out, metrics, on_step=on_step)
+            head.log_output(self, stage, prefix, out, metrics, on_step=on_step)
         return total
 
     def _step(
@@ -133,6 +134,7 @@ class SegmentRecognizeModel(LightningModule):
                 pr_batch["speech_length"],
             )
             rec_loss = self._apply_losses(
+                stepname,
                 self.pr_losses,
                 feat,
                 lens,
@@ -149,6 +151,7 @@ class SegmentRecognizeModel(LightningModule):
             )
             self._prepare_seg_targets(seg_batch)
             seg_loss = self._apply_losses(
+                stepname,
                 self.seg_losses,
                 feat,
                 lens,
