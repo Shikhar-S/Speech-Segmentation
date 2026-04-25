@@ -29,19 +29,17 @@ class GreedyCTCInference:
         speech: torch.Tensor,
         speech_lengths: torch.Tensor,
         features: torch.Tensor = None,
-        feature_lengths: torch.Tensor = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
         
-        encode_speech = features is None or feature_lengths is None
-        if encode_speech:
+        if features is None:
             # 1. Standardized Forward pass
             # Works as long as model has .encode() and .ctc
             encoder_out, _ = model.encode(speech, speech_lengths)
             if isinstance(encoder_out, tuple):
                 encoder_out = encoder_out[0]
         else:
-            encoder_out, feature_lengths = features, feature_lengths
+            encoder_out = features
         logits = model.ctc.ctc_lo(encoder_out)
 
         # 2. Greedy search
@@ -60,11 +58,8 @@ class GreedyCTCInference:
                 t for t in tokens if not (t.startswith("<") and t.endswith(">"))
             ]
             processed = "".join(clean_tokens).strip()  # replace(self.sym_space, " ")
-
-            results.append(
-                {
-                    "processed_transcript": processed,
-                    "predicted_transcript": raw_text,
-                }
-            )
+            result={"processed_transcript": processed, "predicted_transcript": raw_text, "ids": ids}
+            if kwargs.get("return_logits", False):
+                result["logits"] = logits
+            results.append(result)
         return results

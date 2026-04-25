@@ -7,15 +7,62 @@ Usage:
 
 class DecodeAlignStrategy:
     def __init__(self, decode_strategy, align_strategy):
-        self.decode_fn = decode_strategy
-        self.align_fn = align_strategy
+        self.decode_strategy = decode_strategy
+        self.align_strategy = align_strategy
 
-    def __call__(self, *args, **kwargs):
-        decode_results = self.decode_fn(*args, **kwargs)
-        align_results = self.align_fn(*args, **kwargs, **decode_results)
-        return align_results
+    def __call__(self, net, speech, speech_lengths, features=None, **kwargs):
+        """Run decode strategy to get raw predictions, then align with forced alignment.
+        NOTE(shikhar): If features are provided, greedy ctc decode strategy skips encoding, 
+        and runs decode directly on features.
+        """
+        decode_results = self.decode_strategy(net, speech, speech_lengths, features, return_logits=True, **kwargs)
+        logprobs=[]
+        input_lengths=[]
+        targets=[]
+        for res in decode_results:
+            logits= res.get("logits")
+            assert logits is not None, "Decode strategy must return logits for alignment"
+            logprob = logits.log_softmax(dim=-1).squeeze(0) # T,C
+            logprobs.append(logprob)
+            input_lengths.append(logprob.shape[0])
+            targets.append(res['ids'])
+        
+        aligned_labels, aligned_scores = self.align_strategy(logprobs, input_lengths, targets)
+        
+        decode_align_results = []
+        for decode_res, labels, scores in zip(decode_results, aligned_labels, aligned_scores):
+            decode_align_results.append({
+                **decode_res,
+                "aligned_labels": labels,
+                "alignment_scores": scores,
+            })
+        return decode_align_results
 
 
 if __name__=='__main__':
-    # TODO(shikhar): make this work!
-    pass
+    import torch
+    from src.recipe.common.forced_alignment_strategy import ForcedAlignmentInference
+    from src.recipe.common.greedy_ctc_strategy import GreedyCTCInference
+    
+    #####
+    from src.model.xeusphoneme.builders import build_xeus_pr_from_hf
+    ckpt_path = '/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/speech_segmentation/seg_pxeus_frac0_053/checkpoints/last.ckpt'
+    net = build_xeus_pr_from_hf(
+        work_dir='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/xeus',
+        hf_repo='espnet/xeus',
+        load_ckpt=False,
+        vocab_file='src/model/xeusphoneme/resources/ipa_vocab.json',
+        interctc_weight=0.3,
+        interctc_layer_idx=[4, 8, 12],
+        interctc_use_conditioning=True,
+        ctc_weight=1.0,
+    )
+    #####
+    decode_strategy = GreedyCTCInference(token_list=net.token_list, blank_id=0)
+    align_strategy = ForcedAlignmentInference(blank_idx=0)
+    strategy = DecodeAlignStrategy(decode_strategy, align_strategy)
+    
+    speech = torch.randn(1, 16000)  # 1 second of fake audio at 16kHz
+    speech_lengths = torch.tensor([16000], dtype=torch.long)
+    results = strategy(net=net, speech=speech, speech_lengths=speech_lengths)
+    print(results)
