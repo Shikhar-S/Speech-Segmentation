@@ -68,8 +68,8 @@ from src.recipe.segment_recognize.heads.bce_boundary import (
 from src.recipe.segment_recognize.heads.ctc_recognition import (
     CTCRecognitionHead,
 )
-from src.recipe.segment_recognize.heads.fa_segmentation import (
-    FASegmentationHead,
+from src.recipe.segment_recognize.heads.frame_ce_segmentation import (
+    FrameCESegmentationHead,
 )
 
 
@@ -190,7 +190,7 @@ def test_multiple_seg_losses():
     model = _make_model(
         seg_losses={
             "bce": partial(BCEBoundaryHead, weight=0.7),
-            "fa": partial(FASegmentationHead, weight=0.3),
+            "fa": partial(FrameCESegmentationHead, weight=0.3),
         },
     )
     assert "bce" in model.seg_losses

@@ -29,18 +29,28 @@ class GreedyCTCInference:
         speech: torch.Tensor,
         speech_lengths: torch.Tensor,
         features: torch.Tensor = None,
+        logits: torch.Tensor = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
+        """
+        Return schema:
+            List of dicts, one per utterance, with keys
+            - "processed_transcript": post-processed text (e.g. no special tokens)
+            - "predicted_transcript": raw text from token mapping (e.g. with special tokens)
+            - "ids": List[int] of predicted token ids (after CTC collapse)
+            - "logits": Optional[torch.Tensor] of frame logits (if return_logits=True)
+        """
         
-        if features is None:
-            # 1. Standardized Forward pass
-            # Works as long as model has .encode() and .ctc
-            encoder_out, _ = model.encode(speech, speech_lengths)
-            if isinstance(encoder_out, tuple):
-                encoder_out = encoder_out[0]
-        else:
-            encoder_out = features
-        logits = model.ctc.ctc_lo(encoder_out)
+        if logits is None:
+            if features is None:
+                # 1. Standardized Forward pass
+                # Works as long as model has .encode() and .ctc
+                encoder_out, _ = model.encode(speech, speech_lengths)
+                if isinstance(encoder_out, tuple):
+                    encoder_out = encoder_out[0]
+            else:
+                encoder_out = features
+            logits = model.ctc.ctc_lo(encoder_out)
 
         # 2. Greedy search
         y_hat = torch.argmax(logits, dim=-1)

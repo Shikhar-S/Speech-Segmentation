@@ -98,6 +98,46 @@ def boundaries_to_units(
     return units
 
 
+def frame_label_to_units(
+    frame_labels: List[int],
+    valid_len: int,
+    points_by_frames: float,
+    sampling_rate: int,
+    token_list: Optional[List[str]] = None,
+) -> List[SegmentationUnit]:
+    """Convert per-frame labels to ``SegmentationUnit`` segments.
+
+    Args:
+        frame_labels: Length ``valid_len``; class id for each frame.
+        valid_len: Number of valid (non-padded) frames.
+        points_by_frames: Audio points per frame (#points/#frames).
+        sampling_rate: Audio sampling rate in Hz.
+        token_list: Optional list mapping class ids to strings; 
+            if provided, will be used to populate the ``label`` field of the output units, 
+            else the raw class id will be used.
+    Returns:
+        ``List[SegmentationUnit]`` with class labels.
+    """
+    units: List[SegmentationUnit] = []
+    assert (
+        valid_len > 0
+    ), "valid_len should be > 0 to create at least one segment"
+    start = 0
+    current_label = frame_labels[0]
+    for i in range(1, valid_len):
+        if frame_labels[i] != current_label:
+            units.append(
+                SegmentationUnit(
+                    start=start * points_by_frames / sampling_rate,
+                    end=i * points_by_frames / sampling_rate,
+                    label=current_label if token_list is None else token_list[current_label],
+                )
+            )
+            start = i
+            current_label = frame_labels[i]
+    return units
+
+
 def phone_starts_to_gt_units(
     target_start_idx: torch.Tensor,
     target_length: torch.Tensor,

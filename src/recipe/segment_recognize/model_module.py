@@ -214,7 +214,12 @@ class SegmentRecognizeModel(LightningModule):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> dict[str, Any]:
-        """Decode every registered head on shared encoder features."""
+        """Decode every registered head on shared encoder features.
+        Return schema:
+            {'pred': { head_name: head-specific output dict, ... } }
+        Distributed inference harness will pick up the pred dict and 
+            store it in jsonl
+        """
         features, lens = self._encode(batch["speech"], batch["speech_length"])
         results: dict[str, Any] = {}
 
@@ -224,7 +229,7 @@ class SegmentRecognizeModel(LightningModule):
                 if out is not None:
                     results[name] = out
 
-        return results
+        return {'pred': results}
 
     def on_before_optimizer_step(self, optimizer: Any) -> None:
         """Log gradient norms."""

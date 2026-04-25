@@ -19,6 +19,9 @@ class ForcedAlignmentInference:
             logprobs: list of tensors of shape (T_i, C) containing log probabilities for each frame
             input_lengths: list of ints, lengths of the input sequences, shape (B,)
             target: list of lists of int, target phone sequences for each utterance
+        Returns:
+            aligned_labels: list of lists of int, aligned phone labels for each frame
+            alignment_scores: list of lists of float, alignment scores for each frame
         """
         labels=[]
         scores=[]

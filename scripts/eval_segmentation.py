@@ -2,9 +2,9 @@
 """Compute segmentation metrics from distributed_inference JSONL output.
 
 Usage:
-    python -m src.recipe.segmentation.local.eval_segmentation "exp/runs/.../seg_pxeus_timit.*.jsonl"
-    python -m src.recipe.segmentation.local.eval_segmentation shard0.jsonl shard1.jsonl --tolerance-ms 20
-    python -m src.recipe.segmentation.local.eval_segmentation "exp/runs/.../seg_pxeus_timit.*.jsonl" --forced
+    python -m scripts/eval_segmentation.py "exp/runs/.../seg_pxeus_timit.*.jsonl"
+    python -m scripts/eval_segmentation.py shard0.jsonl shard1.jsonl --tolerance-ms 20
+    python -m scripts/eval_segmentation.py "exp/runs/.../seg_pxeus_timit.*.jsonl" --forced
 """
 
 import argparse

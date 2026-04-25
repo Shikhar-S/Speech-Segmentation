@@ -70,9 +70,9 @@ def build_segment_recognize_inference(
 if __name__ == "__main__":
     # python -m src.recipe.segment_recognize.inference
     from src.model.xeusphoneme.builders import build_xeus_pr_from_hf
-    ckpt_path = (
-        "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/vibe_timit_single/bce/checkpoints/last.ckpt"
-    )
+    ckpt_path = "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/vibe_timit_single/bce/checkpoints/last.ckpt"
+    ckpt_path='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/vibe_timit_single/ctc/checkpoints/last.ckpt'
+    
     net = build_xeus_pr_from_hf(
         work_dir=(
             "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/xeus"
@@ -88,7 +88,9 @@ if __name__ == "__main__":
     inference = build_segment_recognize_inference(
         net=net, ckpt_path=ckpt_path, device='cpu',
     )
+    
     speech = torch.randn(32000 * 5)
     speech_length = torch.tensor(32000 * 5)
+    
     result = inference(speech=speech, speech_length=speech_length)
     print(result)

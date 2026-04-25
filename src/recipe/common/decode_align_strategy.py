@@ -10,12 +10,25 @@ class DecodeAlignStrategy:
         self.decode_strategy = decode_strategy
         self.align_strategy = align_strategy
 
-    def __call__(self, net, speech, speech_lengths, features=None, **kwargs):
+    def __call__(self, net, speech, speech_lengths, features=None, logits=None, **kwargs):
         """Run decode strategy to get raw predictions, then align with forced alignment.
-        NOTE(shikhar): If features are provided, greedy ctc decode strategy skips encoding, 
+        NOTE(shikhar): 
+        If features are provided, greedy ctc decode strategy skips encoding, 
         and runs decode directly on features.
+        If logits are provided, it skips both encoding and decoding, and uses the provided logits.
+        When logits are provided, net can be None since it won't be used.
+        
+        Return schema:
+            List of dicts, one per utterance, with keys
+            - "processed_transcript": post-processed text (e.g. no special tokens)
+            - "predicted_transcript": raw text from token mapping (e.g. with special tokens)
+            - "ids": List[int] of predicted token ids (after CTC collapse)
+            - "logits": Optional[torch.Tensor] of frame logits (if return_logits=True)
+            - "aligned_labels": List[int] of aligned labels
+            - "alignment_scores": List[float] of alignment scores
+            First 4 keys come from decode strategy, last 2 keys come from align strategy.
         """
-        decode_results = self.decode_strategy(net, speech, speech_lengths, features, return_logits=True, **kwargs)
+        decode_results = self.decode_strategy(net, speech, speech_lengths, features, logits=logits, return_logits=True, **kwargs)
         logprobs=[]
         input_lengths=[]
         targets=[]

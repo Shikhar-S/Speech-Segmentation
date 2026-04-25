@@ -6,26 +6,19 @@ from typing import Any, Dict, List
 import torch
 
 from src.metrics.segmentation_evaluator import SegmentationEvaluator
-from src.recipe.common.greedy_ctc_strategy import (
-    ctc_collapse_vectorized,
-)
+from src.recipe.common.decode_align_strategy import DecodeAlignStrategy
+from src.recipe.common.forced_alignment_strategy import ForcedAlignmentInference
+from src.recipe.common.greedy_ctc_strategy import GreedyCTCInference
 from src.recipe.common.boundary_utils import (
-    argmax_to_boundaries,
-    boundaries_to_units,
-    boundary_rval_metrics,
+    frame_label_to_units,
+    evaluate_boundaries,
+    phone_starts_to_gt_units,
 )
 from src.recipe.segment_recognize.heads.base import TaskHead
 # NOTE(shikhar): This head only works for pxeus and xeus nets for now.
 
 class CTCRecognitionHead(TaskHead):
     """CTC phone-recognition head.
-
-    Delegates to ``net._calc_ctc_loss``.
-
-    The forward output includes the raw stats dict returned by the
-    encoder's CTC module (e.g. ``loss_ctc``, ``cer_ctc``), which
-    ``eval_metrics`` extracts as scalars for logging.  Additionally
-    stores CTC logits for boundary-based rval evaluation.
 
     Attributes:
         evaluator: Shared boundary-level metric evaluator.
@@ -86,6 +79,44 @@ class CTCRecognitionHead(TaskHead):
             out.update(stats)
         return out
 
+    # Helpers
+    @torch.no_grad()
+    def _decode_with_alignment(
+        self,
+        logits: torch.Tensor,
+        feature_lens: torch.Tensor,
+        blank_id: int,
+        token_list: List[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """2-pass decode via DecodeAlignStrategy: greedy CTC then forced alignment.
+
+        Args:
+            logits: ``(B, T, C)`` unnormalised frame logits.
+            feature_lens: ``(B,)`` valid frame counts.
+            blank_id: CTC blank token index.
+            token_list: Vocabulary list; defaults to ``str(id)`` when ``None``.
+
+        Returns:
+            List of ``{"ids": List[int], "flags": List[bool]}`` per utterance.
+        """
+        if token_list is None:
+            # hack: does not matter for segmentation
+            token_list = [str(i) for i in range(logits.shape[-1])]
+        strategy = DecodeAlignStrategy(
+            decode_strategy=GreedyCTCInference(token_list=token_list, blank_id=blank_id),
+            align_strategy=ForcedAlignmentInference(blank_idx=blank_id),
+        )
+        results = strategy(net=None, speech=None, speech_lengths=None, logits=logits)
+        
+        # postprocess
+        processed_results = [{"labels": r['aligned_labels']} for r in results]
+        # convert into segmentation units
+        pbf, sr = self.effective_pbf, self.audio_sr
+        for res in processed_results:
+            labels = res["labels"].tolist()
+            res["boundaries"] = frame_label_to_units(labels, len(labels), pbf, sr, token_list)
+        return processed_results
+
     @torch.no_grad()
     def _rval_metrics(
         self,
@@ -93,14 +124,19 @@ class CTCRecognitionHead(TaskHead):
         feature_lens: torch.Tensor,
         batch: Mapping[str, Any],
     ) -> dict[str, float]:
-        """Run boundary rval when supervision is present, else {}."""
+        """2-pass boundary rval when supervision is present, else {}."""
         if "target_start_idx" not in batch:
             return {}
-        return boundary_rval_metrics(
-            output["logits"], feature_lens, batch,
-            self.evaluator, self.effective_pbf, self.audio_sr,
-            blank_id=0,
+        decoded = self._decode_with_alignment(output["logits"], feature_lens, blank_id=0)
+        preds_dict = {}
+        for b, res in enumerate(decoded):
+            preds_dict[str(b)] = res["boundaries"]
+        gt_dict = phone_starts_to_gt_units(
+            batch["target_start_idx"], batch["target_length"],
+            feature_lens, self.effective_pbf, self.audio_sr,
         )
+        return evaluate_boundaries(self.evaluator, preds_dict, gt_dict)
+    # helpers, end
 
     def eval_metrics(
         self,
@@ -130,30 +166,17 @@ class CTCRecognitionHead(TaskHead):
         net: torch.nn.Module,
         **ctx: Any,
     ) -> List[Dict[str, Any]]:
-        """Greedy CTC decode + per-frame boundaries.
-        #TODO(shikhar): add 2 pass approach for onset/offset decoding
-        #TODO(shikhar): refactor this and eval metrics to a shared CTC decoding fn
-        # 1. Use greedy ctc decoding to get raw phone predictions
-        # 2. Use forced alignment strategy with (1)
+        """2-pass CTC decode: greedy phone recognition + forced-alignment boundaries.
 
-        Returns one dict per utterance with phone recognition output
-        (``phone_ids``, ``target``, ``transcript``) and segmentation
-        ``boundaries`` derived from argmax phone-change frames.
+        Returns one dict per utterance with ``phone_ids``, ``target``,
+        ``transcript``, and segmentation ``boundaries``.
         """
-        y_hat = torch.argmax(net.ctc.ctc_lo(features), dim=-1)
-        blank_id = net.get_blank_id()
-        collapsed = ctc_collapse_vectorized(y_hat, blank_id)
         token_list = net.token_list
-        pbf, sr = self.effective_pbf, self.audio_sr
-        out: List[Dict[str, Any]] = []
-        for b, ids in enumerate(collapsed):
-            vlen = int(feature_lens[b])
-            preds = y_hat[b, :vlen].tolist()
-            flags = argmax_to_boundaries(preds, vlen, blank_id=blank_id)
-            out.append({
-                "phone_ids": ids,
-                "target": [token_list[i] for i in ids],
-                "transcript": "/".join(token_list[i] for i in ids),
-                "boundaries": boundaries_to_units(flags, vlen, pbf, sr),
-            })
+        blank_id = net.get_blank_id()
+        decoded = self._decode_with_alignment(
+            net.ctc.ctc_lo(features), feature_lens, blank_id, token_list,
+        )
+        out = []
+        for res in decoded:
+            out.append(res['boundaries'])
         return out
