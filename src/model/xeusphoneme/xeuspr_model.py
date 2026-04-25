@@ -23,7 +23,7 @@ from espnet_import.nets.pytorch_backend.transformer.label_smoothing_loss import 
 )
 
 # from espnet_import.nets.e2e_asr_common import ErrorCalculator
-from src.recipe.phone_recognition.error_calculator import ErrorCalculator
+from src.recipe.common.error_calculator import ErrorCalculator
 
 from src.model.powsm.ctc import CTC
 from src.utils import RankedLogger
@@ -146,7 +146,7 @@ class XeusPRModel(torch.nn.Module):
             intermediate_outs = encoder_out[1]
             encoder_out = encoder_out[0]
 
-        loss_ctc, stats = self._calc_ctc_loss(
+        loss_ctc, stats, logits = self._calc_ctc_loss(
             encoder_out, encoder_out_lens, text, text_lengths, **kwargs
         )
 
@@ -165,12 +165,13 @@ class XeusPRModel(torch.nn.Module):
             if ys_inter is not None and ys_inter_lens is not None:
                 loss_interctc = 0.0
                 for layer_idx, intermediate_out in intermediate_outs:
-                    loss_ic = ctc_inter(
+                    ctcinterout = ctc_inter(
                         intermediate_out,
                         encoder_out_lens,
                         ys_inter,
                         ys_inter_lens,
                     )
+                    loss_ic = ctcinterout[0] if isinstance(ctcinterout, tuple) else ctcinterout
                     loss_interctc = loss_interctc + loss_ic
                     stats[f"loss_interctc_layer{layer_idx}"] = loss_ic.detach()
                 loss_interctc = loss_interctc / len(intermediate_outs)
@@ -192,7 +193,7 @@ class XeusPRModel(torch.nn.Module):
         loss, stats, weight = force_gatherable(
             (loss, stats, speech.shape[0]), loss.device
         )
-        return {"loss": loss, "stats": stats, "weight": weight}
+        return {"loss": loss, "stats": stats, "weight": weight, "logits": logits}
 
     def _extract_feats(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor
@@ -311,14 +312,20 @@ class XeusPRModel(torch.nn.Module):
     ):
         ys_pad = torch.where(ys_pad == -1, self.ignore_id, ys_pad)
         ys_pad = ys_pad[:, : ys_pad_lens.max()]
-        loss_ctc = self.ctc(
+        ctcoutput = self.ctc(
             encoder_out,
             encoder_out_lens,
             ys_pad,
             ys_pad_lens,
             lang_sym=kwargs.get("lang_sym"),
             accent_sym=kwargs.get("accent_sym"),
+            return_logits=kwargs.get("return_logits", False),
         )
+        if isinstance(ctcoutput, tuple):
+            loss_ctc, logits = ctcoutput
+        else:
+            loss_ctc = ctcoutput
+            logits = None
         stats = {}
         assert self.error_calculator is not None, "ErrorCalculator not initialized"
         if not self.training:  # err calc, slow?
@@ -332,7 +339,7 @@ class XeusPRModel(torch.nn.Module):
                 )
                 for k, v in metrics.items():
                     stats[k + "_ctc"] = v
-        return loss_ctc, stats
+        return loss_ctc, stats, logits
 
     def ctc_logits(
         self, speech: torch.Tensor, speech_lengths: torch.Tensor

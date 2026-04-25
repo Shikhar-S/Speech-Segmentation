@@ -5,7 +5,7 @@ from typing import List
 
 # REFERENCE
 from espnet_import.nets.e2e_asr_common import ErrorCalculator as ESPnetErrorCalculator
-from src.recipe.phone_recognition.error_calculator import (
+from src.recipe.common.error_calculator import (
     ErrorCalculator as CustomErrorCalculator,
 )
 

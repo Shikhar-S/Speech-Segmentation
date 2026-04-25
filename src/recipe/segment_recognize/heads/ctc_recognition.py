@@ -6,22 +6,21 @@ from typing import Any, Dict, List
 import torch
 
 from src.metrics.segmentation_evaluator import SegmentationEvaluator
-from src.recipe.phone_recognition.greedy_ctc_strategy import (
+from src.recipe.common.greedy_ctc_strategy import (
     ctc_collapse_vectorized,
 )
-from src.recipe.segmentation.boundary_utils import (
+from src.recipe.common.boundary_utils import (
     argmax_to_boundaries,
     boundaries_to_units,
     boundary_rval_metrics,
 )
 from src.recipe.segment_recognize.heads.base import TaskHead
-
+# NOTE(shikhar): This head only works for pxeus and xeus nets for now.
 
 class CTCRecognitionHead(TaskHead):
     """CTC phone-recognition head.
 
-    Owns no parameters -- delegates entirely to
-    ``net._calc_ctc_loss`` (passed via context).
+    Delegates to ``net._calc_ctc_loss``.
 
     The forward output includes the raw stats dict returned by the
     encoder's CTC module (e.g. ``loss_ctc``, ``cer_ctc``), which
@@ -34,7 +33,7 @@ class CTCRecognitionHead(TaskHead):
         audio_sr: Audio sample rate in Hz.
     """
 
-    log_name = "pr"
+    log_name = "ctc"
     prog_bar_keys = frozenset({"rval"})
 
     def __init__(
@@ -70,16 +69,18 @@ class CTCRecognitionHead(TaskHead):
         Returns:
             Dict with ``loss``, CTC stats, and ``logits``.
         """
-        loss, stats = net._calc_ctc_loss(
+        assert hasattr(net, "_calc_ctc_loss"), "CTCRecognitionHead requires net._calc_ctc_loss"
+        loss, stats, logits = net._calc_ctc_loss(
             features,
             feature_lens,
             batch["target"],
             batch["target_length"],
             lang_sym=batch.get("lang_sym"),
+            return_logits=True,
         )
         out: dict[str, Any] = {
             "loss": loss,
-            "logits": net.ctc.ctc_lo(features),
+            "logits": logits,
         }
         if stats:
             out.update(stats)
@@ -93,7 +94,7 @@ class CTCRecognitionHead(TaskHead):
         batch: Mapping[str, Any],
     ) -> dict[str, float]:
         """Run boundary rval when supervision is present, else {}."""
-        if "phone_start_idx" not in batch:
+        if "target_start_idx" not in batch:
             return {}
         return boundary_rval_metrics(
             output["logits"], feature_lens, batch,
@@ -130,6 +131,10 @@ class CTCRecognitionHead(TaskHead):
         **ctx: Any,
     ) -> List[Dict[str, Any]]:
         """Greedy CTC decode + per-frame boundaries.
+        #TODO(shikhar): add 2 pass approach for onset/offset decoding
+        #TODO(shikhar): refactor this and eval metrics to a shared CTC decoding fn
+        # 1. Use greedy ctc decoding to get raw phone predictions
+        # 2. Use forced alignment strategy with (1)
 
         Returns one dict per utterance with phone recognition output
         (``phone_ids``, ``target``, ``transcript``) and segmentation

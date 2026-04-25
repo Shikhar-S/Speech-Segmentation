@@ -15,7 +15,7 @@ from lightning.pytorch.utilities import grad_norm
 
 from src.recipe.segmentation.segmentation_loss import BoundaryLoss, SegmentationLoss
 from src.recipe.segmentation.inference import SegmentationInference
-from src.recipe.segmentation.boundary_utils import boundaries_to_units
+from src.recipe.common.boundary_utils import boundaries_to_units
 from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 from src.utils import RankedLogger
 

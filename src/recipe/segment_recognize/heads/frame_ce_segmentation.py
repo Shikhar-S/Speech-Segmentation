@@ -6,12 +6,12 @@ from typing import Any
 import torch
 
 from src.metrics.segmentation_evaluator import SegmentationEvaluator
-from src.recipe.segmentation.boundary_utils import boundary_rval_metrics
+from src.recipe.common.boundary_utils import boundary_rval_metrics
 from src.recipe.segmentation.segmentation_loss import SegmentationLoss
 from src.recipe.segment_recognize.heads.base import TaskHead
 
 
-class FASegmentationHead(TaskHead):
+class FrameCESegmentationHead(TaskHead):
     """Frame-level cross-entropy head.
 
     No owned parameters -- uses ``net.ctc.ctc_lo`` (passed via

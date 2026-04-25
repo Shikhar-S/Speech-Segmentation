@@ -7,7 +7,7 @@ from src.metrics.segmentation_evaluator import (
     SegmentationEvaluator,
     SegmentationUnit,
 )
-from src.recipe.segmentation.boundary_utils import (
+from src.recipe.common.boundary_utils import (
     argmax_to_boundaries,
     boundaries_to_units,
     boundary_rval_metrics,

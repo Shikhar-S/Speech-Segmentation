@@ -1,4 +1,6 @@
-"""ASG phone-recognition head."""
+"""ASG phone-recognition head.
+#TODO(shikhar): Check this head later!
+"""
 
 from collections.abc import Mapping
 from typing import Any, Dict, List
@@ -7,10 +9,10 @@ import torch
 import torch.nn as nn
 
 from src.metrics.segmentation_evaluator import SegmentationEvaluator
-from src.recipe.phone_recognition.greedy_ctc_strategy import (
+from src.recipe.common.greedy_ctc_strategy import (
     ctc_collapse_vectorized,
 )
-from src.recipe.segmentation.boundary_utils import (
+from src.recipe.common.boundary_utils import (
     argmax_to_boundaries,
     boundaries_to_units,
     boundary_rval_metrics,

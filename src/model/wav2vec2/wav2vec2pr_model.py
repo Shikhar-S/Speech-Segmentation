@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from espnet2.torch_utils.device_funcs import force_gatherable
-from src.recipe.phone_recognition.error_calculator import ErrorCalculator
+from src.recipe.common.error_calculator import ErrorCalculator
 
 from src.model.powsm.ctc import CTC
 from src.model.wav2vec2.wav2vec2_model import Wav2Vec2Model

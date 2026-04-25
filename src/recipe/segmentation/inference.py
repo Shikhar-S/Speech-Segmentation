@@ -8,7 +8,7 @@ from typing import List
 import torch
 import torch.nn as nn
 from src.metrics.segmentation_evaluator import SegmentationUnit
-from src.recipe.segmentation.boundary_utils import boundaries_to_units
+from src.recipe.common.boundary_utils import boundaries_to_units
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)

@@ -27,7 +27,7 @@ from src.metrics.segmentation_evaluator import (
     SegmentationEvaluator,
     SegmentationUnit,
 )
-from src.recipe.segmentation.boundary_utils import boundaries_to_units
+from src.recipe.common.boundary_utils import boundaries_to_units
 
 
 class JointPRSegModel(LightningModule):

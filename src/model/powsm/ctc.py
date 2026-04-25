@@ -242,6 +242,7 @@ class CTC(torch.nn.Module):
         ys_lens,
         lang_sym: Optional[Union[List[str], None]] = None,
         accent_sym: Optional[Union[List[str], None]] = None,
+        return_logits: bool = False,
     ):
         """Calculate CTC loss.
 
@@ -252,6 +253,7 @@ class CTC(torch.nn.Module):
             ys_lens: batch of lengths of character sequence (B)
             lang_sym: optional list of language codes per utterance (for manual_distance_per_lang)
             accent_sym: optional list of accent codes per utterance
+            return_logits: whether to return the unnormalized logits in addition to the loss
         """
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
@@ -267,6 +269,8 @@ class CTC(torch.nn.Module):
             loss = self.loss_fn(
                 ys_hat, ys_pad, hlens, ys_lens, lang_sym=lang_sym, accent_sym=accent_sym
             ).to(device=hs_pad.device, dtype=hs_pad.dtype)
+            if return_logits:
+                return loss, ys_hat
             return loss
 
         elif self.ctc_type == "gtnctc":
@@ -282,6 +286,8 @@ class CTC(torch.nn.Module):
             ys_hat, ys_true, hlens, ys_lens, lang_sym=lang_sym, accent_sym=accent_sym
         ).to(device=hs_pad.device, dtype=hs_pad.dtype)
 
+        if return_logits:
+            return loss, ys_hat.transpose(0, 1)  # (L, B, D) -> (B, L, D)
         return loss
 
     def softmax(self, hs_pad):

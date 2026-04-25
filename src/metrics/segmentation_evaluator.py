@@ -27,7 +27,7 @@ class SegmentationUnit:
 
     start: int | float
     end: int | float
-    label: str | int
+    label: str | int | None = None
 
 
 class SegmentationEvaluator:
@@ -83,7 +83,9 @@ class SegmentationEvaluator:
         }
         if not self.forced:
             return results
-        return self._add_forced_alignment_metrics(results, predicted, ground_truth, symbols)
+        return self._add_forced_alignment_metrics(
+            results, predicted, ground_truth, symbols
+        )
 
     def _get_boundary_counts(
         self,
@@ -129,21 +131,20 @@ class SegmentationEvaluator:
         # for i in range(min(5, len(metrics))):
         #     ps, pe, gs, ge = predicted[i].start, predicted[i].end, ground_truth[i].start, ground_truth[i].end
         #     print(f"Pred: ({ps:.3f}, {pe:.3f}), GT: ({gs:.3f}, {ge:.3f})")
-            
-        
+
         # print('-=-' * 20)
         # print('Largest predicted and GT time for largest 5 pbe')
         # pbe = metrics[:, 2]
         # largest_indices = np.argsort(pbe)[-5:]
         # for idx in largest_indices:
         #     ps, pe, gs, ge = predicted[idx].start, predicted[idx].end, ground_truth[idx].start, ground_truth[idx].end
-        #     print(f"PBE: {pbe[idx]:.3f} sec - Pred: ({ps:.3f}, {pe:.3f}), GT: ({gs:.3f}, {ge:.3f})")  
+        #     print(f"PBE: {pbe[idx]:.3f} sec - Pred: ({ps:.3f}, {pe:.3f}), GT: ({gs:.3f}, {ge:.3f})")
 
         start_err, end_err, pbe, dur_err, gt_dur, pred_dur = metrics.T
 
         percentiles = [5, 50, 95]
-        results.update({'n': n})
-        
+        results.update({"n": n})
+
         error_types = [
             ("start_err", start_err),
             ("end_err", end_err),
@@ -167,7 +168,9 @@ class SegmentationEvaluator:
     # Boundary helpers                                                   #
     # ------------------------------------------------------------------ #
 
-    def _extract_boundary_times(self, units: List[SegmentationUnit]) -> np.ndarray:
+    def _extract_boundary_times(
+        self, units: List[SegmentationUnit]
+    ) -> np.ndarray:
         """Extract all unique boundary times (N starts + final end) from units."""
         times = [u.start for u in units] + [units[-1].end]
         return np.unique(times)
@@ -214,7 +217,9 @@ class SegmentationEvaluator:
             f"{prefix}_std": np.std(data),
             f"{prefix}_median": np.median(data),
         }
-        stats.update({f"{prefix}_p{p}": np.percentile(data, p) for p in percentiles})
+        stats.update(
+            {f"{prefix}_p{p}": np.percentile(data, p) for p in percentiles}
+        )
         return stats
 
     def _analyze_by_symbol(self, symbols, start_err, end_err, pbe, dur_err):
@@ -227,7 +232,9 @@ class SegmentationEvaluator:
         )
 
         # group by symbol
-        for sym, se, ee, pb, de in zip(symbols, start_err, end_err, pbe, dur_err):
+        for sym, se, ee, pb, de in zip(
+            symbols, start_err, end_err, pbe, dur_err
+        ):
             symbol_data[sym]["start"].append(se * 1000)
             symbol_data[sym]["end"].append(ee * 1000)
             symbol_data[sym]["pbe"].append(pb * 1000)
@@ -245,7 +252,9 @@ class SegmentationEvaluator:
             for sym, data in symbol_data.items()
         }
 
-    def _get_metric(self, results: Dict, key: str, default: float = 0.0) -> float:
+    def _get_metric(
+        self, results: Dict, key: str, default: float = 0.0
+    ) -> float:
         """Get metric, falling back to mean_<key> for batch results."""
         if key in results and results[key] is not None:
             return results[key]
@@ -263,7 +272,9 @@ class SegmentationEvaluator:
         console = Console()
 
         g = self._get_metric
-        samples = results.get("n", results.get("total_samples", results.get("n_gt", 0)))
+        samples = results.get(
+            "n", results.get("total_samples", results.get("n_gt", 0))
+        )
         segments = results.get("total_segments", None)
 
         table = Table(title="Alignment Evaluation Results", show_lines=True)
@@ -366,7 +377,9 @@ class SegmentationEvaluator:
 
         for seg_id in ground_truth:
             if seg_id not in predictions:
-                log.warning(f"Segment ID {seg_id} missing in predictions; skipping.")
+                log.warning(
+                    f"Segment ID {seg_id} missing in predictions; skipping."
+                )
                 continue
 
             preds = predictions[seg_id]
@@ -376,7 +389,10 @@ class SegmentationEvaluator:
             if skip_symbols:
                 preds_, gts_ = [], []
                 for p, g in zip(preds, gts):
-                    if g.label not in skip_symbols and p.label not in skip_symbols:
+                    if (
+                        g.label not in skip_symbols
+                        and p.label not in skip_symbols
+                    ):
                         preds_.append(p)
                         gts_.append(g)
                 preds = preds_
@@ -409,7 +425,9 @@ class SegmentationEvaluator:
         ]
         aggregated = {
             "total_segments": len(all_results),
-            "total_samples": sum(r.get("n", r.get("n_gt", 0)) for r in all_results),
+            "total_samples": sum(
+                r.get("n", r.get("n_gt", 0)) for r in all_results
+            ),
             **{
                 f"mean_{metric}": np.mean([r[metric] for r in all_results])
                 for metric in metric_names

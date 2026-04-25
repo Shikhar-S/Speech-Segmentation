@@ -1,4 +1,4 @@
-# ~2-3x Faster error calculator!
+# ~2-3x Faster error calculator than espnet!
 import torch
 import numpy as np
 from rapidfuzz.distance import Levenshtein

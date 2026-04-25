@@ -28,13 +28,20 @@ class GreedyCTCInference:
         model: torch.nn.Module,
         speech: torch.Tensor,
         speech_lengths: torch.Tensor,
+        features: torch.Tensor = None,
+        feature_lengths: torch.Tensor = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
-        # 1. Standardized Forward pass
-        # Works as long as model has .encode() and .ctc
-        encoder_out, _ = model.encode(speech, speech_lengths)
-        if isinstance(encoder_out, tuple):
-            encoder_out = encoder_out[0]
+        
+        encode_speech = features is None or feature_lengths is None
+        if encode_speech:
+            # 1. Standardized Forward pass
+            # Works as long as model has .encode() and .ctc
+            encoder_out, _ = model.encode(speech, speech_lengths)
+            if isinstance(encoder_out, tuple):
+                encoder_out = encoder_out[0]
+        else:
+            encoder_out, feature_lengths = features, feature_lengths
         logits = model.ctc.ctc_lo(encoder_out)
 
         # 2. Greedy search

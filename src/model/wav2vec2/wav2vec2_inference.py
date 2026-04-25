@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from typing import Union, List, Dict, Any
 
-from src.recipe.phone_recognition.greedy_ctc_strategy import GreedyCTCInference
+from src.recipe.common.greedy_ctc_strategy import GreedyCTCInference
 
 
 class Wav2Vec2Inference:

@@ -52,7 +52,6 @@ def argmax_to_boundaries(
         return flags
 
     # This is the logic for CTC/ASG (first prediction marks the onset)
-    # TODO(shikhar): Add options to use mid-point between phones or other methods for marking boundaries.
     prev_phone: Optional[int] = None
     for i in range(valid_len):
         p = preds[i]
@@ -100,8 +99,8 @@ def boundaries_to_units(
 
 
 def phone_starts_to_gt_units(
-    phone_start_idx: torch.Tensor,
-    phone_length: torch.Tensor,
+    target_start_idx: torch.Tensor,
+    target_length: torch.Tensor,
     feature_lens: torch.Tensor,
     points_by_frames: float,
     sampling_rate: int,
@@ -109,8 +108,8 @@ def phone_starts_to_gt_units(
     """Build per-utterance ground-truth segments from phone-start indices.
 
     Args:
-        phone_start_idx: ``(B, N_max)`` frame-space phone-start indices.
-        phone_length: ``(B,)`` number of phones per utterance.
+        target_start_idx: ``(B, N_max)`` frame-space phone-start indices.
+        target_length: ``(B,)`` number of phones per utterance.
         feature_lens: ``(B,)`` valid frame counts (used to close the last
             segment of each utterance).
         points_by_frames: Audio points per frame.
@@ -120,11 +119,11 @@ def phone_starts_to_gt_units(
         ``{str(b): [SegmentationUnit, ...]}`` keyed by batch index.
     """
     gt: dict[str, List[SegmentationUnit]] = {}
-    B = phone_start_idx.shape[0]
+    B = target_start_idx.shape[0]
     for b in range(B):
-        n = int(phone_length[b])
+        n = int(target_length[b])
         vlen = int(feature_lens[b])
-        starts = phone_start_idx[b, :n].tolist()
+        starts = target_start_idx[b, :n].tolist()
         gt[str(b)] = [
             SegmentationUnit(
                 start=starts[i] * points_by_frames / sampling_rate,
@@ -163,11 +162,11 @@ def boundary_rval_metrics(
 ) -> dict[str, float]:
     """Computes P/R/F1/rval from argmax phone predictions and ground truth by calling other utils here."""
     assert (
-        "phone_start_idx" in batch and "phone_length" in batch
-    ), "phone_start_idx and phone_length are required for boundary evaluation"
+        "target_start_idx" in batch and "target_length" in batch
+    ), "target_start_idx and target_length are required for boundary evaluation"
     gt_dict = phone_starts_to_gt_units(
-        batch["phone_start_idx"],
-        batch["phone_length"],
+        batch["target_start_idx"],
+        batch["target_length"],
         feature_lens,
         points_by_frames,
         sampling_rate,

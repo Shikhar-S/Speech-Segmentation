@@ -15,8 +15,8 @@ from src.recipe.segment_recognize.heads.count_ctc import (
     _build_targets,
     _parse_substitution,
 )
-from src.recipe.segment_recognize.heads.fa_segmentation import (
-    FASegmentationHead,
+from src.recipe.segment_recognize.heads.frame_ce_segmentation import (
+    FrameCESegmentationHead,
 )
 from src.recipe.segment_recognize.heads.asg_recognition import (
     ASGRecognitionHead,
@@ -133,7 +133,7 @@ def test_bce_boundary_head_grad():
 
 
 def test_fa_forward_returns_loss_and_accuracy():
-    lm = FASegmentationHead(evaluator=_ev())
+    lm = FrameCESegmentationHead(evaluator=_ev())
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
@@ -144,7 +144,7 @@ def test_fa_forward_returns_loss_and_accuracy():
 
 
 def test_fa_eval_metrics():
-    lm = FASegmentationHead(evaluator=_ev())
+    lm = FrameCESegmentationHead(evaluator=_ev())
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
@@ -478,7 +478,7 @@ def test_ctc_decode_returns_phone_ids():
 
 
 def test_fa_decode_returns_none():
-    lm = FASegmentationHead(evaluator=_ev())
+    lm = FrameCESegmentationHead(evaluator=_ev())
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
     assert lm.decode(feat, lens, _decode_batch()) is None
@@ -549,7 +549,7 @@ def test_predict_step_dispatches_all_heads():
 def test_predict_step_fa_skipped():
     """FA.decode returns None, so predict_step filters it out."""
     model = _bare_sr_model(
-        seg_heads={"fa": FASegmentationHead(evaluator=_ev())},
+        seg_heads={"fa": FrameCESegmentationHead(evaluator=_ev())},
     )
     out = model.predict_step(_decode_batch(), 0)
     assert out == {}
@@ -559,7 +559,7 @@ def test_predict_step_fa_skipped():
 
 
 def test_fa_eval_metrics_returns_rval():
-    lm = FASegmentationHead(evaluator=_ev(), effective_pbf=POINTS, audio_sr=16000)
+    lm = FrameCESegmentationHead(evaluator=_ev(), effective_pbf=POINTS, audio_sr=16000)
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)
@@ -572,7 +572,7 @@ def test_fa_eval_metrics_returns_rval():
 
 
 def test_fa_eval_metrics_no_seg_targets():
-    lm = FASegmentationHead(evaluator=_ev(), effective_pbf=POINTS, audio_sr=16000)
+    lm = FrameCESegmentationHead(evaluator=_ev(), effective_pbf=POINTS, audio_sr=16000)
     net = _dummy_net()
     feat = torch.randn(B, T, ENCODER_DIM)
     lens = torch.full((B,), T, dtype=torch.long)

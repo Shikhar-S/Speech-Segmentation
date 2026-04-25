@@ -5,7 +5,7 @@ import numpy as np
 import torch.nn.functional as F
 from typing import Union, List, Dict, Any, Optional
 
-from src.recipe.phone_recognition.greedy_ctc_strategy import GreedyCTCInference
+from src.recipe.common.greedy_ctc_strategy import GreedyCTCInference
 
 
 class XeusPRInference:

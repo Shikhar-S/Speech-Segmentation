@@ -10,7 +10,7 @@ from src.metrics.segmentation_evaluator import (
     SegmentationEvaluator,
     SegmentationUnit,
 )
-from src.recipe.segmentation.boundary_utils import (
+from src.recipe.common.boundary_utils import (
     boundaries_to_units,
     evaluate_boundaries,
     phone_starts_to_gt_units,
@@ -81,7 +81,7 @@ class BCEBoundaryHead(TaskHead):
         out["boundary_logits"] = logits
         return out
 
-    def _preds_dict(
+    def _process_predictions(
         self,
         boundary_logits: torch.Tensor,
         feature_lens: torch.Tensor,
@@ -103,7 +103,7 @@ class BCEBoundaryHead(TaskHead):
         batch: Mapping[str, Any],
     ) -> dict[str, float]:
         """Boundary P/R/F1/R-value via the shared evaluator."""
-        preds_dict = self._preds_dict(output["boundary_logits"], feature_lens)
+        preds_dict = self._process_predictions(output["boundary_logits"], feature_lens)
         gt_dict = phone_starts_to_gt_units(
             batch["target_start_idx"],
             batch["target_length"],
@@ -124,5 +124,5 @@ class BCEBoundaryHead(TaskHead):
     ) -> List[Dict[str, Any]]:
         """Decode boundary logits into per-utterance segmentation dicts."""
         logits = self.boundary_head(features)
-        preds_dict = self._preds_dict(logits, feature_lens, boundary_threshold)
+        preds_dict = self._process_predictions(logits, feature_lens, boundary_threshold)
         return [{"utterance_id": str(i), "pred_units": units} for i, units in preds_dict.items()]
