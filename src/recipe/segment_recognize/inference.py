@@ -72,6 +72,7 @@ if __name__ == "__main__":
     from src.model.xeusphoneme.builders import build_xeus_pr_from_hf
     ckpt_path = "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/vibe_timit_single/bce/checkpoints/last.ckpt"
     ckpt_path='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/vibe_timit_single/ctc/checkpoints/last.ckpt'
+    ckpt_path='/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/vibe_timit_single/fce/checkpoints/last.ckpt'
     
     net = build_xeus_pr_from_hf(
         work_dir=(

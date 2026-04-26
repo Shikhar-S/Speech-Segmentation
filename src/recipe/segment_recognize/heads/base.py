@@ -1,4 +1,11 @@
-"""Base class for composable task heads."""
+"""Base class for composable task heads.
+
+Methods that should be implemented by subclasses:
+    - forward(): Compute loss from encoder features, batch and the backbone net module.
+        Return dict with "loss" and any auxiliary keys needed for eval_metrics().
+    - eval_metrics(): Compute metrics from forward() output. Return dict of metric name to value.
+    - decode(): Inference time decoding function. Return a list of dicts, one for each utterance in batch.
+"""
 
 from collections.abc import Mapping
 from typing import Any

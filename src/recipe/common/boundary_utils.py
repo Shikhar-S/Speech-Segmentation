@@ -126,6 +126,7 @@ def frame_label_to_units(
     current_label = frame_labels[0]
     for i in range(1, valid_len):
         if frame_labels[i] != current_label:
+            #TODO(shikhar): remove entries with label = blank id
             units.append(
                 SegmentationUnit(
                     start=start * points_by_frames / sampling_rate,
@@ -135,6 +136,14 @@ def frame_label_to_units(
             )
             start = i
             current_label = frame_labels[i]
+    # add last
+    units.append(
+        SegmentationUnit(
+            start=start * points_by_frames / sampling_rate,
+            end=valid_len * points_by_frames / sampling_rate,
+            label=current_label if token_list is None else token_list[current_label],
+        )
+    )
     return units
 
 def target_boundaries_to_gt_units(
