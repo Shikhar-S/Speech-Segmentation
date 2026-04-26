@@ -18,7 +18,7 @@ from lightning.pytorch.utilities import grad_norm
 
 from src.recipe.segmentation.segmentation_loss import (
     BoundaryLoss,
-    SegmentationLoss,
+    FCELoss,
 )
 from src.recipe.segmentation.model_module import (
     convert_pointstamps_to_frame_indices,
@@ -79,7 +79,7 @@ class JointPRSegModel(LightningModule):
             self.boundary_head = nn.Linear(dim, 1)
             self.boundary_criterion = BoundaryLoss(pos_weight=pos_weight)
         if bce_weight < 1.0:
-            self.seg_criterion = SegmentationLoss()
+            self.seg_criterion = FCELoss()
 
         self.evaluator = SegmentationEvaluator(tolerance_ms=20)
 

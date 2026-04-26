@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 import pytest
-from src.recipe.segmentation.segmentation_loss import BoundaryLoss, SegmentationLoss
+from src.recipe.segmentation.segmentation_loss import BoundaryLoss, FCELoss
 import torch.nn.functional as F
 
 
@@ -94,7 +94,7 @@ class ReferenceSegmentationLoop(torch.nn.Module):
 def loss_fn():
     """The optimized implementation under test."""
     # Ensure this imports your corrected class
-    return SegmentationLoss(ignore_index=-100)
+    return FCELoss(ignore_index=-100)
 
 
 @pytest.fixture

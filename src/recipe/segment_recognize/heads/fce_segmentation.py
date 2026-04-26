@@ -7,7 +7,7 @@ import torch
 
 from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
 from src.recipe.common.boundary_utils import evaluate_boundaries, target_boundaries_to_gt_units
-from src.recipe.segmentation.segmentation_loss import SegmentationLoss
+from src.recipe.segmentation.segmentation_loss import FCELoss
 from src.recipe.segment_recognize.heads.base import TaskHead
 from src.recipe.common.boundary_utils import frame_label_to_units
 
@@ -34,7 +34,7 @@ class FCESegmentationHead(TaskHead):
         **kwargs: Any,
     ) -> None:
         super().__init__(weight)
-        self.criterion = SegmentationLoss()
+        self.criterion = FCELoss()
         self.evaluator = evaluator
         self.effective_pbf = effective_pbf
         self.audio_sr = audio_sr

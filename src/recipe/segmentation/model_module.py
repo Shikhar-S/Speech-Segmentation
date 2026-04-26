@@ -13,7 +13,7 @@ from lightning import LightningModule
 from torchmetrics import MinMetric, MeanMetric
 from lightning.pytorch.utilities import grad_norm
 
-from src.recipe.segmentation.segmentation_loss import BoundaryLoss, SegmentationLoss
+from src.recipe.segmentation.segmentation_loss import BoundaryLoss, FCELoss
 from src.recipe.segmentation.inference import SegmentationInference
 from src.recipe.common.boundary_utils import boundaries_to_units
 from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
@@ -74,7 +74,7 @@ class SegmentationModel(LightningModule):
         self.audio_sr = audio_sr
         self.evaluator = SegmentationEvaluator(tolerance_ms=20)
         self.encoder_dim = self.net.encoder_output_size()
-        self.criterion = SegmentationLoss()
+        self.criterion = FCELoss()
         self.bce_weight = bce_weight
         assert resolution >= 1 and isinstance(resolution, int), (
             f"resolution must be a positive integer, got {resolution}"

@@ -15,7 +15,7 @@ from src.recipe.segment_recognize.heads.count_ctc import (
     _build_targets,
     _parse_substitution,
 )
-from src.recipe.segment_recognize.heads.frame_ce_segmentation import (
+from src.recipe.segment_recognize.heads.fce_segmentation import (
     FrameCESegmentationHead,
 )
 from src.recipe.segment_recognize.heads.asg_recognition import (

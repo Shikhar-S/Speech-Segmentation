@@ -3,7 +3,8 @@ import torch.nn as nn
 from typing import Dict, Optional
 
 
-class SegmentationLoss(nn.Module):
+class FCELoss(nn.Module):
+    """Frame-wise cross-entropy loss for segmentation."""
     def __init__(self, ignore_index=-1):
         super().__init__()
         self.ignore_index = ignore_index

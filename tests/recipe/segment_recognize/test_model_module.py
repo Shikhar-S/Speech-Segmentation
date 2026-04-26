@@ -68,7 +68,7 @@ from src.recipe.segment_recognize.heads.bce_boundary import (
 from src.recipe.segment_recognize.heads.ctc_recognition import (
     CTCRecognitionHead,
 )
-from src.recipe.segment_recognize.heads.frame_ce_segmentation import (
+from src.recipe.segment_recognize.heads.fce_segmentation import (
     FrameCESegmentationHead,
 )
 

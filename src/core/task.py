@@ -9,7 +9,10 @@ from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 import torch
-from src.core.distributed_inference import run_distributed_inference_
+from src.core.distributed_inference import (
+    default_encoder,
+    run_distributed_inference_,
+)
 
 from src.utils import (
     RankedLogger,
@@ -49,9 +52,12 @@ class Task:
         log.info("Starting training!")
         if self.task_cfg.get("ckpt_path") is not None:
             self._load_partial_ckpt_for_training(model, self.task_cfg.ckpt_path)
+        resume_ckpt_path = self.task_cfg.get("resume_ckpt_path")
         trainer.fit(
             model=model,
             datamodule=datamodule,
+            ckpt_path=resume_ckpt_path,
+            weights_only=False,
         )
         ckpt_cb = getattr(trainer, "checkpoint_callback", None)
         ckpt_path = getattr(ckpt_cb, "best_model_path", "") if ckpt_cb else ""
@@ -166,7 +172,7 @@ class Task:
                 if pred_dir:
                     os.makedirs(pred_dir, exist_ok=True)
                 with open(pred_file, "w", encoding="utf-8") as f:
-                    json.dump(preds, f, indent=2)
+                    json.dump(preds, f, indent=2, default=default_encoder)
                 log.info(f"Wrote predictions to {pred_file}")
 
         return metrics, object_dict
