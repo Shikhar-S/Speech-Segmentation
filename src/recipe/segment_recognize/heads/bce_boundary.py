@@ -83,7 +83,7 @@ class BCEBoundaryHead(TaskHead):
             batch["target_start_idx"],
             batch["target_length"],
         )
-        out["boundary_logits"] = logits
+        out["boundary_logits"] = logits.detach()
         return out
 
     def _process_predictions(
@@ -130,7 +130,7 @@ class BCEBoundaryHead(TaskHead):
         **ctx: Any,
     ) -> List[Dict[str, Any]]:
         """Decode boundary logits into per-utterance segmentation dicts."""
-        logits = self.boundary_head(features)
+        logits = self.boundary_head(features).detach()
         preds_dict = self._process_predictions(logits, feature_lens, boundary_threshold)
         preds_list = [boundaries for boundaries in preds_dict.values()]
         return preds_list

@@ -73,7 +73,7 @@ class CTCRecognitionHead(TaskHead):
         )
         out: dict[str, Any] = {
             "loss": loss,
-            "logits": logits,
+            "logits": logits.detach(),
         }
         if stats:
             out.update(stats)
