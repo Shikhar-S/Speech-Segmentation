@@ -232,7 +232,7 @@ class SegmentRecognizeModel(LightningModule):
                 if out is not None:
                     results[name] = out
 
-        return {'pred': results}
+        return results
 
     def on_before_optimizer_step(self, optimizer: Any) -> None:
         """Log gradient norms."""

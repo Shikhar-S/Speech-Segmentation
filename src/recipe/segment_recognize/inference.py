@@ -39,7 +39,7 @@ class SegmentRecognizeInference:
         sl = torch.as_tensor([int(speech_length)], device=self.device)
         assert 'utt_id' in kwargs, "Make sure the predict dataset returns utt_id!"
         utt_id = kwargs['utt_id']
-        batch: Dict[str, Any] = {"speech": sp, "speech_length": sl, 'utt_id': utt_id}
+        batch: Dict[str, Any] = {"speech": sp, "speech_length": sl, 'utt_id': [utt_id]}
         
         if target is not None and target_length is not None:
             batch["target"] = (

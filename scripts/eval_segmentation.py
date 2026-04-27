@@ -2,9 +2,9 @@
 """Compute segmentation metrics from distributed_inference JSONL output.
 
 Usage:
-    python -m scripts/eval_segmentation.py "exp/runs/.../seg_pxeus_timit.*.jsonl"
-    python -m scripts/eval_segmentation.py shard0.jsonl shard1.jsonl --tolerance-ms 20
-    python -m scripts/eval_segmentation.py "exp/runs/.../seg_pxeus_timit.*.jsonl" --forced
+    python -m scripts.eval_segmentation "exp/runs/.../seg_pxeus_timit.*.jsonl"
+    python -m scripts.eval_segmentation shard0.jsonl shard1.jsonl --tolerance-ms 20
+    python -m scripts.eval_segmentation "exp/runs/.../seg_pxeus_timit.*.jsonl" --forced
 """
 
 import argparse
@@ -21,9 +21,23 @@ def parse_groundtruth(passthrough, forced):
     phones = passthrough.get("phones") if forced else None
     return [SegmentationUnit(start=s, end=e, label=(phones[i] if phones else 0)) for i, (s, e) in enumerate(ts)]
 
+# def parse_predictions(pred_list):
+#     return [SegmentationUnit(start=p["start"], end=p["end"], label=p["label"]) for p in pred_list]
 
-def parse_predictions(pred_list):
-    return [SegmentationUnit(start=p["start"], end=p["end"], label=p["label"]) for p in pred_list]
+def parse_predictions(pred_dict, head=None):
+    """Parse head-specific output dict into list of SegmentationUnit.
+    Schema:
+        { 'head-name' : {utt_id: List[SegmentationUnit], ...}, ... }
+    """
+    results = []
+    for head_name, head_output in pred_dict.items():
+        if head is not None and head_name != head:
+            continue
+        utt_keys = list(head_output.keys())
+        assert len(utt_keys) == 1, f"Expected exactly one utterance in head output dict, got {len(utt_keys)}: {utt_keys}"
+        utt_preds = head_output[utt_keys[0]]
+        results=[SegmentationUnit(start=unit["start"], end=unit["end"], label=unit.get("label", 0)) for unit in utt_preds]
+    return results
 
 
 def load_utterances_from_shards(files, forced):
