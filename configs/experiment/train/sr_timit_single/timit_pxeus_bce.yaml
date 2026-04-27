@@ -1,18 +1,18 @@
 # @package _global_
 
-# python src/main.py experiment=train/sr_pxeus_32k
+# BCE only on TIMIT with PhoneticXEUS
 
 defaults:
   - override /data: sr_joint_prseg
-  - override /model: segment_recognize
+  - override /model: segment_recognize_bare
   - override /model/net: phoneticxeus
 
   - override /trainer: ddp
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "sr_pxeus_32k"
-tags: ["pxeus", "segment_recognize", "32k"]
+task_name: "timit_pxeus_bce"
+tags: ["pxeus", "segment_recognize", "timit", "single", "bce"]
 
 seed: 42
 
@@ -21,7 +21,7 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   min_epochs: 0
   max_epochs: -1
-  max_steps: 10000
+  max_steps: 20000
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
   val_check_interval: 250
@@ -45,13 +45,14 @@ model:
     lr: 0.0001
   seg_losses:
     bce:
+      _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
+      _partial_: true
       weight: 1.0
-  pr_losses:
-    ctc:
-      weight: 1.0
+      pos_weight: 1.0
+      tolerance_ms: 20
 
 data:
-  pr_weight: 1.0
+  pr_weight: 0.0
   seg_weight: 1.0
   batch_size: 8
   seg_datamodule:

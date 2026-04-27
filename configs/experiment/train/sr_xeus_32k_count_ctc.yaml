@@ -3,7 +3,7 @@
 # python src/main.py experiment=train/sr_xeus_32k_count_ctc
 
 defaults:
-  - override /data: joint_prseg
+  - override /data: sr_joint_prseg
   - override /model: segment_recognize
   - override /model/net: xeuspr
 
@@ -48,6 +48,7 @@ model:
       weight: 1.0
     count_ctc:
       _target_: src.recipe.segment_recognize.heads.count_ctc.CountCTCHead
+      _partial_: true
       weight: 0.5
       substitution: "1 0"
       boundary_token: "1"

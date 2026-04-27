@@ -1,18 +1,18 @@
 # @package _global_
 
-# python src/main.py experiment=train/sr_pxeus_32k
+# FCE (frame-wise cross-entropy) only on TIMIT with PhoneticXEUS
 
 defaults:
   - override /data: sr_joint_prseg
-  - override /model: segment_recognize
+  - override /model: segment_recognize_bare
   - override /model/net: phoneticxeus
 
   - override /trainer: ddp
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "sr_pxeus_32k"
-tags: ["pxeus", "segment_recognize", "32k"]
+task_name: "timit_pxeus_fce"
+tags: ["pxeus", "segment_recognize", "timit", "single", "fce"]
 
 seed: 42
 
@@ -44,14 +44,14 @@ model:
   optimizer:
     lr: 0.0001
   seg_losses:
-    bce:
+    fa:
+      _target_: src.recipe.segment_recognize.heads.fa_segmentation.FASegmentationHead
+      _partial_: true
       weight: 1.0
-  pr_losses:
-    ctc:
-      weight: 1.0
+      tolerance_ms: 20
 
 data:
-  pr_weight: 1.0
+  pr_weight: 0.0
   seg_weight: 1.0
   batch_size: 8
   seg_datamodule:

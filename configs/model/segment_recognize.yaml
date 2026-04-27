@@ -1,21 +1,24 @@
 _target_: src.recipe.segment_recognize.model_module.SegmentRecognizeModel
+
 optimizer:
   _target_: torch.optim.Adam
   _partial_: true
   lr: 0.0001
+
 scheduler: null
-resolution: 1
+resolution: 1 # resolution factor at output
 audio_sr: 16000
 net: ???
+
 seg_losses:
-  _recursive_: false
   bce:
     _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
+    _partial_: true
     weight: 1.0
     pos_weight: 1.0
     tolerance_ms: 20
 pr_losses:
-  _recursive_: false
   ctc:
     _target_: src.recipe.segment_recognize.heads.ctc_recognition.CTCRecognitionHead
+    _partial_: true
     weight: 1.0

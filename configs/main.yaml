@@ -41,4 +41,6 @@ pred_file: null # path to write predictions to
 run_folder: ${now:%Y%m%d}_${now:%H%M%S}
 # useful to resume training from a checkpoint path
 ckpt_path: null
+# full Lightning resume (optimizer state, global step, scheduler)
+resume_ckpt_path: null
 seed: 42 # pytorch, numpy and python.random

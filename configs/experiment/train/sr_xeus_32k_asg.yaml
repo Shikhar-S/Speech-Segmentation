@@ -3,7 +3,7 @@
 # python src/main.py experiment=train/sr_xeus_32k_asg
 
 defaults:
-  - override /data: joint_prseg
+  - override /data: sr_joint_prseg
   - override /model: segment_recognize
   - override /model/net: xeuspr
 
@@ -51,6 +51,7 @@ model:
       weight: 1.0
     asg:
       _target_: src.recipe.segment_recognize.heads.asg_recognition.ASGRecognitionHead
+      _partial_: true
       num_labels: 428
       weight: 0.3
       use_transitions: true
