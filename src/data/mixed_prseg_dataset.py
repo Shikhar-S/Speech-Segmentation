@@ -205,6 +205,7 @@ class SegmentRecognizeDataModule(L.LightningDataModule):
         train_datasets: List of (dataset, type, weight) tuples for training.
         validation_datasets: List of (dataset, type, weight) tuples for validation.
         test_datasets: List of (dataset, type, weight) tuples for testing.
+        prediction_dataset: A single dataset for running inference during prediction step.
         batch_size: Batch size for the joint training DataLoader.
         num_workers: Number of workers for the joint DataLoader.
         pin_memory: Pin memory for the joint DataLoader.
@@ -215,6 +216,7 @@ class SegmentRecognizeDataModule(L.LightningDataModule):
         train_datasets: List[Tuple[Dataset, str, float]],
         validation_datasets: List[Tuple[Dataset, str, float]],
         test_datasets: Optional[List[Tuple[Dataset, str, float]]] = None,
+        prediction_dataset: Optional[Dataset] = None,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -223,6 +225,7 @@ class SegmentRecognizeDataModule(L.LightningDataModule):
         self.train_datasets = train_datasets
         self.validation_datasets = validation_datasets
         self.test_datasets = test_datasets
+        self.prediction_dataset = prediction_dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -260,15 +263,13 @@ class SegmentRecognizeDataModule(L.LightningDataModule):
         return self._dl(self.test_ds, shuffle=False)
 
     def predict_dataloader(self):
-        predict_ds = [
-            ds for ds in (self.validation_ds, self.test_ds) if ds is not None
-        ]
-        return self._dl(ConcatDataset(predict_ds), shuffle=False)
+        return self._dl(self.prediction_dataset, shuffle=False)
 
 
 def build_prseg_datamodule(
     train_datasets: dict[str, List[Tuple[Dataset, float]]],
     validation_datasets: dict[str, List[Dataset]],
+    prediction_dataset: Optional[Dataset] = None,
     batch_size: int = 32,
     num_workers: int = 4,
     pin_memory: bool = True,
@@ -277,6 +278,7 @@ def build_prseg_datamodule(
     Args:
         train_datasets: Dict mapping dataset type to list of (dataset, weight) tuples for training.
         validation_datasets: Dict mapping dataset type to list of datasets for validation.
+        prediction_dataset: A single dataset for running inference during prediction step.
     """
     # Conversion and checks
     train_ds_list = []
@@ -294,6 +296,7 @@ def build_prseg_datamodule(
     return SegmentRecognizeDataModule(
         train_datasets=train_ds_list,
         validation_datasets=val_ds_list,
+        prediction_dataset=prediction_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=pin_memory,
@@ -313,6 +316,7 @@ if __name__ == "__main__":
     tokenizer = type("DummyTokenizer", (), {"tokens2ids": lambda self, target: [i for i in range(len(target))]})()
     timit_train_ds=build_segmentation_dataset(hf_repo=DATASET, split="train", tokenizer=tokenizer)
     timit_val_ds=build_segmentation_dataset(hf_repo=DATASET, split="val", tokenizer=tokenizer)
+    timit_test_ds=build_segmentation_dataset(hf_repo=DATASET, split="test", tokenizer=tokenizer)
 
     dm = build_prseg_datamodule(
         train_datasets={
@@ -323,6 +327,7 @@ if __name__ == "__main__":
             "segmentation": [timit_val_ds],
             "recognition": [eval_pr_ds],
         },
+        prediction_dataset=timit_test_ds,
         batch_size=4,
         num_workers=0,
         pin_memory=False,

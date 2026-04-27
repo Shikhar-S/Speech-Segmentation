@@ -30,21 +30,23 @@ class SegmentRecognizeInference:
         self,
         speech: torch.Tensor,
         speech_length: Any,
-        phones: torch.Tensor = None,
-        phone_length: Any = None,
+        target: torch.Tensor = None,
+        target_length: Any = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Decode a single utterance across all registered heads."""
         sp = speech[: int(speech_length)].unsqueeze(0).to(self.device)
         sl = torch.as_tensor([int(speech_length)], device=self.device)
-        batch: Dict[str, Any] = {"speech": sp, "speech_length": sl}
+        assert 'utt_id' in kwargs, "Make sure the predict dataset returns utt_id!"
+        utt_id = kwargs['utt_id']
+        batch: Dict[str, Any] = {"speech": sp, "speech_length": sl, 'utt_id': utt_id}
         
-        if phones is not None and phone_length is not None:
-            batch["phones"] = (
-                phones[: int(phone_length)].unsqueeze(0).to(self.device)
+        if target is not None and target_length is not None:
+            batch["target"] = (
+                target[: int(target_length)].unsqueeze(0).to(self.device)
             )
-            batch["phone_length"] = torch.as_tensor(
-                [int(phone_length)], device=self.device,
+            batch["target_length"] = torch.as_tensor(
+                [int(target_length)], device=self.device,
             )
 
         return self.model.predict_step(batch, 0)

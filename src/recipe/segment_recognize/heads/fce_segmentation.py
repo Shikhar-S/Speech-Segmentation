@@ -77,13 +77,14 @@ class FCESegmentationHead(TaskHead):
         self,
         logits: torch.Tensor,
         feature_lens: torch.Tensor,
+        utt_id: List[str],
     ) -> dict[str, List[SegmentationUnit]]:
         """Convert frame-level logits into per-utterance segmentation units."""
         B = logits.shape[0]
         preds_dict = {}
         for b in range(B):
             frame_labels = logits[b].argmax(dim=-1)[:int(feature_lens[b])].tolist()
-            preds_dict[str(b)] = frame_label_to_units(frame_labels, feature_lens[b], self.effective_pbf, self.audio_sr)
+            preds_dict[utt_id[b]] = frame_label_to_units(frame_labels, feature_lens[b], self.effective_pbf, self.audio_sr)
         return preds_dict
 
     @torch.no_grad()
@@ -104,7 +105,7 @@ class FCESegmentationHead(TaskHead):
             self.effective_pbf,
             self.audio_sr,
         )
-        pred_dict = self._process_predictions(output["logits"], feature_lens)
+        pred_dict = self._process_predictions(output["logits"], feature_lens, batch['utt_id'])
         print(pred_dict)
         return evaluate_boundaries(self.evaluator, pred_dict, gt_dict)
 
@@ -133,5 +134,5 @@ class FCESegmentationHead(TaskHead):
         **ctx: Any,
     ) -> None:
         """Run greedy decode strategy by using argmax per-frame."""
-        results = self._process_predictions(net.ctc.ctc_lo(features), feature_lens)
+        results = self._process_predictions(net.ctc.ctc_lo(features), feature_lens, batch['utt_id'])
         return results

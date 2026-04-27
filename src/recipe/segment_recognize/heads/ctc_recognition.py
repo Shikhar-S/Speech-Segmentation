@@ -130,7 +130,7 @@ class CTCRecognitionHead(TaskHead):
         decoded = self._decode_with_alignment(output["logits"], feature_lens, blank_id=0)
         preds_dict = {}
         for b, res in enumerate(decoded):
-            preds_dict[str(b)] = res["boundaries"]
+            preds_dict[batch['utt_id'][b]] = res["boundaries"]
         gt_dict = target_boundaries_to_gt_units(
             batch["target_start_idx"], 
             batch["target_end_idx"], 
@@ -176,9 +176,9 @@ class CTCRecognitionHead(TaskHead):
         token_list = net.token_list
         blank_id = net.get_blank_id()
         decoded = self._decode_with_alignment(
-            net.ctc.ctc_lo(features), feature_lens, blank_id, token_list,
+            net.ctc.ctc_lo(features), feature_lens, blank_id, token_list
         )
-        out = []
-        for res in decoded:
-            out.append(res['boundaries'])
+        out = {}
+        for b,res in enumerate(decoded):
+            out[batch['utt_id'][b]] = res['boundaries']
         return out

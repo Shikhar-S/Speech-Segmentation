@@ -9,7 +9,7 @@ pin_memory: true
 # dataset types can be "segmentation" or "recognition"
 train_datasets:
   segmentation:
-    - - _target_: src.data.segmentation.segmentation_dataset.SegmentationDataset
+    - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
         hf_repo: changelinglab/timit-segment
         split: train
         tokenizer:
@@ -23,7 +23,7 @@ train_datasets:
 # dataset types can be "segmentation" or "recognition"
 validation_datasets:
   segmentation:
-    - _target_: src.data.segmentation.segmentation_dataset.SegmentationDataset
+    - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
       hf_repo: changelinglab/timit-segment
       split: val
       tokenizer:
@@ -35,7 +35,7 @@ validation_datasets:
 # a single optional dataset for running inference during prediction step.
 # This can be switched in distributed inference configs.
 prediction_dataset:
-  _target_: src.data.segmentation.segmentation_dataset.SegmentationDataset
+  _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
   hf_repo: changelinglab/timit-segment
   split: test
   tokenizer:

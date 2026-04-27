@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch.utils.data import Dataset
 
-from src.data.mixed_prseg import (
+from src.data.mixed_prseg_dataset import (
     MixedPRSegmentDataset,
     SegmentRecognizeDataModule,
     _collate_pr_items,

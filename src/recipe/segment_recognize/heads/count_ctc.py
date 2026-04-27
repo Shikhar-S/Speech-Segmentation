@@ -154,7 +154,7 @@ class CountCTCHead(TaskHead):
         if "target_start_idx" not in batch or "target_end_idx" not in batch:
             return metrics
         
-        preds_dict = self._process_predictions(logits, feature_lens)
+        preds_dict = self._process_predictions(logits, feature_lens, batch['utt_id'])
         gt_dict = target_boundaries_to_gt_units(
             batch["target_start_idx"], 
             batch['target_end_idx'],
@@ -170,6 +170,7 @@ class CountCTCHead(TaskHead):
         self,
         logits: torch.Tensor,
         feature_lens: torch.Tensor,
+        utt_id: List[str],
     ) -> dict[str, List[SegmentationUnit]]:
         """Convert argmax logits to predicted segmentation based on 
         approach (1), first and last spikes in a contiguous run are the 
@@ -194,7 +195,7 @@ class CountCTCHead(TaskHead):
                         start=start * self.effective_pbf / self.audio_sr,
                         end=end * self.effective_pbf / self.audio_sr,
                     ))
-            out[str(b)] = segmentation_units
+            out[utt_id[b]] = segmentation_units
         return out
 
     @torch.no_grad()
@@ -206,5 +207,5 @@ class CountCTCHead(TaskHead):
         **ctx: Any,
     ) -> List[Dict[str, Any]]:
         logits = self.proj(features).detach()
-        results = self._process_predictions(logits, feature_lens)
+        results = self._process_predictions(logits, feature_lens, batch['utt_id'])
         return results

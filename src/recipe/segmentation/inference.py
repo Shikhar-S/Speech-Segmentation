@@ -113,7 +113,7 @@ class SegmentationInference:
         splen_t = torch.as_tensor([int(speech_length)], device=sp.device)
         txtlen_t = torch.as_tensor([int(target_length)], device=sp.device)
         log.info(
-            f"Prepared inputs: uttid:{utt_id}, speech length: {splen_t.item()}, target length: {txtlen_t.item()}"
+            f"Prepared inputs: utt_id:{utt_id}, speech length: {splen_t.item()}, target length: {txtlen_t.item()}"
         )
         return sp, txt, splen_t, txtlen_t
 

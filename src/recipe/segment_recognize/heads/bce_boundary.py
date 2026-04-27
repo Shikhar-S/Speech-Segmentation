@@ -90,6 +90,7 @@ class BCEBoundaryHead(TaskHead):
         self,
         boundary_logits: torch.Tensor,
         feature_lens: torch.Tensor,
+        utt_id: List[str],
         boundary_threshold: float = 0.5,
     ) -> dict[str, List[SegmentationUnit]]:
         out: dict[str, List[SegmentationUnit]] = {}
@@ -98,7 +99,7 @@ class BCEBoundaryHead(TaskHead):
         for b in range(bs):
             vlen = int(feature_lens[b])
             flags = (boundary_prob[b, :vlen] > boundary_threshold).tolist()
-            out[str(b)] = boundaries_to_units(flags, vlen, self.effective_pbf, self.audio_sr)
+            out[utt_id[b]] = boundaries_to_units(flags, vlen, self.effective_pbf, self.audio_sr)
         return out
 
     @torch.no_grad()
@@ -109,7 +110,7 @@ class BCEBoundaryHead(TaskHead):
         batch: Mapping[str, Any],
     ) -> dict[str, float]:
         """Boundary P/R/F1/R-value via the shared evaluator."""
-        preds_dict = self._process_predictions(output["boundary_logits"], feature_lens)
+        preds_dict = self._process_predictions(output["boundary_logits"], feature_lens, batch['utt_id'])
         gt_dict = target_boundaries_to_gt_units(
             batch["target_start_idx"],
             batch["target_end_idx"],
@@ -131,6 +132,5 @@ class BCEBoundaryHead(TaskHead):
     ) -> List[Dict[str, Any]]:
         """Decode boundary logits into per-utterance segmentation dicts."""
         logits = self.boundary_head(features).detach()
-        preds_dict = self._process_predictions(logits, feature_lens, boundary_threshold)
-        preds_list = [boundaries for boundaries in preds_dict.values()]
-        return preds_list
+        preds_dict = self._process_predictions(logits, feature_lens, batch['utt_id'], boundary_threshold)
+        return preds_dict
