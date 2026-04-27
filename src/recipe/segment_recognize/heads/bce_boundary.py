@@ -94,7 +94,7 @@ class BCEBoundaryHead(TaskHead):
         boundary_threshold: float = 0.5,
     ) -> dict[str, List[SegmentationUnit]]:
         out: dict[str, List[SegmentationUnit]] = {}
-        boundary_prob = torch.sigmoid(boundary_logits)
+        boundary_prob = torch.sigmoid(boundary_logits) # B, T
         bs = boundary_logits.shape[0]
         for b in range(bs):
             vlen = int(feature_lens[b])
@@ -131,6 +131,6 @@ class BCEBoundaryHead(TaskHead):
         **ctx: Any,
     ) -> List[Dict[str, Any]]:
         """Decode boundary logits into per-utterance segmentation dicts."""
-        logits = self.boundary_head(features).detach()
+        logits = self.boundary_head(features).squeeze(-1).detach()
         preds_dict = self._process_predictions(logits, feature_lens, batch['utt_id'], boundary_threshold)
         return preds_dict

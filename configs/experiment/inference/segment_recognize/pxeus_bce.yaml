@@ -1,0 +1,43 @@
+# @package _global_
+
+# Inference config for pxeus style checkpoint trained with bce head using segment_recognize recipe
+# python src/main.py experiment=inference/segment_recognize/pxeus_bce inference.inference_runner.ckpt_path=<path>
+defaults:
+  - override /data: timit_prseg
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: powsm
+
+task_name: "inf_segmentrecognize_pxeus_bce_32k"
+tags: ["segmentation", "bce", "inference", "32k"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  prediction_dataset:
+    target_sr: 32000
+
+inference:
+  num_workers: 4
+  out_file: ${paths.output_dir}/pxeus_bce_32k.json
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.recipe.segment_recognize.inference.build_segment_recognize_inference
+    ckpt_path: ???
+    device: cuda
+    net:
+      _target_: src.model.xeusphoneme.builders.build_xeus_pr_from_hf
+      work_dir: ${paths.cache_dir}/xeus
+      hf_repo: espnet/xeus
+      vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+      load_ckpt: false
+      interctc_weight: 0.3
+      interctc_layer_idx: [4, 8, 12]
+      interctc_use_conditioning: true
+      ctc_weight: 1.0
