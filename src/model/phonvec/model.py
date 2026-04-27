@@ -16,6 +16,15 @@ FRAME_SHIFT_SEC = FRAME_SHIFT / SR
 MEL_FRAME_SHIFT_MS = 10
 assert FRAME_SHIFT_SEC == 0.02, "Frame shift should be 20ms for WavLM features."
 
+# ################################
+# # experimental 32khz config
+# SR = 32000
+# FRAME_SHIFT = 320  # WavLM hop in samples
+# FRAME_SHIFT_SEC = FRAME_SHIFT / SR
+# MEL_FRAME_SHIFT_MS = 10
+# assert FRAME_SHIFT_SEC == 0.01, "Frame shift should be 20ms for WavLM features."
+################################
+
 
 class SilenceHandler:
     def __init__(self, detector_path="logistic_regression_silence_detector.joblib"):
@@ -190,7 +199,7 @@ class PhonologicalVectors:
 
 
 # Signals
-def _melspec_kaldi(y, sr=16000, n_mels=40):
+def _melspec_kaldi(y, sr=SR, n_mels=40):
     waveform = torch.from_numpy(np.asarray(y, dtype=np.float32)).unsqueeze(0)
     feats = kaldi.fbank(
         waveform,
