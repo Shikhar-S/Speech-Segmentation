@@ -7,23 +7,22 @@ compares predicted boundaries against ground-truth phone timestamps using
 
 Usage:
     python -m scripts.phonvec_eval \
-        --train-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/timit-wavlm-large-24-center-featslice.pkl \
+        --combined-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/timit-wavlm-large-24-center-featslice.pkl \
         --silence-detector /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/logistic_regression_silence_detector.joblib \
         --hf-repo changelinglab/timit-segment \
         --split test \
-        --out /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/phonological_vectors/timit_segments.jsonl \
-        --limit 5
-    
-    
+        --out /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/phonological_vectors/timit_segments_fixed.jsonl
+
     python -m scripts.phonvec_eval \
-        --train-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/voxangeles-wavlm-large-24-center-featslice.pkl \
+        --combined-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/voxangeles-wavlm-large-24-center-featslice.pkl \
+        --train-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/timit-wavlm-large-24-center-featslice.pkl \
         --silence-detector /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/logistic_regression_silence_detector.joblib \
         --hf-repo changelinglab/voxangeles-segment \
         --out /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/phonological_vectors/voxangeles_segments.jsonl \
         --split test
     
     python -m scripts.phonvec_eval \
-        --train-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/voxangeles-wavlm-large-24-center-featslice.pkl \
+        --combined-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/voxangeles-wavlm-large-24-center-featslice.pkl \
         --silence-detector /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/logistic_regression_silence_detector.joblib \
         --hf-repo changelinglab/buckeye-segment \
         --out /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/phonological_vectors/buckeye_segments.jsonl \
@@ -43,6 +42,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 import librosa
+import numpy as np
 
 from src.data.segmentation.segmentation_dataset import build_segmentation_dataset
 from src.metrics.segmentation_evaluator import (
@@ -64,17 +64,33 @@ class _DummyTokenizer:
     def tokens2ids(self, phones):
         return list(range(len(phones)))
 
+# def _extract_wavlm_feats(wavlm, speech, device):
+#     """Run WavLM forward on one utterance. Returns (T_f, D) numpy + valid_len."""
+#     with torch.no_grad():
+#         feats, feat_lens = wavlm.encode(
+#             speech.unsqueeze(0).to(device),
+#             torch.tensor([speech.shape[0]], device=device),
+#         )
+#     vlen = int(feat_lens[0])
+#     return feats[0, :vlen].cpu().numpy(), vlen
 
 def _extract_wavlm_feats(wavlm, speech, device):
-    """Run WavLM forward on one utterance. Returns (T_f, D) numpy + valid_len."""
+    """Run WavLM forward on one utterance with HuggingFace-style padding.
+
+    Returns (T_f, D) numpy + valid_len.
+    """
+    pad = (400 - FRAME_SHIFT) // 2
+    if isinstance(speech, np.ndarray):
+        speech = torch.from_numpy(speech)
+    speech = speech.float()
+    speech_padded = torch.nn.functional.pad(speech, (pad, pad))
     with torch.no_grad():
         feats, feat_lens = wavlm.encode(
-            speech.unsqueeze(0).to(device),
-            torch.tensor([speech.shape[0]], device=device),
+            speech_padded.unsqueeze(0).to(device),
+            torch.tensor([speech_padded.shape[0]], device=device),
         )
     vlen = int(feat_lens[0])
     return feats[0, :vlen].cpu().numpy(), vlen
-
 
 def _pred_frames_to_units(pred_frames, vlen):
     """Convert phonvec's frame-index array into a SegmentationUnit list."""
@@ -86,8 +102,9 @@ def _pred_frames_to_units(pred_frames, vlen):
     return boundaries_to_units(flags, vlen, FRAME_SHIFT, SR)
 
 
-def _gt_units(phone_timestamps):
+def _gt_units(phone_timestamps, is_timit=False):
     """Dataset item's `phone_timestamps` (seconds) → SegmentationUnit list."""
+    # TODO(shikhar): filter by units and merge together closure etc for timit
     return [
         SegmentationUnit(start=float(s), end=float(e))
         for s, e in phone_timestamps
@@ -114,7 +131,8 @@ def _maybe_dump_jsonl(out_path, preds_dict, gt_dict):
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--train-df", required=True, help="Path to pickled TIMIT train-phone DataFrame.")
+    p.add_argument("--combined-df", required=True, help="Path to pickled dataframe containing both train and test splits.")
+    p.add_argument("--train-df", help="Path to pickled dataframe containing train split [optional].")
     p.add_argument("--silence-detector", required=True, help="Path to silence-detector .joblib.")
     p.add_argument("--hf-repo", required=True, help="HuggingFace repo id for the eval dataset.")
     p.add_argument("--split", default="test", help="Dataset split to evaluate on.")
@@ -131,12 +149,18 @@ def parse_args():
 def main():
     args = parse_args()
 
-    for path in (args.train_df, args.silence_detector):
+    for path in (args.combined_df, args.silence_detector):
         if not os.path.isfile(path):
             sys.exit(f"Missing asset: {path}")
+    
+    combined_df = pd.read_pickle(args.combined_df)
+    if args.train_df:
+        train_df = pd.read_pickle(args.train_df)
+        train_df = train_df[train_df.split == "train"]
+    else:
+        train_df = combined_df[combined_df.split == "train"]
+    test_df = combined_df[combined_df.split == "test"]
 
-    print(f"[phonvec] loading training DataFrame from {args.train_df}")
-    train_df = pd.read_pickle(args.train_df)
     print(f"[phonvec] initializing Segmenter (this fits phonological vectors)")
     segmenter = Segmenter(
         train_df, silence_detector_path=args.silence_detector,

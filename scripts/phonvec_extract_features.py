@@ -3,7 +3,7 @@ Usage:
     python -m scripts.phonvec_extract_features \
         --model microsoft/wavlm-large \
         --dataset_csv "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/timit.csv" \
-        --split test \
+        --split both \
         --output_path "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/timit-wavlm-large-24-center-featslice.pkl" \
         --layer_index 24 \
         --pool center \
@@ -12,7 +12,7 @@ Usage:
     python -m scripts.phonvec_extract_features \
         --model microsoft/wavlm-large \
         --dataset_csv "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/voxangeles.csv" \
-        --split test \
+        --split both \
         --output_path "/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/voxangeles-wavlm-large-24-center-featslice.pkl" \
         --layer_index 24 \
         --pool center \

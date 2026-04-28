@@ -25,7 +25,6 @@ assert FRAME_SHIFT_SEC == 0.02, "Frame shift should be 20ms for WavLM features."
 # assert FRAME_SHIFT_SEC == 0.01, "Frame shift should be 20ms for WavLM features."
 ################################
 
-
 class SilenceHandler:
     def __init__(self, detector_path="logistic_regression_silence_detector.joblib"):
         self.model = joblib.load(detector_path)
@@ -308,20 +307,20 @@ class Segmenter:
         "mel_svf",
     )
     COMBINED_SIGNAL_KWARGS = {
-        "frame_delta": {"offset": 1},
-        "fwd_delta": {"offset": 1},
-        "bwd_delta": {"offset": 2},
-        "fwd_contrast": {"lookahead": 2},
+        "frame_delta": {"offset": 2},
+        "fwd_delta": {"offset": 2},
+        "bwd_delta": {"offset": 1},
+        "fwd_contrast": {"lookahead": 1},
         "bwd_contrast": {"lookbehind": 2},
-        "mel_svf": {"left": 1, "right": 1},
+        "mel_svf": {"left": 1, "right": 2},
     }
     COMBINED_SIGNAL_SHIFTS = {
-        "frame_delta": 0,
-        "fwd_delta": 0,
+        "frame_delta": 1,
+        "fwd_delta": 1,
         "bwd_delta": 1,
         "fwd_contrast": 1,
-        "bwd_contrast": -2,
-        "mel_svf": 0,
+        "bwd_contrast": -1,
+        "mel_svf": 1,
     }
     COMBINED_DROP_K = 2
     COMBINED_PROMINENCE = 0.001
@@ -424,7 +423,7 @@ class Segmenter:
         else:
             # Careful! This is tuned on a subset of VoxAngeles
             signal = _shift_signal(
-                _fwd_contrast(proj_ipa, proj_r1, self.W_r1_to_ipa, lookahead=1), shift_frames=1
+                _fwd_contrast(proj_ipa, proj_r1, self.W_r1_to_ipa, lookahead=2), shift_frames=2
             )
             prominence = 0.1
 

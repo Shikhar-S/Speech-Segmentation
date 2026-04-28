@@ -1,0 +1,51 @@
+#!/bin/bash
+#SBATCH -A bbjs-dtai-gh
+#SBATCH -p ghx4-interactive
+#SBATCH -J phonvec_eval
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=64G
+#SBATCH -t 0:30:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+
+# Usage:
+#   sbatch scripts/phonvec_eval.batch \
+#       /path/to/timit-wavlm-large-24-center-featslice.pkl \
+#       /path/to/logistic_regression_silence_detector.joblib
+#
+# Runs phonvec evaluation on TIMIT-test and VoxAngeles back-to-back.
+
+set -euo pipefail
+
+TRAIN_DF="${1:?train-df pickle path required}"
+SIL_DET="${2:?silence-detector joblib path required}"
+TOLERANCE_MS="${3:-20}"
+
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p exp/slurm_logs exp/phonvec
+
+source ~/.bashrc
+source setup_uv.sh .venv_dai requirements-dai.txt
+
+export HF_HOME="${HF_HOME:-/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf}"
+export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
+
+echo "=== TIMIT test ==="
+python -u -m scripts.phonvec_eval \
+    --train-df "$TRAIN_DF" \
+    --silence-detector "$SIL_DET" \
+    --hf-repo changelinglab/timit-segment \
+    --split test \
+    --tolerance-ms "$TOLERANCE_MS" \
+    --out exp/phonvec/timit_test.jsonl
+
+echo "=== VoxAngeles test ==="
+python -u -m scripts.phonvec_eval \
+    --train-df "$TRAIN_DF" \
+    --silence-detector "$SIL_DET" \
+    --hf-repo changelinglab/voxangeles-segment \
+    --split test \
+    --tolerance-ms "$TOLERANCE_MS" \
+    --out exp/phonvec/voxangeles_test.jsonl
