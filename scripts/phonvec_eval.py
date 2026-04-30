@@ -11,7 +11,7 @@ Usage:
         --silence-detector /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/logistic_regression_silence_detector.joblib \
         --hf-repo changelinglab/timit-segment \
         --split test \
-        --out /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/phonological_vectors/timit_segments_fixed.jsonl
+        --out /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/runs/phonological_vectors/timit_segments_wmerge.jsonl
 
     python -m scripts.phonvec_eval \
         --combined-df  /work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/data/phonological_vector/voxangeles-wavlm-large-24-center-featslice.pkl \
@@ -51,7 +51,6 @@ from src.metrics.segmentation_evaluator import (
 )
 from src.model.phonvec.model import FRAME_SHIFT, SR, Segmenter
 from src.model.wavlm.builders import build_wavlm_model
-from src.recipe.common.boundary_utils import boundaries_to_units
 
 
 class _DummyTokenizer:
@@ -93,22 +92,94 @@ def _extract_wavlm_feats(wavlm, speech, device):
     return feats[0, :vlen].cpu().numpy(), vlen
 
 def _pred_frames_to_units(pred_frames, vlen):
-    """Convert phonvec's frame-index array into a SegmentationUnit list."""
-    flags = [False] * vlen
-    for p in pred_frames:
-        pi = int(p)
-        if 0 <= pi < vlen:
-            flags[pi] = True
-    return boundaries_to_units(flags, vlen, FRAME_SHIFT, SR)
+    """Convert phonvec's frame-index array into a SegmentationUnit list.
 
-
-def _gt_units(phone_timestamps, is_timit=False):
-    """Dataset item's `phone_timestamps` (seconds) → SegmentationUnit list."""
-    # TODO(shikhar): filter by units and merge together closure etc for timit
+    Builds units directly from the predicted frames so
+    ``SegmentationEvaluator._extract_boundary_times`` recovers exactly the
+    predicted set. Going through ``boundaries_to_units`` would synthesize a
+    spurious ``t=0`` boundary (its ``start=0`` initialization), inflating
+    ``pred_counter`` by 1 per utterance.
+    """
+    times = sorted({int(p) for p in pred_frames if 0 <= int(p) < vlen})
+    if len(times) < 2:
+        return []
     return [
-        SegmentationUnit(start=float(s), end=float(e))
-        for s, e in phone_timestamps
+        SegmentationUnit(
+            start=times[i] * FRAME_SHIFT / SR,
+            end=times[i + 1] * FRAME_SHIFT / SR,
+        )
+        for i in range(len(times) - 1)
     ]
+
+
+# TIMIT closure/silence simplification, applied on the IPA labels exposed
+# by the HF dataset (see src/core/ipa_utils.py for the ARPABET→IPA map).
+_IPA_CLOSURE_TO_STOP = {
+    "b̚": "b", "d̚": "d", "ɡ̚": "ɡ",
+    "p̚": "p", "t̚": "t", "k̚": "k",
+}
+_IPA_AFFRICATE_PAIRS = {("d̚", "d͡ʒ"), ("t̚", "t͡ʃ")}
+_IPA_SILENCE_LABELS = {"h#", "pau", "ʔ̞"}
+
+
+def _simplify_ipa_segments(segments):
+    """Mirror of `phonvec_original_eval._simplify_phn_segments` on IPA labels."""
+    merged = []
+    i = 0
+    while i < len(segments):
+        start, end, label = segments[i]
+        if label in _IPA_CLOSURE_TO_STOP and i + 1 < len(segments):
+            next_start, next_end, next_label = segments[i + 1]
+            expected = _IPA_CLOSURE_TO_STOP[label]
+            if next_label == expected or (label, next_label) in _IPA_AFFRICATE_PAIRS:
+                merged.append((start, next_end, next_label))
+                i += 2
+                continue
+        merged.append((start, end, label))
+        i += 1
+
+    collapsed = []
+    for start, end, label in merged:
+        if label in _IPA_SILENCE_LABELS:
+            if collapsed and collapsed[-1][2] in _IPA_SILENCE_LABELS:
+                prev_start, _, prev_label = collapsed[-1]
+                collapsed[-1] = (prev_start, end, prev_label)
+                continue
+        collapsed.append((start, end, label))
+    return collapsed
+
+
+def _snap_to_frame(t):
+    """Snap a time (seconds) to the nearest WavLM frame multiple.
+
+    Required for parity with phonvec_original_eval, which works in integer
+    frames (``tolerance=1`` ≈ ±20 ms only when GT is also frame-aligned;
+    without snap, GT off-frame by up to 10 ms effectively widens the match
+    window to ±30 ms in the original — i.e., the new eval is strictly
+    tighter and reports lower P/R/F1/Rval).
+    """
+    return round(float(t) * SR / FRAME_SHIFT) * FRAME_SHIFT / SR
+
+
+def _gt_units(phone_timestamps, phones, is_timit=False):
+    """Dataset item's `phone_timestamps` (seconds) → SegmentationUnit list.
+
+    Snap is applied unconditionally so GT lands on the same frame grid as
+    the (always frame-aligned) predictions. Closure-merge + silence-collapse
+    + outer-silence stripping are TIMIT-specific and only run on TIMIT.
+    """
+    if not is_timit:
+        return [
+            SegmentationUnit(start=_snap_to_frame(s), end=_snap_to_frame(e))
+            for s, e in phone_timestamps
+        ]
+    segs = [
+        (_snap_to_frame(s), _snap_to_frame(e), p)
+        for (s, e), p in zip(phone_timestamps, phones)
+    ]
+    segs = _simplify_ipa_segments(segs)
+    inner = segs[1:-1]
+    return [SegmentationUnit(start=s, end=e) for s, e, _ in inner]
 
 
 def _maybe_dump_jsonl(out_path, preds_dict, gt_dict):
@@ -194,6 +265,7 @@ def main():
     n_items = len(dataset) if args.limit is None else min(args.limit, len(dataset))
     print(f"[phonvec] evaluating {n_items} utterances")
 
+    is_timit = "timit" in args.hf_repo.lower()
     preds_dict, gt_dict = {}, {}
     for i in tqdm(range(n_items), desc="phonvec"):
         item = dataset[i]
@@ -209,7 +281,9 @@ def main():
             wavlm_feats, speech.numpy(),
         )
         preds_dict[utt_id] = _pred_frames_to_units(pred_frames, vlen)
-        gt_dict[utt_id] = _gt_units(item["phone_timestamps"])
+        gt_dict[utt_id] = _gt_units(
+            item["phone_timestamps"], item["phones"], is_timit=is_timit,
+        )
 
     evaluator = SegmentationEvaluator(tolerance_ms=args.tolerance_ms)
     results = evaluator.evaluate_batch(preds_dict, gt_dict)
