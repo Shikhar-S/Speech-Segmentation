@@ -35,7 +35,7 @@ from tqdm import tqdm
 
 from src.data.segmentation.segmentation_dataset import SegmentationDataset
 from src.metrics.segmentation_evaluator import SegmentationEvaluator, SegmentationUnit
-from src.recipe.segmentation.local.eval_segmentation import (
+from scripts.eval_segmentation import (
     parse_groundtruth,
     parse_predictions,
 )
