@@ -1,0 +1,230 @@
+"""Per-dataset preprocessing for SegmentationDataset / SegmentationDataModule.
+
+Two registries:
+
+* ``HF_REPO_TRANSFORMS`` — per-row GT cleanup applied inside
+  ``SegmentationDataset.__getitem__`` to ``(phone_timestamps, phones)``.
+  Must be idempotent.
+
+* ``HF_REPO_SPLIT_TRANSFORMS`` — DatasetDict-level split reshaping applied
+  inside ``SegmentationDataModule.setup`` (and ``build_segmentation_dataset``).
+  Each takes a ``DatasetDict`` and returns a new one with possibly different
+  splits. Used to carve out a deterministic ``tune`` split disjoint from
+  fit / eval.
+
+# TODO(shikhar): Check these thoroughly again! Especially the splitting, speaker independent?
+"""
+
+from typing import Any, Callable, Dict, List, Tuple
+
+import numpy as np
+
+from src.core.ipa_utils import ARPABET_TO_IPA, IPA_SILENCE_LABELS
+
+# TIMIT closure -> stop merge tables.
+# Keys are IPA (post ARPABET→IPA conversion).
+_IPA_CLOSURE_TO_STOP = {
+    "b̚": "b",
+    "d̚": "d",
+    "ɡ̚": "ɡ",
+    "p̚": "p",
+    "t̚": "t",
+    "k̚": "k",
+}
+_IPA_AFFRICATE_PAIRS = {
+    ("d̚", "d͡ʒ"),
+    ("t̚", "t͡ʃ"),
+}
+
+
+def process_timit_symbols(
+    phone_timestamps: List[Tuple[float, float]],
+    phones: List[str],
+) -> Tuple[List[Tuple[float, float]], List[str]]:
+    """TIMIT GT pipeline: ARPABET→IPA + closure->stop merge + silence collapse.
+
+    All three steps are idempotent. Labels already in IPA pass through the
+    ARPABET map unchanged via the lowercase fallback.
+
+    Args:
+        phone_timestamps: list of ``(start, end)`` tuples (seconds).
+        phones: parallel list of phone labels (ARPABET or IPA).
+
+    Returns:
+        ``(merged_timestamps, merged_phones)`` with phones in IPA, closure-
+        stop pairs merged into the stop, and adjacent silence runs
+        collapsed into a single span.
+    """
+    ipa_phones = [ARPABET_TO_IPA.get(p.lower(), p.lower()) for p in phones]
+    segs = [(s, e, p) for (s, e), p in zip(phone_timestamps, ipa_phones)]
+
+    merged = []
+    i = 0
+    while i < len(segs):
+        s, e, p = segs[i]
+        if p in _IPA_CLOSURE_TO_STOP and i + 1 < len(segs):
+            ns, ne, np_ = segs[i + 1]
+            if (
+                np_ == _IPA_CLOSURE_TO_STOP[p]
+                or (p, np_) in _IPA_AFFRICATE_PAIRS
+            ):
+                merged.append((s, ne, np_))
+                i += 2
+                continue
+        merged.append((s, e, p))
+        i += 1
+
+    collapsed = []
+    for s, e, p in merged:
+        if (
+            p in IPA_SILENCE_LABELS
+            and collapsed
+            and collapsed[-1][2] in IPA_SILENCE_LABELS
+        ):
+            ps, _, pp = collapsed[-1]
+            collapsed[-1] = (ps, e, pp)
+            continue
+        collapsed.append((s, e, p))
+
+    return (
+        [(s, e) for s, e, _ in collapsed],
+        [p for _, _, p in collapsed],
+    )
+
+
+def arpabet_phones_to_ipa(
+    phone_timestamps: List[Tuple[float, float]],
+    phones: List[str],
+) -> Tuple[List[Tuple[float, float]], List[str]]:
+    """Map ARPABET phone labels to IPA, leaving timestamps untouched.
+
+    Idempotent: labels already in IPA pass through via the lowercase
+    fallback in ``ARPABET_TO_IPA.get``.
+    """
+    return (
+        list(phone_timestamps),
+        [ARPABET_TO_IPA.get(p.lower(), p.lower()) for p in phones],
+    )
+
+
+def process_gtimit_arpabet_symbols(
+    phone_timestamps: List[Tuple[float, float]],
+    phones: List[str],
+) -> Tuple[List[Tuple[float, float]], List[str]]:
+    """GTIMIT English ARPABET → IPA + closure->stop merge + silence collapse.
+
+    Handles both lowercase-no-stress (l2simple) and uppercase-with-stress
+    (l2tbnk, l1simple, l1tbnk) variants in a single pass: lowercase, strip
+    trailing stress digits, ARPABET→IPA, then merge closure+stop pairs and
+    collapse adjacent silences. Idempotent on already-clean IPA input.
+    """
+    ipa_phones = [
+        ARPABET_TO_IPA.get(stripped, stripped)
+        for stripped in (p.lower().rstrip("0123456789") for p in phones)
+    ]
+    segs = [(s, e, p) for (s, e), p in zip(phone_timestamps, ipa_phones)]
+
+    merged = []
+    i = 0
+    while i < len(segs):
+        s, e, p = segs[i]
+        if p in _IPA_CLOSURE_TO_STOP and i + 1 < len(segs):
+            ns, ne, np_ = segs[i + 1]
+            if (
+                np_ == _IPA_CLOSURE_TO_STOP[p]
+                or (p, np_) in _IPA_AFFRICATE_PAIRS
+            ):
+                merged.append((s, ne, np_))
+                i += 2
+                continue
+        merged.append((s, e, p))
+        i += 1
+
+    collapsed = []
+    for s, e, p in merged:
+        if (
+            p in IPA_SILENCE_LABELS
+            and collapsed
+            and collapsed[-1][2] in IPA_SILENCE_LABELS
+        ):
+            ps, _, pp = collapsed[-1]
+            collapsed[-1] = (ps, e, pp)
+            continue
+        collapsed.append((s, e, p))
+
+    return (
+        [(s, e) for s, e, _ in collapsed],
+        [p for _, _, p in collapsed],
+    )
+
+
+def process_gtimit_thai_symbols(
+    phone_timestamps: List[Tuple[float, float]],
+    phones: List[str],
+) -> Tuple[List[Tuple[float, float]], List[str]]:
+    """GTIMIT Thai pass-through with case normalization.
+
+    Thai phones use a custom romanization that is not ARPABET; no closure
+    merging applies. Tones live in a separate field excluded from ``phones``.
+    Idempotent.
+    """
+    return list(phone_timestamps), [p.lower() for p in phones]
+
+
+# Registry: HuggingFace repo id -> default per-row GT transform.
+HF_REPO_TRANSFORMS: Dict[
+    str,
+    Callable[
+        [List[Tuple[float, float]], List[str]],
+        Tuple[List[Tuple[float, float]], List[str]],
+    ],
+] = {
+    "changelinglab/timit-segment": process_timit_symbols,
+    "changelinglab/buckeye-segmentation": arpabet_phones_to_ipa,
+    "changelinglab/gtimit-l2simple-segment": process_gtimit_arpabet_symbols,
+    "changelinglab/gtimit-l2tbnk-segment": process_gtimit_arpabet_symbols,
+    "changelinglab/gtimit-l1simple-segment": process_gtimit_arpabet_symbols,
+    "changelinglab/gtimit-l1tbnk-segment": process_gtimit_arpabet_symbols,
+    "changelinglab/gtimit-tha-segment": process_gtimit_thai_symbols,
+}
+
+
+def split_timit_train_for_tuning(ddict: Any) -> Any:
+    """Carve a 1000-utt seed-42 ``tune`` split out of TIMIT ``train``.
+
+    The remaining train utts stay in ``train`` (used for fitting
+    PhonologicalVectors). The tune subset is disjoint.
+    """
+    train = ddict["train"]
+    n = len(train)
+    rng = np.random.default_rng(42)
+    tune_idx = rng.choice(n, size=min(1000, n), replace=False)
+    tune_set = set(tune_idx.tolist())
+    train_idx = [i for i in range(n) if i not in tune_set]
+
+    new_dd = {k: v for k, v in ddict.items()}
+    new_dd["tune"] = train.select(sorted(tune_idx.tolist()))
+    new_dd["train"] = train.select(train_idx)
+    return new_dd
+
+
+def split_voxangeles_test_for_tuning(ddict: Any) -> Any:
+    """Carve VoxAngeles ``test`` into disjoint ``test`` (eval) + ``tune``."""
+    test = ddict["test"]
+    n = len(test)
+    rng = np.random.default_rng(50)
+    selected = rng.choice(n, size=min(2000, n), replace=False)
+    eval_idx = selected[:1000].tolist()
+    tune_idx = selected[1000:2000].tolist()
+
+    new_dd = {k: v for k, v in ddict.items()}
+    new_dd["test"] = test.select(eval_idx)
+    new_dd["tune"] = test.select(tune_idx)
+    return new_dd
+
+
+# Registry: HuggingFace repo id -> default DatasetDict-level split transform.
+HF_REPO_SPLIT_TRANSFORMS: Dict[str, Callable[[Any], Any]] = {
+    "changelinglab/timit-segment": split_timit_train_for_tuning,
+    "changelinglab/voxangeles-segment": split_voxangeles_test_for_tuning,
+}

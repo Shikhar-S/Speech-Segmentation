@@ -75,7 +75,7 @@ panphon_segmenter = panphon.distance.Distance().fm.ipa_segs
 
 # IPA labels that mark silence/non-speech segments
 # after ARPABET→IPA conversion.
-IPA_SILENCE_LABELS = {"h#", "pau", "ʔ̞"}
+IPA_SILENCE_LABELS = {"h#", "pau", "ʔ̞", "sil"}
 
 
 def arpabet_to_ipa(phones: List[str]) -> List[str]:
