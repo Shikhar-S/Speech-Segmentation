@@ -1,0 +1,40 @@
+# @package _global_
+# python src/main.py experiment=inference/phonvec inference.inference_runner.artifact_path=...
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_phonvec"
+tags: ["phonvec", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+ 
+data:
+  hf_repo: changelinglab/timit-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/phonvec.jsonl
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.model.phonvec.inference.build_phonvec_inference
+    artifact_path: ???
+    device: cuda
+    # frame_shift / sr default to the artifact's saved net spec.
+    # Uncomment to override at inference time:
+    # frame_shift: 320
+    # sr: 16000
+    net:
+      _target_: src.model.wavlm.builders.build_wavlm_model
+      hf_repo: microsoft/wavlm-large
+      encoder_layer: 24
+      cache_dir: ${paths.cache_dir}/hf

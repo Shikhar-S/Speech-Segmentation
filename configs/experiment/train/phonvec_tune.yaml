@@ -1,0 +1,52 @@
+# @package _global_
+# python -m src.recipe.phonvec.train experiment=train/phonvec_tune
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "tune_phonvec"
+tags: ["phonvec", "tune", "timit"]
+
+train: false
+test: false
+distributed_predict: false
+
+# dataset for fitting phonological vectors
+# note that this is different from tuning dataset, defined below
+data:
+  hf_repo: changelinglab/timit-segment
+
+phonvec_tune:
+  device: cuda
+  tolerance_ms: 20
+  strip_outer_silences: true
+  silence_detector_path: exp/data/phonological_vector/logistic_regression_silence_detector.joblib
+  # Dataset for tuning
+  # the transform carves out the tuning set from test/train
+  tune_data:
+    _target_: src.data.segmentation.segmentation_dataset.SegmentationDataModule
+    hf_repo: changelinglab/timit-segment
+    tokenizer:
+      _target_: src.data.segmentation.segmentation_dataset.DummyTokenizer
+    batch_size: 1
+    num_workers: 4
+    pin_memory: true
+    target_sr: 16000
+  frame_shift: 320
+  sr: 16000
+  mel_frame_shift_ms: 10
+  net:
+    _target_: src.model.wavlm.builders.build_wavlm_model
+    hf_repo: microsoft/wavlm-large
+    encoder_layer: 24
+    cache_dir: ${paths.cache_dir}/hf
+  # hyper-params to run grid search over
+  grid:
+    use_combined: [true]
+    drop_k: [0, 1, 2, 3]
+    norm_method: [min, minmax]
+    combined_prominence: [0.001]
+    snap_silence: [true]
+  out_artifact: ${paths.output_dir}/phonvec_timit.pt

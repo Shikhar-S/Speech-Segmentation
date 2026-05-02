@@ -1,0 +1,11 @@
+_target_: src.data.segmentation.segmentation_dataset.SegmentationDataModule
+hf_repo: changelinglab/timit-segment
+tokenizer:
+  _target_: src.data.segmentation.segmentation_dataset.DummyTokenizer
+batch_size: 1
+num_workers: 4
+pin_memory: true
+target_sr: 16000
+train_fraction: 1.0
+seed: 42
+predict_split: null
