@@ -1,23 +1,14 @@
-"""Per-dataset preprocessing for SegmentationDataset / SegmentationDataModule.
+"""Per-row GT preprocessing for SegmentationDataset.
 
-Two registries:
+``HF_REPO_TRANSFORMS`` maps HF repo id -> per-row cleanup applied inside
+``SegmentationDataset.__getitem__`` to ``(phone_timestamps, phones)``.
+Must be idempotent.
 
-* ``HF_REPO_TRANSFORMS`` — per-row GT cleanup applied inside
-  ``SegmentationDataset.__getitem__`` to ``(phone_timestamps, phones)``.
-  Must be idempotent.
-
-* ``HF_REPO_SPLIT_TRANSFORMS`` — DatasetDict-level split reshaping applied
-  inside ``SegmentationDataModule.setup`` (and ``build_segmentation_dataset``).
-  Each takes a ``DatasetDict`` and returns a new one with possibly different
-  splits. Used to carve out a deterministic ``tune`` split disjoint from
-  fit / eval.
-
-# TODO(shikhar): Check these thoroughly again! Especially the splitting, speaker independent?
+DatasetDict-level split reshaping lives in ``dataset_splitting_transforms``.
+# TODO(shikhar,stephen): Check this to ensure match with notebook.
 """
 
-from typing import Any, Callable, Dict, List, Tuple
-
-import numpy as np
+from typing import Callable, Dict, List, Tuple
 
 from src.core.ipa_utils import ARPABET_TO_IPA, IPA_SILENCE_LABELS
 
@@ -186,45 +177,4 @@ HF_REPO_TRANSFORMS: Dict[
     "changelinglab/gtimit-l1simple-segment": process_gtimit_arpabet_symbols,
     "changelinglab/gtimit-l1tbnk-segment": process_gtimit_arpabet_symbols,
     "changelinglab/gtimit-tha-segment": process_gtimit_thai_symbols,
-}
-
-
-def split_timit_train_for_tuning(ddict: Any) -> Any:
-    """Carve a 1000-utt seed-42 ``tune`` split out of TIMIT ``train``.
-
-    The remaining train utts stay in ``train`` (used for fitting
-    PhonologicalVectors). The tune subset is disjoint.
-    """
-    train = ddict["train"]
-    n = len(train)
-    rng = np.random.default_rng(42)
-    tune_idx = rng.choice(n, size=min(1000, n), replace=False)
-    tune_set = set(tune_idx.tolist())
-    train_idx = [i for i in range(n) if i not in tune_set]
-
-    new_dd = {k: v for k, v in ddict.items()}
-    new_dd["tune"] = train.select(sorted(tune_idx.tolist()))
-    new_dd["train"] = train.select(train_idx)
-    return new_dd
-
-
-def split_voxangeles_test_for_tuning(ddict: Any) -> Any:
-    """Carve VoxAngeles ``test`` into disjoint ``test`` (eval) + ``tune``."""
-    test = ddict["test"]
-    n = len(test)
-    rng = np.random.default_rng(50)
-    selected = rng.choice(n, size=min(2000, n), replace=False)
-    eval_idx = selected[:1000].tolist()
-    tune_idx = selected[1000:2000].tolist()
-
-    new_dd = {k: v for k, v in ddict.items()}
-    new_dd["test"] = test.select(eval_idx)
-    new_dd["tune"] = test.select(tune_idx)
-    return new_dd
-
-
-# Registry: HuggingFace repo id -> default DatasetDict-level split transform.
-HF_REPO_SPLIT_TRANSFORMS: Dict[str, Callable[[Any], Any]] = {
-    "changelinglab/timit-segment": split_timit_train_for_tuning,
-    "changelinglab/voxangeles-segment": split_voxangeles_test_for_tuning,
 }

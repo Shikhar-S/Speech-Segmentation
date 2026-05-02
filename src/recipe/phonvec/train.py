@@ -20,7 +20,7 @@ Tune split source
 Comes from the tune_dataset() of the datamodule at phonvec_tune.tune_data
 in config. The logic to define tune and test split for each dataset (hf_repo)
 is defined in `HF_REPO_SPLIT_TRANSFORMS`
-(src/data/segmentation/dataset_processing_transforms.py)
+(src/data/segmentation/dataset_splitting_transforms.py)
 
 Usage (GPU)
 -----------

@@ -16,8 +16,10 @@ import lightning as L
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 
 from src.data.segmentation.dataset_processing_transforms import (
-    HF_REPO_SPLIT_TRANSFORMS,
     HF_REPO_TRANSFORMS,
+)
+from src.data.segmentation.dataset_splitting_transforms import (
+    HF_REPO_SPLIT_TRANSFORMS,
 )
 
 
@@ -268,6 +270,7 @@ class SegmentationDataModule(L.LightningDataModule):
         ), f"None of the predict splits {self.predict_split} found in dataset."
         return self._dl(ConcatDataset(predict_datasets))
 
+
 # builders
 def build_segmentation_dataset(
     hf_repo: str,
@@ -277,7 +280,7 @@ def build_segmentation_dataset(
     **kwargs,
 ) -> SegmentationDataset:
     """Build a SegmentationDataset for one split, applying any
-    registered DatasetDict-level split transform first 
+    registered DatasetDict-level split transform first
     (to mirror SegmentationDataModule's behaviour).
     """
     cache_dir = kwargs.get("cache_dir", "exp/cache/hf")

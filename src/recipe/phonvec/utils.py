@@ -280,7 +280,7 @@ def instantiate_tune_dataset(pt_cfg: DictConfig):
     tune_ds = tune_dm.tune_dataset
     assert tune_ds is not None, (
         f"hf_repo={pt_cfg.tune_data.hf_repo} did not produce a 'tune' split — "
-        "register a split_transform in dataset_processing_transforms.py."
+        "register a split_transform in dataset_splitting_transforms.py."
     )
     log.info(f"Tune dataset size: {len(tune_ds)}")
     return tune_ds
