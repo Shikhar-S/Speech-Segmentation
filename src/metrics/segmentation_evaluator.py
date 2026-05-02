@@ -39,11 +39,28 @@ class SegmentationEvaluator:
             computes per-phone error statistics in addition to boundary P/R/F1/Rval.
             If False (default), operate in free mode: accepts any segment counts
             and returns only boundary-level metrics.
+        match_mode: How to count boundary TPs.
+            ``"strict"`` (default): greedy one-to-one assignment — each
+            boundary can be claimed by at most one counterpart, from Strgar & Harwath.
+            ``"lenient"``: independent nearest-neighbour — every boundary
+            counts as TP iff any counterpart lies within tolerance, with no
+            exclusivity.
     """
 
-    def __init__(self, tolerance_ms: int = 20, forced: bool = False):
+    def __init__(
+        self,
+        tolerance_ms: int = 20,
+        forced: bool = False,
+        match_mode: str = "strict",
+    ):
+        if match_mode not in {"strict", "lenient"}:
+            raise ValueError(
+                f"match_mode must be 'strict' or 'lenient', got {match_mode!r}"
+            )
         self.tolerance_sec = tolerance_ms / 1000.0
+        self._tol_eps = 1e-9  # Float-precision slack on the boundary check.
         self.forced = forced
+        self.match_mode = match_mode
 
     def evaluate_boundaries(
         self,
@@ -96,12 +113,17 @@ class SegmentationEvaluator:
         pred_times = self._extract_boundary_times(predicted)
         gt_times = self._extract_boundary_times(ground_truth)
 
-        precision_counter = sum(
-            np.abs(gt_times - t).min() <= self.tolerance_sec for t in pred_times
-        )
-        recall_counter = sum(
-            np.abs(pred_times - t).min() <= self.tolerance_sec for t in gt_times
-        )
+        tol = self.tolerance_sec + self._tol_eps
+        if self.match_mode == "strict":
+            precision_counter = self._greedy_match_count(gt_times, pred_times)
+            recall_counter = self._greedy_match_count(pred_times, gt_times)
+        else:
+            precision_counter = sum(
+                np.abs(gt_times - t).min() <= tol for t in pred_times
+            )
+            recall_counter = sum(
+                np.abs(pred_times - t).min() <= tol for t in gt_times
+            )
 
         return {
             "precision_counter": int(precision_counter),
@@ -109,6 +131,29 @@ class SegmentationEvaluator:
             "pred_counter": int(len(pred_times)),
             "gt_counter": int(len(gt_times)),
         }
+
+    def _greedy_match_count(
+        self, ref_times: np.ndarray, query_times: np.ndarray
+    ) -> int:
+        """Count queries that uniquely match a ref boundary within tolerance."""
+        if len(ref_times) == 0 or len(query_times) == 0:
+            return 0
+        tol = self.tolerance_sec + self._tol_eps
+        matches: Dict[int, List[int]] = {}
+        for i, q in enumerate(query_times):
+            dists = np.abs(ref_times - q)
+            idxs = np.argsort(dists)
+            matches[i] = [int(idx) for idx in idxs if dists[idx] <= tol]
+
+        used: set = set()
+        count = 0
+        for vs in matches.values():
+            for v in sorted(vs):
+                if v not in used:
+                    used.add(v)
+                    count += 1
+                    break
+        return count
 
     def _add_forced_alignment_metrics(
         self,

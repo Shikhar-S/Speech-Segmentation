@@ -24,6 +24,7 @@ import torch.nn.functional as F
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
+from src.core.ipa_utils import IPA_SILENCE_LABELS
 from src.metrics.segmentation_evaluator import (
     SegmentationEvaluator,
     SegmentationUnit,
@@ -32,11 +33,6 @@ from src.model.phonvec.model import Segmenter, SilenceHandler
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
-
-
-# IPA labels treated as silence (ipa column NaN) — same set the legacy
-# notebook / script uses when fitting PhonologicalVectors.
-SILENCE_LABELS = {"h#", "pau", "ʔ̞"}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -76,7 +72,7 @@ def build_per_phone_df(
     """Builds a dataframe by walking over each phone in each utterance in the dataset.
     A row corresponds to the phone with center-frame encoder features and has columns:
         feat: encoder features at the center frame of the current phone
-        ipa: IPA label of the current phone (NaN if in SILENCE_LABELS)
+        ipa: IPA label of the current phone (NaN if in IPA_SILENCE_LABELS)
         l_1: IPA label of the left-adjacent phone (None if no left neighbor)
         r_1: IPA label of the right-adjacent phone (None if no right neighbor)
         audio_path: the utt_id of the current phone, a backpointer to the original audio and metadata
@@ -112,7 +108,7 @@ def build_per_phone_df(
             mid_frame = max(0, min(mid_frame, vlen - 1))
             l_1 = phones[j - 1] if j > 0 else None
             r_1 = phones[j + 1] if j + 1 < len(phones) else None
-            ipa_label = float("nan") if p in SILENCE_LABELS else p
+            ipa_label = float("nan") if p in IPA_SILENCE_LABELS else p
             rows.append(
                 {
                     "feat": feats_np[mid_frame].copy(),
@@ -202,9 +198,9 @@ def gt_units(
     pts = list(phone_timestamps)
     phs = list(phones)
     if strip_outer_silences and phs:
-        if phs[0] in SILENCE_LABELS:
+        if phs[0] in IPA_SILENCE_LABELS:
             pts, phs = pts[1:], phs[1:]
-        if phs and phs[-1] in SILENCE_LABELS:
+        if phs and phs[-1] in IPA_SILENCE_LABELS:
             pts, phs = pts[:-1], phs[:-1]
     return [SegmentationUnit(start=float(s), end=float(e)) for s, e in pts]
 

@@ -17,7 +17,7 @@ IPA_TO_ARPABET = {
     "ʌ": "AH",  # unstressed “uh”; schwa is AX
     "ɔ": "AO",
     "ə˞": "AXR",  # r-colored schwa (alternate)
-    "ɜ˞": "ER",   # stressed r-colored vowel (alternate)
+    "ɜ˞": "ER",  # stressed r-colored vowel (alternate)
     "b": "B",
     "d": "D",
     "ð": "DH",
@@ -73,6 +73,10 @@ IPA_TO_ARPABET = {
 ARPABET_TO_IPA = {v.lower(): k for k, v in IPA_TO_ARPABET.items()}
 panphon_segmenter = panphon.distance.Distance().fm.ipa_segs
 
+# IPA labels that mark silence/non-speech segments
+# after ARPABET→IPA conversion.
+IPA_SILENCE_LABELS = {"h#", "pau", "ʔ̞"}
+
 
 def arpabet_to_ipa(phones: List[str]) -> List[str]:
     """Map a sequence of ARPABET symbols to IPA. Unknown symbols use lowercase as fallback (same as timit/buckeye)."""
@@ -88,7 +92,11 @@ class IPATokenizer:
         self.blank_id = 0
         self.blank_token = "<blank>"
         self.unk_token = "<unk>"
-        VOCAB = [self.blank_token] + sorted(IPA_TO_ARPABET.keys()) + [self.unk_token]
+        VOCAB = (
+            [self.blank_token]
+            + sorted(IPA_TO_ARPABET.keys())
+            + [self.unk_token]
+        )
         self.phone2id = {phone: idx for idx, phone in enumerate(VOCAB)}
         self.id2phone = {idx: phone for phone, idx in self.phone2id.items()}
         self.unk_id = self.phone2id[self.unk_token]

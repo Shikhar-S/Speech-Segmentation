@@ -14,34 +14,51 @@ import json
 
 from tqdm import tqdm
 
+from src.core.ipa_utils import IPA_SILENCE_LABELS
 from src.metrics.segmentation_evaluator import (
     SegmentationEvaluator,
     SegmentationUnit,
 )
 
 
-def parse_groundtruth(passthrough, forced):
+def parse_groundtruth(passthrough, forced, strip_outer=False):
     ts = passthrough.get("phone_timestamps") or passthrough.get(
         "ground_truth_timestamps"
     )
-    phones = passthrough.get("phones") if forced else None
+    phones = passthrough.get("phones")
+    if strip_outer and phones:
+        ts = list(ts)
+        phones = list(phones)
+        while phones and phones[0] in IPA_SILENCE_LABELS:
+            ts, phones = ts[1:], phones[1:]
+        while phones and phones[-1] in IPA_SILENCE_LABELS:
+            ts, phones = ts[:-1], phones[:-1]
+    label_src = phones if forced else None
     return [
-        SegmentationUnit(start=s, end=e, label=(phones[i] if phones else 0))
+        SegmentationUnit(
+            start=s, end=e, label=(label_src[i] if label_src else 0)
+        )
         for i, (s, e) in enumerate(ts)
     ]
 
 
-# def parse_predictions(pred_list):
-#     return [SegmentationUnit(start=p["start"], end=p["end"], label=p["label"]) for p in pred_list]
+def parse_predictions(pred, head=None):
+    """Parse pred payload into a list of SegmentationUnit.
 
-
-def parse_predictions(pred_dict, head=None):
-    """Parse head-specific output dict into list of SegmentationUnit.
-    Schema:
-        { 'head-name' : {utt_id: List[SegmentationUnit], ...}, ... }
+    Accepts either:
+      - flat list ``[{start, end, label}, ...]`` (phonvec)
+      - head-keyed dict ``{head: {utt_id: [{start, end, label}, ...]}}``
+        (segment_recognize multi-head)
     """
+    if isinstance(pred, list):
+        return [
+            SegmentationUnit(
+                start=u["start"], end=u["end"], label=u.get("label", 0)
+            )
+            for u in pred
+        ]
     results = []
-    for head_name, head_output in pred_dict.items():
+    for head_name, head_output in pred.items():
         if head is not None and head_name != head:
             continue
         utt_keys = list(head_output.keys())
@@ -58,7 +75,7 @@ def parse_predictions(pred_dict, head=None):
     return results
 
 
-def load_utterances_from_shards(files, forced):
+def load_utterances_from_shards(files, forced, strip_outer=False):
     predictions, ground_truth, symbols_dict = {}, {}, {}
     for filepath in tqdm(files, desc="Loading shards"):
         with open(filepath) as fh:
@@ -75,7 +92,7 @@ def load_utterances_from_shards(files, forced):
                     utt_id = passthrough.get("utt_id", str(idx))
                     predictions[utt_id] = parse_predictions(data["pred"])
                     ground_truth[utt_id] = parse_groundtruth(
-                        passthrough, forced
+                        passthrough, forced, strip_outer=strip_outer
                     )
                     if forced:
                         symbols_dict[utt_id] = passthrough["phones"]
@@ -104,11 +121,17 @@ def main():
         default="lenient",
         help="Strict means one GT corresponds to one predicted boundary.",
     )
+    parser.add_argument(
+        "--strip-outer-silences",
+        action="store_true",
+        default=False,
+        help="Drop leading/trailing silence segments (h#, pau, ʔ̞) from GT.",
+    )
     args = parser.parse_args()
 
     files = [f for p in args.files for f in (sorted(glob.glob(p)) or [p])]
     predictions, ground_truth, symbols_dict = load_utterances_from_shards(
-        files, args.forced
+        files, args.forced, strip_outer=args.strip_outer_silences
     )
     print(f"Loaded {len(predictions)} utterances from {len(files)} file(s)")
 
