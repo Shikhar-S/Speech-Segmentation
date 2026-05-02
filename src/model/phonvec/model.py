@@ -8,41 +8,52 @@ import torchaudio.compliance.kaldi as kaldi
 from scipy.signal import find_peaks
 from scipy.spatial.distance import cosine as cos_dist
 
-warnings.filterwarnings("ignore", message="Support for mismatched key_padding_mask")
+warnings.filterwarnings(
+    "ignore", message="Support for mismatched key_padding_mask"
+)
 
-SR = 16000
-FRAME_SHIFT = 320  # WavLM hop in samples
-FRAME_SHIFT_SEC = FRAME_SHIFT / SR
-MEL_FRAME_SHIFT_MS = 10
-assert FRAME_SHIFT_SEC == 0.02, "Frame shift should be 20ms for WavLM features."
 
-# ################################
-# # experimental 32khz config
-# SR = 32000
-# FRAME_SHIFT = 320  # WavLM hop in samples
-# FRAME_SHIFT_SEC = FRAME_SHIFT / SR
-# MEL_FRAME_SHIFT_MS = 10
-# assert FRAME_SHIFT_SEC == 0.01, "Frame shift should be 20ms for WavLM features."
-################################
-
+################################################################################################
 class SilenceHandler:
-    def __init__(self, detector_path="logistic_regression_silence_detector.joblib"):
-        self.model = joblib.load(detector_path)
+    def __init__(self, detector_path=None, *, model=None):
+        if model is not None:
+            self.model = model
+        elif detector_path is not None:
+            self.model = joblib.load(detector_path)
+        else:
+            raise ValueError("SilenceHandler requires detector_path or model.")
+
+    def to_state(self):
+        """Extract sklearn LogReg state for artifact serialization."""
+        return {
+            "_class_name": type(self.model).__name__,
+            "coef_": self.model.coef_,
+            "intercept_": self.model.intercept_,
+            "classes_": self.model.classes_,
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        """Reconstruct from a state dict produced by to_state()."""
+        from sklearn.linear_model import LogisticRegression
+
+        clf = LogisticRegression()
+        clf.coef_ = np.asarray(state["coef_"])
+        clf.intercept_ = np.asarray(state["intercept_"])
+        clf.classes_ = np.asarray(state["classes_"])
+        return cls(model=clf)
 
     def _fill_gaps(self, raw_mask):
         neighbors_silent = np.logical_and(
-            np.concatenate(([False], raw_mask[:-1])), np.concatenate((raw_mask[1:], [False]))
+            np.concatenate(([False], raw_mask[:-1])),
+            np.concatenate((raw_mask[1:], [False])),
         )
         return np.logical_or(raw_mask, neighbors_silent)
 
-    def predict_silence_mask(self, feats, *, frame_shift=FRAME_SHIFT):
+    def predict_silence_mask(self, feats):
+        """Per-frame silence mask aligned with the input feature rate."""
         raw_silence_mask = self.model.predict(feats)
-        filled_silence_mask = self._fill_gaps(raw_silence_mask)
-        if frame_shift != FRAME_SHIFT:
-            assert FRAME_SHIFT % frame_shift == 0, "FRAME_SHIFT must be a multiple of frame_shift"
-            factor = FRAME_SHIFT // frame_shift
-            filled_silence_mask = np.repeat(filled_silence_mask, factor)
-        return filled_silence_mask
+        return self._fill_gaps(raw_silence_mask)
 
     def handle_silence(self, preds, silence_mask, snap_tolerance=1):
         """Suppress peaks inside silence, snap nearby peaks to silence edges, and inject silence-boundary frames."""
@@ -66,20 +77,30 @@ class SilenceHandler:
         for s, e in spans:
             # Left edge (silence onset)
             if s > 0:
-                nearby = preds[(preds >= s - snap_tolerance) & (preds <= s + snap_tolerance)]
+                nearby = preds[
+                    (preds >= s - snap_tolerance)
+                    & (preds <= s + snap_tolerance)
+                ]
                 if len(nearby) > 0:
                     outside = nearby[nearby <= s]
-                    silence_boundaries.append(outside.min() if len(outside) > 0 else nearby.min())
+                    silence_boundaries.append(
+                        outside.min() if len(outside) > 0 else nearby.min()
+                    )
                     snapped.update(nearby.tolist())
                 else:
                     silence_boundaries.append(s)
 
             # Right edge (silence offset)
             if e < n_frames:
-                nearby = preds[(preds >= e - snap_tolerance) & (preds <= e + snap_tolerance)]
+                nearby = preds[
+                    (preds >= e - snap_tolerance)
+                    & (preds <= e + snap_tolerance)
+                ]
                 if len(nearby) > 0:
                     outside = nearby[nearby >= e]
-                    silence_boundaries.append(outside.max() if len(outside) > 0 else nearby.max())
+                    silence_boundaries.append(
+                        outside.max() if len(outside) > 0 else nearby.max()
+                    )
                     snapped.update(nearby.tolist())
                 else:
                     silence_boundaries.append(e)
@@ -90,11 +111,48 @@ class SilenceHandler:
             if p in snapped:
                 keep[i] = False
 
-        out = np.unique(np.concatenate([preds[keep], np.array(silence_boundaries, dtype=int)]))
+        out = np.unique(
+            np.concatenate(
+                [preds[keep], np.array(silence_boundaries, dtype=int)]
+            )
+        )
         return out
 
 
+################################################################################################
+
+
 class PhonologicalVectors:
+
+    def __init__(
+        self,
+        df=None,
+        vocab=None,
+        group_col="ipa",
+        filter_features=True,
+        *,
+        _from_state=None,
+    ):
+        if _from_state is not None:
+            self.featnames = list(_from_state["featnames"])
+            self.featmap = {
+                k: list(v) for k, v in _from_state["featmap"].items()
+            }
+            self.pos_vecs = np.asarray(_from_state["pos_vecs"])
+            self.zero_vecs = np.asarray(_from_state["zero_vecs"])
+            self.scales = np.asarray(_from_state["scales"])
+            self.biases = np.asarray(_from_state["biases"])
+            self.in_dim = self.pos_vecs.shape[1]
+            return
+        assert (
+            df is not None and vocab is not None
+        ), "PhonologicalVectors requires (df, vocab) unless _from_state is given."
+        ft = panphon.FeatureTable()
+        self.featnames, self.featmap = self.prep_featmap(vocab, ft)
+        self.calc_phnvectors(df, group_col)
+        if filter_features:
+            self._filter_features()
+
     @staticmethod
     def prep_featmap(vocab, ft):
         names = (
@@ -128,8 +186,12 @@ class PhonologicalVectors:
         for featname in self.featnames:
             pos_phns, zero_phns = self.split_phns(featname)
             if len(pos_phns) > 0 and len(zero_phns) > 0:
-                pos_samples = np.stack(df[df[group_col].isin(pos_phns)].feat.tolist())
-                zero_samples = np.stack(df[df[group_col].isin(zero_phns)].feat.tolist())
+                pos_samples = np.stack(
+                    df[df[group_col].isin(pos_phns)].feat.tolist()
+                )
+                zero_samples = np.stack(
+                    df[df[group_col].isin(zero_phns)].feat.tolist()
+                )
                 pos_vec = pos_samples.mean(0)
                 zero_vec = zero_samples.mean(0)
                 w = pos_vec - zero_vec
@@ -165,7 +227,11 @@ class PhonologicalVectors:
             pos_phns, zero_phns = self.split_phns(name)
             if len(pos_phns) == 0 or len(zero_phns) == 0:
                 continue
-            if name != "speech+" and pos_phns == speech_pos and zero_phns == speech_zero:
+            if (
+                name != "speech+"
+                and pos_phns == speech_pos
+                and zero_phns == speech_zero
+            ):
                 continue
             keep.append(i)
 
@@ -177,14 +243,25 @@ class PhonologicalVectors:
         self.biases = self.biases[keep]
 
         # Update featmap to match reduced indexing
-        self.featmap = {phone: [vals[i] for i in keep] for phone, vals in self.featmap.items()}
+        self.featmap = {
+            phone: [vals[i] for i in keep]
+            for phone, vals in self.featmap.items()
+        }
 
-    def __init__(self, df, vocab, group_col="ipa", filter_features=True):
-        ft = panphon.FeatureTable()
-        self.featnames, self.featmap = self.prep_featmap(vocab, ft)
-        self.calc_phnvectors(df, group_col)
-        if filter_features:
-            self._filter_features()
+    def to_state(self):
+        """Serialize all data needed to reconstruct via from_state()."""
+        return {
+            "featnames": list(self.featnames),
+            "featmap": {k: list(v) for k, v in self.featmap.items()},
+            "pos_vecs": self.pos_vecs,
+            "zero_vecs": self.zero_vecs,
+            "scales": self.scales,
+            "biases": self.biases,
+        }
+
+    @classmethod
+    def from_state(cls, state):
+        return cls(_from_state=state)
 
     def project_raw(self, feats):
         W = self.pos_vecs - self.zero_vecs
@@ -198,13 +275,13 @@ class PhonologicalVectors:
 
 
 # Signals
-def _melspec_kaldi(y, sr=SR, n_mels=40):
+def _melspec_kaldi(y, *, sr, frame_shift_ms, n_mels=40):
     waveform = torch.from_numpy(np.asarray(y, dtype=np.float32)).unsqueeze(0)
     feats = kaldi.fbank(
         waveform,
         sample_frequency=float(sr),
         frame_length=25.0,
-        frame_shift=MEL_FRAME_SHIFT_MS,
+        frame_shift=frame_shift_ms,
         num_mel_bins=n_mels,
         use_power=True,
         use_energy=False,
@@ -222,7 +299,10 @@ def _mel_svf(mel_frames, left, right):
     for t in range(left, n - right):
         denom = norms[t - left] * norms[t + right]
         if denom > 0:
-            signal[t] = 1.0 - np.dot(mel_frames[t - left], mel_frames[t + right]) / denom
+            signal[t] = (
+                1.0
+                - np.dot(mel_frames[t - left], mel_frames[t + right]) / denom
+            )
     finite = np.isfinite(signal)
     if finite.any():
         lo, hi = np.nanmin(signal), np.nanmax(signal)
@@ -231,8 +311,16 @@ def _mel_svf(mel_frames, left, right):
     return signal
 
 
-def _mel_svf_signal(audio: np.ndarray, left: int, right: int, target_len: int) -> np.ndarray:
-    mel = _melspec_kaldi(audio)
+def _mel_svf_signal(
+    audio: np.ndarray,
+    left: int,
+    right: int,
+    target_len: int,
+    *,
+    sr: int,
+    mel_frame_shift_ms: int,
+) -> np.ndarray:
+    mel = _melspec_kaldi(audio, sr=sr, frame_shift_ms=mel_frame_shift_ms)
     sig = _mel_svf(mel, left=left, right=right)
     if len(sig) == 0 or target_len == 0:
         return np.full(target_len, np.nan, dtype=np.float32)
@@ -281,6 +369,36 @@ def _bwd_contrast(proj_ipa, proj_l1, W_l1_to_ipa, lookbehind):
     return contrast
 
 
+def _normalize_signal(signal, method):
+    """Normalize a 1D signal in-place semantics.
+
+    "min": subtract nanmin so the lowest finite value is zero.
+    "minmax": scale finite values to [0, 1].
+    """
+    if method == "min":
+        return signal - np.nanmin(signal)
+    if method == "minmax":
+        sig = np.asarray(signal, dtype=float).copy()
+        finite = np.isfinite(sig)
+        if finite.sum() < 2:
+            return sig
+        lo, hi = sig[finite].min(), sig[finite].max()
+        if hi > lo:
+            sig[finite] = (sig[finite] - lo) / (hi - lo)
+        else:
+            sig[finite] = 0.0
+        return sig
+    raise ValueError(f"Unknown norm_method: {method}")
+
+
+def _combine_stacked(stacked, method):
+    """Combine stacked normalized signals along axis 0."""
+    if method == "min":
+        return np.prod(stacked, axis=0)
+    with np.errstate(invalid="ignore"):
+        return np.exp(np.mean(np.log(np.maximum(stacked, 1e-12)), axis=0))
+
+
 def _shift_signal(signal, shift_frames):
     """Shift a 1D signal in frame units, padding exposed positions with NaN."""
     if shift_frames == 0:
@@ -295,6 +413,9 @@ def _shift_signal(signal, shift_frames):
     else:
         shifted[:shift_frames] = signal[-shift_frames:]
     return shifted
+
+
+################################################################################################
 
 
 class Segmenter:
@@ -325,53 +446,216 @@ class Segmenter:
     COMBINED_DROP_K = 2
     COMBINED_PROMINENCE = 0.001
 
-    def __init__(
-        self, timit_train_df, silence_detector_path="logistic_regression_silence_detector.joblib"
-    ):
-        """Build segmenter from per-phone training data. (docstring by Claude)
+    @classmethod
+    def default_hparams(cls):
+        """Default hyperparameters; mirror the class constants exactly."""
+        return {
+            "use_combined": True,
+            "combined_signals": list(cls.COMBINED_SIGNALS),
+            "signal_kwargs": {
+                k: dict(v) for k, v in cls.COMBINED_SIGNAL_KWARGS.items()
+            },
+            "signal_shifts": dict(cls.COMBINED_SIGNAL_SHIFTS),
+            "drop_k": cls.COMBINED_DROP_K,
+            "combined_prominence": cls.COMBINED_PROMINENCE,
+            "norm_method": "min",
+            "single_signal_name": "fwd_contrast",
+            "single_signal_kwargs": {"lookahead": 1},
+            "single_signal_shift": 1,
+            "single_signal_prominence": 0.2,
+            "snap_silence": True,
+            "snap_tolerance": 2,
+        }
 
-        timit_train_df: DataFrame with one row per phone, requiring columns:
-            feat       - WavLM feature vector (np.ndarray) at phone center frame
+    def __init__(
+        self,
+        train_df=None,
+        silence_detector_path="logistic_regression_silence_detector.joblib",
+        *,
+        frame_shift: int,
+        sr: int,
+        mel_frame_shift_ms: int,
+        _from_components=None,
+        hparams=None,
+    ):
+        """Build segmenter, either by fitting from a per-phone DataFrame
+        (legacy path used by scripts/phonvec_eval.py) or by loading
+        pre-fit components (used by from_artifact / Segmenter.fit).
+
+        Args:
+            frame_shift: encoder hop in samples (e.g. 320 for WavLM-large).
+            sr: encoder sample rate (e.g. 16000).
+            mel_frame_shift_ms: mel-spectrogram hop in ms used by the
+                mel-SVF auxiliary signal.
+
+        train_df: DataFrame with one row per phone, requiring columns:
+            feat       - encoder feature vector (np.ndarray) at phone center frame
             ipa        - IPA label for this phone (NaN for silence)
             l_1        - IPA label of the preceding phone
             r_1        - IPA label of the following phone
             audio_path - path to the source audio file
             min        - phone onset time (for sorting phones within utterances)
-
-        Generated by prepare_datasets.py; cached as
-        feats/timit-wavlm-large-24-center-featslice.pkl.
         """
-        self.silence_handler = SilenceHandler(silence_detector_path)
+        self.hparams = (
+            dict(hparams) if hparams is not None else self.default_hparams()
+        )
+        self.frame_shift = int(frame_shift)
+        self.sr = int(sr)
+        self.mel_frame_shift_ms = int(mel_frame_shift_ms)
 
-        pv_train_df = timit_train_df[~timit_train_df.ipa.isna()]
+        if _from_components is not None:
+            self.pv_ipa = _from_components["pv_ipa"]
+            self.pv_l1 = _from_components["pv_l1"]
+            self.pv_r1 = _from_components["pv_r1"]
+            self.W_r1_to_ipa = np.asarray(_from_components["W_r1_to_ipa"])
+            self.W_l1_to_ipa = np.asarray(_from_components["W_l1_to_ipa"])
+            self.silence_handler = _from_components["silence_handler"]
+            return
+
+        assert (
+            train_df is not None
+        ), "Segmenter requires train_df unless _from_components is given."
+        self.silence_handler = SilenceHandler(silence_detector_path)
+        self._fit_from_df(train_df)
+
+    def _fit_from_df(self, train_df):
+        pv_train_df = train_df[~train_df.ipa.isna()]
         vocab = pv_train_df.ipa.unique().tolist()
 
-        self.pv_ipa = PhonologicalVectors(pv_train_df, vocab, group_col="ipa")  # current phone
-        self.pv_l1 = PhonologicalVectors(pv_train_df, vocab, group_col="l_1")  # previous phone
-        self.pv_r1 = PhonologicalVectors(pv_train_df, vocab, group_col="r_1")  # next phone
+        self.pv_ipa = PhonologicalVectors(
+            pv_train_df, vocab, group_col="ipa"
+        )  # current phone
+        self.pv_l1 = PhonologicalVectors(
+            pv_train_df, vocab, group_col="l_1"
+        )  # previous phone
+        self.pv_r1 = PhonologicalVectors(
+            pv_train_df, vocab, group_col="r_1"
+        )  # next phone
 
-        df_sorted = timit_train_df[~timit_train_df.ipa.isna()].sort_values(["audio_path", "min"])
-        same_utt = df_sorted.audio_path.values[:-1] == df_sorted.audio_path.values[1:]
-        prev_feats = np.stack(
-            df_sorted.feat.values[:-1][same_utt]
-        )  # previous phone center feature
-        curr_feats = np.stack(df_sorted.feat.values[1:][same_utt])  # next phone center features
+        df_sorted = train_df[~train_df.ipa.isna()].sort_values(
+            ["audio_path", "min"]
+        )
+        same_utt = (
+            df_sorted.audio_path.values[:-1] == df_sorted.audio_path.values[1:]
+        )
+        prev_feats = np.stack(df_sorted.feat.values[:-1][same_utt])
+        curr_feats = np.stack(df_sorted.feat.values[1:][same_utt])
 
-        proj_ipa_curr = self.pv_ipa.project_raw(
-            curr_feats
-        )  # what the current phone thinks it should look like
-        proj_ipa_prev = self.pv_ipa.project_raw(
-            prev_feats
-        )  # what the previous phone thinks it should look like
-        proj_r1_prev = self.pv_r1.project_raw(
-            prev_feats
-        )  # what the previous phone thinks the current phone should look like
-        proj_l1_next = self.pv_l1.project_raw(
-            curr_feats
-        )  # what the current phone thinks the previous phone should look like
+        proj_ipa_curr = self.pv_ipa.project_raw(curr_feats)
+        proj_ipa_prev = self.pv_ipa.project_raw(prev_feats)
+        proj_r1_prev = self.pv_r1.project_raw(prev_feats)
+        proj_l1_next = self.pv_l1.project_raw(curr_feats)
 
-        self.W_r1_to_ipa = np.linalg.lstsq(proj_r1_prev, proj_ipa_curr, rcond=None)[0]
-        self.W_l1_to_ipa = np.linalg.lstsq(proj_l1_next, proj_ipa_prev, rcond=None)[0]
+        self.W_r1_to_ipa = np.linalg.lstsq(
+            proj_r1_prev, proj_ipa_curr, rcond=None
+        )[0]
+        self.W_l1_to_ipa = np.linalg.lstsq(
+            proj_l1_next, proj_ipa_prev, rcond=None
+        )[0]
+
+    @classmethod
+    def fit(
+        cls,
+        train_df,
+        silence_handler,
+        *,
+        frame_shift: int,
+        sr: int,
+        mel_frame_shift_ms: int,
+        hparams=None,
+    ):
+        """Fit a Segmenter from a per-phone DataFrame and a pre-built SilenceHandler."""
+        seg = cls.__new__(cls)
+        seg.hparams = (
+            dict(hparams) if hparams is not None else cls.default_hparams()
+        )
+        seg.frame_shift = int(frame_shift)
+        seg.sr = int(sr)
+        seg.mel_frame_shift_ms = int(mel_frame_shift_ms)
+        seg.silence_handler = silence_handler
+        seg._fit_from_df(train_df)
+        return seg
+
+    @classmethod
+    def from_artifact(cls, artifact):
+        """Reconstruct a Segmenter from a torch.save'd artifact dict.
+
+        The artifact's ``net`` spec must carry ``frame_shift``, ``sr``, and
+        ``mel_frame_shift_ms`` — these were the values used at fit time.
+        """
+        net_spec = artifact["net"]
+        for key in ("frame_shift", "sr", "mel_frame_shift_ms"):
+            assert (
+                key in net_spec
+            ), f"artifact['net'] missing required key '{key}'. "
+        components = {
+            "pv_ipa": PhonologicalVectors.from_state(
+                artifact["phonvecs"]["ipa"]
+            ),
+            "pv_l1": PhonologicalVectors.from_state(
+                artifact["phonvecs"]["l_1"]
+            ),
+            "pv_r1": PhonologicalVectors.from_state(
+                artifact["phonvecs"]["r_1"]
+            ),
+            "W_r1_to_ipa": artifact["regressors"]["W_r1_to_ipa"],
+            "W_l1_to_ipa": artifact["regressors"]["W_l1_to_ipa"],
+            "silence_handler": SilenceHandler.from_state(
+                artifact["silence_detector"]
+            ),
+        }
+        return cls(
+            frame_shift=net_spec["frame_shift"],
+            sr=net_spec["sr"],
+            mel_frame_shift_ms=net_spec["mel_frame_shift_ms"],
+            _from_components=components,
+            hparams=artifact.get("hparams"),
+        )
+
+    def to_artifact(self, *, net_spec, tune_metrics=None):
+        """Serialize the Segmenter to a self-contained dict (saveable via torch.save).
+
+        net_spec: dict describing the encoder used for fitting; must contain
+            ``hf_repo``, ``encoder_layer``, ``frame_shift``, ``sr``,
+            ``mel_frame_shift_ms``.
+        tune_metrics: optional dict with the chosen-config metrics + grid trace.
+        """
+        required = {"frame_shift", "sr", "mel_frame_shift_ms"}
+        missing = required - set(net_spec)
+        assert not missing, f"net_spec missing required keys: {missing}"
+        return {
+            "phonvecs": {
+                "ipa": self.pv_ipa.to_state(),
+                "l_1": self.pv_l1.to_state(),
+                "r_1": self.pv_r1.to_state(),
+            },
+            "regressors": {
+                "W_r1_to_ipa": self.W_r1_to_ipa,
+                "W_l1_to_ipa": self.W_l1_to_ipa,
+            },
+            "silence_detector": self.silence_handler.to_state(),
+            "hparams": dict(self.hparams),
+            "net": dict(net_spec),
+            "tune_metrics": tune_metrics,
+        }
+
+    def with_hparams(self, hparams_override):
+        """Return a copy with `hparams_override` merged on top.
+
+        Shares phonological-vector state and the silence handler, so cheap
+        enough to call inside a grid loop."""
+        new = self.__class__.__new__(self.__class__)
+        new.pv_ipa = self.pv_ipa
+        new.pv_l1 = self.pv_l1
+        new.pv_r1 = self.pv_r1
+        new.W_r1_to_ipa = self.W_r1_to_ipa
+        new.W_l1_to_ipa = self.W_l1_to_ipa
+        new.silence_handler = self.silence_handler
+        new.frame_shift = self.frame_shift
+        new.sr = self.sr
+        new.mel_frame_shift_ms = self.mel_frame_shift_ms
+        new.hparams = {**self.hparams, **hparams_override}
+        return new
 
     def _signal(
         self,
@@ -380,60 +664,91 @@ class Segmenter:
         proj_r1: np.ndarray,
         proj_l1: np.ndarray,
         waveform_np: np.ndarray,
+        kwargs: dict,
     ) -> np.ndarray:
-        kw = self.COMBINED_SIGNAL_KWARGS[name]
         if name == "frame_delta":
-            return _delta(proj_ipa, kw["offset"])
+            return _delta(proj_ipa, kwargs["offset"])
         if name == "fwd_delta":
-            return _delta(proj_r1, kw["offset"])
+            return _delta(proj_r1, kwargs["offset"])
         if name == "bwd_delta":
-            return _delta(proj_l1, kw["offset"])
+            return _delta(proj_l1, kwargs["offset"])
         if name == "fwd_contrast":
-            return _fwd_contrast(proj_ipa, proj_r1, self.W_r1_to_ipa, kw["lookahead"])
+            return _fwd_contrast(
+                proj_ipa, proj_r1, self.W_r1_to_ipa, kwargs["lookahead"]
+            )
         if name == "bwd_contrast":
-            return _bwd_contrast(proj_ipa, proj_l1, self.W_l1_to_ipa, kw["lookbehind"])
+            return _bwd_contrast(
+                proj_ipa, proj_l1, self.W_l1_to_ipa, kwargs["lookbehind"]
+            )
         if name == "mel_svf":
             return _mel_svf_signal(
-                waveform_np, left=kw["left"], right=kw["right"], target_len=proj_ipa.shape[0]
+                waveform_np,
+                left=kwargs["left"],
+                right=kwargs["right"],
+                target_len=proj_ipa.shape[0],
+                sr=self.sr,
+                mel_frame_shift_ms=self.mel_frame_shift_ms,
             )
         raise ValueError(f"Unknown signal: {name}")
 
     def _combined_signal(self, proj_ipa, proj_r1, proj_l1, waveform_np):
+        h = self.hparams
+        norm = h["norm_method"]
         components = []
-        for signal_name in self.COMBINED_SIGNALS:
-            sig = self._signal(signal_name, proj_ipa, proj_r1, proj_l1, waveform_np)
-            shifted = _shift_signal(sig, self.COMBINED_SIGNAL_SHIFTS[signal_name])
-            ranked = shifted - np.nanmin(shifted)
-            components.append(ranked)
+        for signal_name in h["combined_signals"]:
+            sig = self._signal(
+                signal_name,
+                proj_ipa,
+                proj_r1,
+                proj_l1,
+                waveform_np,
+                kwargs=h["signal_kwargs"][signal_name],
+            )
+            shifted = _shift_signal(sig, h["signal_shifts"][signal_name])
+            components.append(_normalize_signal(shifted, norm))
 
-        stacked = np.stack(components, axis=0)  # (n_signals, T)
-        if self.COMBINED_DROP_K > 0:
-            stacked = np.sort(stacked, axis=0)[self.COMBINED_DROP_K :]
+        stacked = np.stack(components, axis=0)
+        if h["drop_k"] > 0:
+            stacked = np.sort(stacked, axis=0)[h["drop_k"] :]
+        return _combine_stacked(stacked, norm)
 
-        return np.prod(stacked, axis=0)
+    def segment(
+        self, net_feats, waveform_np, use_combined=None, snap_silence=None
+    ):
+        h = self.hparams
+        if use_combined is None:
+            use_combined = h["use_combined"]
+        if snap_silence is None:
+            snap_silence = h["snap_silence"]
 
-    def segment(self, wavlm_feats, waveform_np, use_combined=True, snap_silence=True):
-        proj_ipa = self.pv_ipa.project_raw(wavlm_feats)
-        proj_r1 = self.pv_r1.project_raw(wavlm_feats)
-        proj_l1 = self.pv_l1.project_raw(wavlm_feats)
+        proj_ipa = self.pv_ipa.project_raw(net_feats)
+        proj_r1 = self.pv_r1.project_raw(net_feats)
+        proj_l1 = self.pv_l1.project_raw(net_feats)
 
         if use_combined:
-            signal = self._combined_signal(proj_ipa, proj_r1, proj_l1, waveform_np)
-            prominence = self.COMBINED_PROMINENCE
-        else:
-            # Careful! This is tuned on a subset of VoxAngeles
-            signal = _shift_signal(
-                _fwd_contrast(proj_ipa, proj_r1, self.W_r1_to_ipa, lookahead=2), shift_frames=2
+            signal = self._combined_signal(
+                proj_ipa, proj_r1, proj_l1, waveform_np
             )
-            prominence = 0.1
+            prominence = h["combined_prominence"]
+        else:
+            sig = self._signal(
+                h["single_signal_name"],
+                proj_ipa,
+                proj_r1,
+                proj_l1,
+                waveform_np,
+                kwargs=h["single_signal_kwargs"],
+            )
+            signal = _shift_signal(sig, h["single_signal_shift"])
+            prominence = h["single_signal_prominence"]
 
         preds = find_peaks(signal, prominence=prominence)[0]
-        silence_mask = self.silence_handler.predict_silence_mask(wavlm_feats)
         if snap_silence:
+            silence_mask = self.silence_handler.predict_silence_mask(net_feats)
             preds = self.silence_handler.handle_silence(
                 preds=preds,
                 silence_mask=silence_mask,
-                snap_tolerance=2,
+                snap_tolerance=h["snap_tolerance"],
             )
 
         return preds
