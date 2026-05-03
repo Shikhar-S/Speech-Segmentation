@@ -1,0 +1,33 @@
+# @package _global_
+# python src/main.py experiment=inference/mfa_single \
+#     inference.out_file=exp/runs/mfa_single/mfa_single.jsonl
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_mfa_single"
+tags: ["mfa", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/timit-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/mfa_single.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+  inference_runner:
+    _target_: src.model.mfa.inference_single.build_mfa_single_inference
+    dictionary: english_mfa
+    acoustic_model: english_mfa
+    sr: 16000

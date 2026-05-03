@@ -1,5 +1,7 @@
 """Inference with Phonvec segmentation using distributed_inference harness.
 
+# TODO(shikhar): keep inference.py at the same place, baselines are at recipe level?
+# where should mfa inference be?
 To use this, put the following in config:
     inference_runner:
       _target_: src.model.phonvec.inference.build_phonvec_inference
