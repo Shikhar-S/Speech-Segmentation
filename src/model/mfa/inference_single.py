@@ -9,8 +9,6 @@ Usage (via distributed_inference harness):
         data.hf_repo=changelinglab/timit-segment
 """
 
-from __future__ import annotations
-
 import subprocess
 import tempfile
 from collections.abc import Sequence

@@ -11,8 +11,6 @@ Usage:
         --mfa_cache_dir exp/cache/mfa
 """
 
-from __future__ import annotations
-
 import argparse
 import contextlib
 import dataclasses

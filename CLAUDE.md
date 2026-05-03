@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**PhoneBench** is a phonetic model benchmarking framework built on PyTorch Lightning + Hydra. It evaluates phone recognition and segmentation across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). The primary encoders are **XEUS** (cross-lingual speech encoder) and **PhoneticXEUS** (XEUS with interCTC self-conditioning at layers 4, 8, 12). Legacy encoder: **PowSM** (CTC-Attention hybrid encoder-decoder).
+A phonetic modeling research framework built on PyTorch Lightning + Hydra. Covers phone recognition, forced alignment, and segmentation across diverse datasets and phonetic representations (IPA, ARPAbet, etc.). Primary encoders: **XEUS** (cross-lingual speech encoder) and **PhoneticXEUS** (XEUS with interCTC self-conditioning at layers 4, 8, 12). Legacy encoder: **PowSM** (EBranchformer CTC-Attention hybrid). Forced alignment via **MFA** (batch and single-utterance).
 
 ## Environment Setup
 
@@ -47,6 +47,9 @@ python -m src.recipe.segment_recognize.model_module
 ## General Instruction on Coding Style
 Prefer to make new files or functions with minimal changes to original code. Do not bloat the code with unnecessary try catch. Be biased towards simplicity, but if there are any major decisions be proactive to ask the user.
 
+- **Data model first.** Define the data structure before the algorithm. Eliminate special cases by fixing the shape of the data, not by adding conditionals. If the structure is wrong, the algorithm is irrelevant.
+- **Simplicity over generality.** Write the dumbest code that is obviously right. No speculative abstractions, no flexibility nobody asked for, no cleverness for its own sake. Every extra line is a liability — if 50 lines solve it, 500 lines is a confession.
+- **Surgical changes.** Touch only what the request requires. No drive-by refactors, no unrelated edits, no vanity cleanup. Every changed line must have a direct reason to exist. Mention unrelated problems; do not start a second project.
 - **Extract helpers with descriptive names.** Non-trivial logic embedded in orchestration methods should be pulled into named helpers. Names should document intent. Helpers should hide complexity, not rename simplicity or introduce unnecessary layers — extract when the logic is non-trivial, not just to give a readable name to something already readable inline.
 - **Guard clause first.** Handle the no-op or trivial case with an early return at the top; keep the main logic unindented.
 - **Preserve caller uniformity.** Side effects that affect only part of a shared structure should be encapsulated in helpers so the caller can treat all cases identically, without special-casing.

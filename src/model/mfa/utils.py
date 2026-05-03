@@ -1,7 +1,5 @@
 """Shared utilities for MFA inference modules."""
 
-from __future__ import annotations
-
 import json
 import os
 import subprocess
@@ -106,6 +104,7 @@ def _phones_from_mfa_json(json_path: Path) -> list[SegmentationUnit]:
     with open(json_path) as f:
         data = json.load(f)
     tiers = data["tiers"]
+    # tiers may be a list or dict depending on MFA version.
     tier_iter = tiers.values() if isinstance(tiers, dict) else tiers
     phones_tier = next(
         t for t in tier_iter if t["name"].endswith(" - phones")
