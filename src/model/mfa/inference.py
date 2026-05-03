@@ -4,12 +4,14 @@ MFA documentation: https://montreal-forced-aligner.readthedocs.io/en/latest/
 
 Usage:
     micromamba activate mfa
-    python -m src.model.mfa.inference \
-        --hf_repo changelinglab/timit-segment \
-        --split test \
-        --out_file exp/runs/mfa_timit/mfa.jsonl \
+    python -m src.model.mfa.inference \\
+        --hf_repo changelinglab/timit-segment \\
+        --split test \\
+        --out_file exp/runs/mfa_timit/mfa.jsonl \\
         --mfa_cache_dir exp/cache/mfa
 """
+
+from __future__ import annotations
 
 import argparse
 import contextlib
@@ -18,7 +20,6 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 from src.data.segmentation.segmentation_dataset import (
     DummyTokenizer,
@@ -38,7 +39,7 @@ def _build_corpus(
     corpus_dir: Path,
     sr: int = 16000,
     use_phones: bool = True,
-) -> Tuple[Dict[str, int], Set[str]]:
+) -> tuple[dict[str, int], set[str]]:
     """Write a Prosodylab-format corpus from a SegmentationDataset.
 
     Creates corpus_dir/{speaker_id}/{utt_id}.wav and .lab for each item.
@@ -55,8 +56,8 @@ def _build_corpus(
         Tuple of ({utt_id: dataset_index}, set of all phone symbols seen).
         The phone set is empty when use_phones is False.
     """
-    utt_idx_map: Dict[str, int] = {}
-    all_phones: Set[str] = set()
+    utt_idx_map: dict[str, int] = {}
+    all_phones: set[str] = set()
     for i in range(len(dataset)):
         item = dataset[i]
         utt_id: str = item["utt_id"]
@@ -81,7 +82,7 @@ def _run_align(
     output_dir: Path,
     dictionary: str,
     acoustic_model: str,
-    env: Optional[Dict[str, str]] = None,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Run mfa align on the corpus directory.
 
@@ -90,7 +91,7 @@ def _run_align(
         output_dir: Directory where MFA writes output JSON files.
         dictionary: MFA dictionary name or path to a custom dictionary file.
         acoustic_model: MFA acoustic model name or path.
-        env: Environment dict (from ``mfa_env``); controls MFA_ROOT_DIR.
+        env: Environment dict from ``mfa_env``; controls MFA_ROOT_DIR.
     """
     subprocess.run(
         [
@@ -105,21 +106,21 @@ def _run_align(
 
 def _collect_results(
     output_dir: Path,
-    utt_idx_map: Dict[str, int],
+    utt_idx_map: dict[str, int],
     dataset,
-) -> Dict[int, dict]:
+) -> dict[int, dict]:
     """Walk MFA output JSONs and assemble per-utterance result records.
 
     Args:
-        output_dir: Root of MFA output (mirrors corpus speaker-subdir structure).
+        output_dir: Root of MFA output (mirrors corpus speaker-subdir layout).
         utt_idx_map: Mapping {utt_id: dataset_index} from _build_corpus.
-        dataset: SegmentationDataset (used to fetch ground-truth passthrough data).
+        dataset: SegmentationDataset for ground-truth passthrough data.
 
     Returns:
         {dataset_index: {"pred": List[SegmentationUnit], "passthrough": dict}}.
-        Utterances that MFA failed to align (no output JSON) are silently omitted.
+        Utterances that MFA failed to align (no output JSON) are omitted.
     """
-    records: Dict[int, dict] = {}
+    records: dict[int, dict] = {}
     for json_path in output_dir.rglob("*.json"):
         utt_id = json_path.stem
         if utt_id not in utt_idx_map:
@@ -146,8 +147,8 @@ def run_mfa_batch_inference(
     acoustic_model: str = "english_mfa",
     sr: int = 16000,
     cache_dir: str = "exp/cache/hf",
-    mfa_cache_dir: Optional[str] = None,
-    temp_dir: Optional[str] = None,
+    mfa_cache_dir: str | None = None,
+    temp_dir: str | None = None,
     use_phones: bool = True,
 ) -> None:
     """Build a speaker corpus, run mfa align, write eval-compatible JSONL.
@@ -159,23 +160,19 @@ def run_mfa_batch_inference(
         hf_repo: HuggingFace dataset repository.
         split: Dataset split to process (e.g. "test").
         out_file: Output JSONL path.
-        dictionary: MFA dictionary name or path.  Ignored when use_phones=True.
+        dictionary: MFA dictionary name or path. Ignored when use_phones=True.
         acoustic_model: MFA acoustic model name or path.
         sr: Target sample rate for saved WAV files.
         cache_dir: HuggingFace dataset cache directory.
-        mfa_cache_dir: Directory for MFA pretrained models (sets MFA_ROOT_DIR).
-            Models are downloaded here if not already present.
+        mfa_cache_dir: Directory for MFA pretrained models
+            (sets MFA_ROOT_DIR). Models are downloaded here if absent.
         temp_dir: If given, use this directory for intermediate corpus and
             output files instead of a managed temporary directory.
         use_phones: If True (default), write the dataset's phone sequence to
-            .lab and generate a phone-to-phone dictionary on the fly, bypassing
-            word-level dictionary lookup.  Requires the phone symbols to be in
-            the acoustic model's phone set.  If False, use the word transcript
-            and the named dictionary.
+            .lab and generate a phone-to-phone dictionary on the fly.
+            If False, use the word transcript and the named dictionary.
     """
     env = mfa_env(mfa_cache_dir)
-    # When use_phones=True we supply our own dictionary file; only the
-    # acoustic model needs to be pre-downloaded.
     ensure_mfa_model(
         acoustic_model,
         dictionary=None if use_phones else dictionary,
@@ -212,7 +209,8 @@ def run_mfa_batch_inference(
 
         print("Running mfa align ...", flush=True)
         _run_align(
-            corpus_dir, output_dir, effective_dictionary, acoustic_model, env=env
+            corpus_dir, output_dir, effective_dictionary, acoustic_model,
+            env=env,
         )
 
         print("Collecting results ...", flush=True)
@@ -224,14 +222,20 @@ def run_mfa_batch_inference(
         for i, record in records.items():
             pred_dicts = [dataclasses.asdict(u) for u in record["pred"]]
             line = json.dumps(
-                {str(i): {"pred": pred_dicts, "passthrough": record["passthrough"]}},
+                {
+                    str(i): {
+                        "pred": pred_dicts,
+                        "passthrough": record["passthrough"],
+                    }
+                },
                 ensure_ascii=False,
             )
             f.write(line + "\n")
     print(f"Wrote {len(records)} utterances to {out_file}.", flush=True)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """CLI entry point for MFA batch forced-alignment inference."""
     parser = argparse.ArgumentParser(
         description="MFA batch forced-alignment inference → JSONL"
     )
@@ -252,7 +256,7 @@ if __name__ == "__main__":
         "--no_use_phones",
         dest="use_phones",
         action="store_false",
-        help="Use word transcripts + named dictionary instead of phone sequences.",
+        help="Use word transcripts + named dictionary instead of phones.",
     )
     parser.set_defaults(use_phones=True)
     args = parser.parse_args()
@@ -268,3 +272,7 @@ if __name__ == "__main__":
         temp_dir=args.temp_dir,
         use_phones=args.use_phones,
     )
+
+
+if __name__ == "__main__":
+    main()

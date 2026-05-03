@@ -9,10 +9,13 @@ Usage (via distributed_inference harness):
         data.hf_repo=changelinglab/timit-segment
 """
 
+from __future__ import annotations
+
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, TypeAlias
 
 import numpy as np
 import torch
@@ -26,17 +29,24 @@ from src.model.mfa.utils import (
     mfa_env,
 )
 
-# Type for one entry in language_model_map: [dictionary, acoustic_model]
-_ModelEntry = Union[Tuple[str, str], Sequence[str]]
+_ModelEntry: TypeAlias = tuple[str, str] | Sequence[str]
 
 
 class MFASingleInference:
     """Per-utterance forced alignment using mfa align_one.
 
     For monolingual datasets, set ``dictionary`` and ``acoustic_model``
-    directly.  For multilingual datasets (e.g. VoxAngeles), pass a
+    directly. For multilingual datasets (e.g. VoxAngeles), pass a
     ``language_model_map`` keyed by ISO 639-3 code; utterances whose
     language is not in the map are skipped (return ``[]``).
+
+    Attributes:
+        dictionary: Default MFA dictionary name or path.
+        acoustic_model: Default MFA acoustic model name or path.
+        sr: Expected sample rate of incoming waveforms.
+        language_model_map: ISO 639-3 → [dictionary, acoustic_model] mapping.
+        use_phones: If True, align phone sequences directly.
+        recognizer: Optional callable for producing transcripts from speech.
     """
 
     def __init__(
@@ -44,33 +54,30 @@ class MFASingleInference:
         dictionary: str = "english_mfa",
         acoustic_model: str = "english_mfa",
         sr: int = 16000,
-        language_model_map: Optional[Dict[str, _ModelEntry]] = None,
-        cache_dir: Optional[str] = None,
+        language_model_map: dict[str, _ModelEntry] | None = None,
+        cache_dir: str | None = None,
         use_phones: bool = True,
-        recognizer: Optional[Any] = None,
+        recognizer: Any | None = None,
     ):
         """Args:
-        dictionary: Default MFA dictionary name or path.  Ignored when
+        dictionary: Default MFA dictionary name or path. Ignored when
             use_phones=True.
         acoustic_model: Default MFA acoustic model name or path.
         sr: Expected sample rate of incoming waveforms.
         language_model_map: Optional mapping from ISO 639-3 language code to
-            [dictionary, acoustic_model].  When provided, the model is
-            selected per utterance from kwargs["language"].  Utterances
-            whose language is absent from the map are skipped.
+            [dictionary, acoustic_model]. Utterances whose language is
+            absent from the map are skipped (return []).
         cache_dir: Directory for MFA pretrained models (sets MFA_ROOT_DIR).
             Models are downloaded here if not already present.
         use_phones: If True (default), write the dataset's phone sequence to
             .lab and generate a per-utterance phone-to-phone dictionary,
-            bypassing word-level dictionary lookup.  Requires the phone
-            symbols to be in the acoustic model's phone set.  If False, use
-            the word transcript and the named dictionary.
-        recognizer: Optional callable (PR or ASR model).  When provided,
-            the waveform is passed through it first and its output transcript
-            replaces the dataset's phones/text.  Expected to return
-            List[Dict] with "predicted_transcript" (slash-separated phones)
-            and "processed_transcript" (word text); use_phones controls
-            which field is used.
+            bypassing word-level dictionary lookup. Requires the phone
+            symbols to be in the acoustic model's phone set.
+        recognizer: Optional callable (PR or ASR model). When provided,
+            the waveform is passed through it first and its output replaces
+            the dataset's phones/text. Expected to return List[Dict] with
+            "predicted_transcript" (slash-separated phones) and
+            "processed_transcript" (word text); use_phones selects which.
         """
         self.dictionary = dictionary
         self.acoustic_model = acoustic_model
@@ -82,25 +89,28 @@ class MFASingleInference:
         self._download_all_models()
 
     def _download_all_models(self) -> None:
-        """Ensure every acoustic model (and dictionary if not use_phones) is downloaded."""
+        """Download all required MFA models if not already present."""
         if self.use_phones:
-            # Provide our own dictionary file at runtime; only acoustic models needed.
             acoustic_models = [self.acoustic_model]
             if self.language_model_map:
-                acoustic_models += [v[1] for v in self.language_model_map.values()]
+                acoustic_models += [
+                    v[1] for v in self.language_model_map.values()
+                ]
             for am in dict.fromkeys(acoustic_models):
                 ensure_mfa_model(am, dictionary=None, env=self._env)
         else:
-            pairs: List[Tuple[str, str]] = [(self.dictionary, self.acoustic_model)]
+            pairs: list[tuple[str, str]] = [
+                (self.dictionary, self.acoustic_model)
+            ]
             if self.language_model_map:
-                pairs += [(v[0], v[1]) for v in self.language_model_map.values()]
-            for dictionary, acoustic_model in dict.fromkeys(pairs):
-                ensure_mfa_model(acoustic_model, dictionary, env=self._env)
+                pairs += [
+                    (v[0], v[1]) for v in self.language_model_map.values()
+                ]
+            for dict_name, model_name in dict.fromkeys(pairs):
+                ensure_mfa_model(model_name, dict_name, env=self._env)
 
-    def _run_recognizer(
-        self, sp: torch.Tensor
-    ) -> Union[List[str], str]:
-        """Run self.recognizer on sp and return phones list or word transcript.
+    def _run_recognizer(self, sp: torch.Tensor) -> list[str] | str:
+        """Run self.recognizer on sp and return phones or word transcript.
 
         Args:
             sp: 1D float waveform (already sliced to valid length).
@@ -115,8 +125,10 @@ class MFASingleInference:
             return [p for p in raw.split("/") if p]
         return record["processed_transcript"]
 
-    def _resolve_model(self, language: Optional[str]) -> Optional[Tuple[str, str]]:
-        """Return (dictionary, acoustic_model) for this utterance, or None to skip."""
+    def _resolve_model(
+        self, language: str | None
+    ) -> tuple[str, str] | None:
+        """Resolve the model pair for this utterance, or None if unsupported."""
         if self.language_model_map is None:
             return self.dictionary, self.acoustic_model
         if language is None or language not in self.language_model_map:
@@ -126,16 +138,16 @@ class MFASingleInference:
 
     def __call__(
         self, speech, speech_length, text: str, **kwargs
-    ) -> List[SegmentationUnit]:
+    ) -> list[SegmentationUnit]:
         """Align one utterance and return phone-level boundaries.
 
         Args:
             speech: 1D waveform tensor or numpy array.
             speech_length: Number of valid samples.
             text: Utterance word transcript (used when use_phones=False).
-            **kwargs: Dataset item extras.  ``language`` (ISO 639-3) is used
+            **kwargs: Dataset item extras. ``language`` (ISO 639-3) is used
                 when language_model_map is set; ``phones`` (list of phone
-                strings) is used when use_phones=True.
+                strings) is used when use_phones=True and recognizer is None.
 
         Returns:
             Phone-level SegmentationUnit list with start/end in seconds.
@@ -144,9 +156,7 @@ class MFASingleInference:
         model = self._resolve_model(kwargs.get("language"))
         if model is None:
             return []
-        _, acoustic_model = model
-        # When use_phones=False, use the pretrained dictionary from the model pair.
-        pretrained_dictionary = model[0]
+        pretrained_dictionary, acoustic_model = model
 
         if isinstance(speech, np.ndarray):
             speech = torch.from_numpy(speech)
@@ -155,18 +165,20 @@ class MFASingleInference:
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             if self.use_phones:
-                if self.recognizer is not None:
-                    phones: List[str] = self._run_recognizer(sp)
-                else:
-                    phones = kwargs.get("phones", [])
+                phones: list[str] = (
+                    self._run_recognizer(sp)
+                    if self.recognizer is not None
+                    else kwargs.get("phones", [])
+                )
                 transcript = " ".join(phones)
                 build_phone_dict([phones], tmp / "phone_dict.txt")
                 dictionary = str(tmp / "phone_dict.txt")
             else:
-                if self.recognizer is not None:
-                    transcript = self._run_recognizer(sp)
-                else:
-                    transcript = text
+                transcript = (
+                    self._run_recognizer(sp)
+                    if self.recognizer is not None
+                    else text
+                )
                 dictionary = pretrained_dictionary
 
             _save_utterance(sp, transcript, tmp / "item.wav", self.sr)
@@ -190,10 +202,10 @@ def build_mfa_single_inference(
     dictionary: str = "english_mfa",
     acoustic_model: str = "english_mfa",
     sr: int = 16000,
-    language_model_map: Optional[Dict[str, _ModelEntry]] = None,
-    cache_dir: Optional[str] = None,
+    language_model_map: dict[str, _ModelEntry] | None = None,
+    cache_dir: str | None = None,
     use_phones: bool = True,
-    recognizer: Optional[Any] = None,
+    recognizer: Any | None = None,
 ) -> MFASingleInference:
     """Hydra entry point: instantiate MFASingleInference.
 
@@ -203,10 +215,10 @@ def build_mfa_single_inference(
         sr: Expected sample rate of incoming waveforms.
         language_model_map: Optional ISO 639-3 → [dictionary, acoustic_model]
             mapping for multilingual datasets.
-        cache_dir: Directory for MFA pretrained models.  Downloaded if absent.
+        cache_dir: Directory for MFA pretrained models. Downloaded if absent.
         use_phones: If True (default), align phone sequences directly instead
             of word transcripts.
-        recognizer: Optional PR or ASR callable.  When set, its output
+        recognizer: Optional PR or ASR callable. When set, its output
             transcript replaces the dataset's phones/text field.
     """
     return MFASingleInference(

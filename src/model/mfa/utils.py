@@ -1,10 +1,12 @@
 """Shared utilities for MFA inference modules."""
 
+from __future__ import annotations
+
 import json
 import os
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 import torch
 import torchaudio
@@ -12,15 +14,13 @@ import torchaudio
 from src.metrics.segmentation_evaluator import SegmentationUnit
 
 
-def mfa_env(cache_dir: Optional[str] = None) -> Dict[str, str]:
-    """Return an os.environ copy with MFA_ROOT_DIR set to cache_dir.
+def mfa_env(cache_dir: str | None = None) -> dict[str, str]:
+    """Return os.environ with MFA_ROOT_DIR set to cache_dir.
 
-    MFA reads and writes pretrained models from MFA_ROOT_DIR.  Setting it
-    explicitly keeps models out of ~/Documents/MFA and in the project cache.
+    Keeps pretrained models in the project cache instead of ~/Documents/MFA.
 
     Args:
-        cache_dir: Directory for MFA models. If None, MFA uses its default
-            (~~/Documents/MFA).
+        cache_dir: MFA model directory. If None, MFA uses its default.
 
     Returns:
         A copy of os.environ, optionally with MFA_ROOT_DIR added.
@@ -31,41 +31,41 @@ def mfa_env(cache_dir: Optional[str] = None) -> Dict[str, str]:
     return env
 
 
+def _mfa_model_present(
+    model_type: str, name: str, env: dict[str, str]
+) -> bool:
+    result = subprocess.run(
+        ["mfa", "model", "list", model_type],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    return name in result.stdout
+
+
 def ensure_mfa_model(
     acoustic_model: str,
-    dictionary: Optional[str] = None,
-    env: Optional[Dict[str, str]] = None,
+    dictionary: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Download acoustic_model and (optionally) dictionary if absent.
 
-    Uses ``mfa model list`` to check before downloading so already-present
-    models are not re-fetched.  Pass ``dictionary=None`` when providing a
-    custom phone-to-phone dictionary file at runtime (use_phones=True).
+    Pass dictionary=None when supplying a custom phone-to-phone dictionary
+    file at runtime (use_phones=True mode).
 
     Args:
         acoustic_model: MFA acoustic model name (e.g. ``english_mfa``).
-        dictionary: MFA dictionary name, or None to skip dictionary download.
-        env: Environment dict (from ``mfa_env``).  Uses os.environ if None.
+        dictionary: MFA dictionary name, or None to skip download.
+        env: Environment dict from ``mfa_env``; defaults to os.environ.
     """
     if env is None:
         env = os.environ.copy()
-
-    def _is_present(model_type: str, name: str) -> bool:
-        result = subprocess.run(
-            ["mfa", "model", "list", model_type],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
-        return name in result.stdout
-
     targets = [("acoustic", acoustic_model)]
     if dictionary is not None:
         targets.append(("dictionary", dictionary))
-
     for model_type, name in targets:
-        if not _is_present(model_type, name):
+        if not _mfa_model_present(model_type, name, env):
             print(f"Downloading MFA {model_type} model: {name}", flush=True)
             subprocess.run(
                 ["mfa", "model", "download", model_type, name],
@@ -74,16 +74,14 @@ def ensure_mfa_model(
             )
 
 
-def build_phone_dict(phones_iter: Iterable[List[str]], dict_path: Path) -> None:
+def build_phone_dict(
+    phones_iter: Iterable[list[str]], dict_path: Path
+) -> None:
     """Write a phone-to-phone MFA pronunciation dictionary.
 
-    Each unique non-empty phone symbol is written as a single-phone "word"
-    that maps to itself, e.g. ``ʃ\\tʃ``.  This lets MFA align a phone-sequence
-    transcript directly without a word-level pronunciation dictionary.
-
-    Note: Phone symbols must belong to the acoustic model's phone set for
-    alignment to succeed.  For ``english_mfa`` that means ARPABET; for IPA
-    phones use an IPA-compatible acoustic model.
+    Each unique non-empty phone is written as a one-phone "word" mapping to
+    itself (e.g. ``ʃ\\tʃ``), bypassing word-level dictionary lookup. Phone
+    symbols must belong to the acoustic model's phone set.
 
     Args:
         phones_iter: Iterable of phone lists, one per utterance.
@@ -95,23 +93,23 @@ def build_phone_dict(phones_iter: Iterable[List[str]], dict_path: Path) -> None:
             f.write(f"{phone}\t{phone}\n")
 
 
-def _phones_from_mfa_json(json_path: Path) -> List[SegmentationUnit]:
-    """Parse MFA JSON output for one utterance into phone-level SegmentationUnits.
+def _phones_from_mfa_json(json_path: Path) -> list[SegmentationUnit]:
+    """Parse an MFA JSON output file into phone-level SegmentationUnits.
 
     Args:
-        json_path: Path to the MFA-produced JSON file for a single utterance.
+        json_path: MFA-produced JSON file for a single utterance.
 
     Returns:
-        Phone-level segments with start/end in seconds and label.
-        Silence intervals (empty/sil/spn labels) are included; stripping is
-        left to eval_segmentation.py --strip-outer-silences.
+        Phone-level segments with start/end in seconds. Silence intervals
+        are included; strip them downstream if needed.
     """
     with open(json_path) as f:
         data = json.load(f)
     tiers = data["tiers"]
-    # tiers may be a list or dict depending on MFA version
     tier_iter = tiers.values() if isinstance(tiers, dict) else tiers
-    phones_tier = next(t for t in tier_iter if t["name"].endswith(" - phones"))
+    phones_tier = next(
+        t for t in tier_iter if t["name"].endswith(" - phones")
+    )
     return [
         SegmentationUnit(start=s, end=e, label=label if label else None)
         for s, e, label in phones_tier["entries"]
@@ -125,8 +123,8 @@ def _save_utterance(
 
     Args:
         speech: 1D float waveform tensor.
-        text: Utterance transcript (word text or space-joined phone sequence).
-        wav_path: Destination WAV path; the .lab file is written alongside it.
+        text: Utterance transcript (words or space-joined phones).
+        wav_path: Destination WAV path; .lab is written alongside it.
         sr: Sample rate.
     """
     torchaudio.save(str(wav_path), speech.unsqueeze(0), sr)
