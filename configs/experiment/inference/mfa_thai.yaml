@@ -1,0 +1,37 @@
+# @package _global_
+# Thai dataset (GTIMIT Thai).
+#   python src/main.py experiment=inference/mfa_thai \
+#       inference.out_file=exp/runs/mfa_thai/gtimit_tha.jsonl
+# Prerequisite: mfa model download acoustic thai_mfa
+#               mfa model download dictionary thai_mfa
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_mfa_thai"
+tags: ["mfa", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/gtimit-tha-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/mfa_thai.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+  inference_runner:
+    _target_: src.model.mfa.inference_single.build_mfa_single_inference
+    dictionary: thai_mfa
+    acoustic_model: thai_mfa
+    sr: 16000
+    cache_dir: ${paths.cache_dir}/mfa

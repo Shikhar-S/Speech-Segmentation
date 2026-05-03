@@ -2,17 +2,13 @@
 
 MFA documentation: https://montreal-forced-aligner.readthedocs.io/en/latest/
 
-Installation:
-    micromamba activate mfa
-    mfa model download acoustic english_mfa
-    mfa model download dictionary english_mfa
-
 Usage:
     micromamba activate mfa
     python -m src.model.mfa.inference \
         --hf_repo changelinglab/timit-segment \
         --split test \
-        --out_file exp/runs/mfa_timit/mfa.jsonl
+        --out_file exp/runs/mfa_timit/mfa.jsonl \
+        --mfa_cache_dir exp/cache/mfa
 """
 
 import argparse
@@ -28,7 +24,12 @@ from src.data.segmentation.segmentation_dataset import (
     DummyTokenizer,
     build_segmentation_dataset,
 )
-from src.model.mfa.utils import _phones_from_mfa_json, _save_utterance
+from src.model.mfa.utils import (
+    _phones_from_mfa_json,
+    _save_utterance,
+    ensure_mfa_model,
+    mfa_env,
+)
 
 
 def _build_corpus(dataset, corpus_dir: Path, sr: int = 16000) -> Dict[str, int]:
@@ -65,6 +66,7 @@ def _run_align(
     output_dir: Path,
     dictionary: str,
     acoustic_model: str,
+    env: Optional[Dict[str, str]] = None,
 ) -> None:
     """Run mfa align on the corpus directory.
 
@@ -73,6 +75,7 @@ def _run_align(
         output_dir: Directory where MFA writes output JSON files.
         dictionary: MFA dictionary name or path.
         acoustic_model: MFA acoustic model name or path.
+        env: Environment dict (from ``mfa_env``); controls MFA_ROOT_DIR.
     """
     subprocess.run(
         [
@@ -87,6 +90,7 @@ def _run_align(
             "--output_format",
             "json",
         ],
+        env=env,
         check=True,
     )
 
@@ -134,6 +138,7 @@ def run_mfa_batch_inference(
     acoustic_model: str = "english_mfa",
     sr: int = 16000,
     cache_dir: str = "exp/cache/hf",
+    mfa_cache_dir: Optional[str] = None,
     temp_dir: Optional[str] = None,
 ) -> None:
     """Build a speaker corpus, run mfa align, write eval-compatible JSONL.
@@ -149,10 +154,15 @@ def run_mfa_batch_inference(
         acoustic_model: MFA acoustic model name or path.
         sr: Target sample rate for saved WAV files.
         cache_dir: HuggingFace dataset cache directory.
+        mfa_cache_dir: Directory for MFA pretrained models (sets MFA_ROOT_DIR).
+            Models are downloaded here if not already present.
         temp_dir: If given, use this directory for intermediate corpus and
             output files instead of a managed temporary directory. Useful
             for inspecting intermediate files during debugging.
     """
+    env = mfa_env(mfa_cache_dir)
+    ensure_mfa_model(acoustic_model, dictionary, env)
+
     dataset = build_segmentation_dataset(
         hf_repo, split, tokenizer=DummyTokenizer(), cache_dir=cache_dir
     )
@@ -173,7 +183,7 @@ def run_mfa_batch_inference(
         utt_idx_map = _build_corpus(dataset, corpus_dir, sr=sr)
 
         print("Running mfa align ...", flush=True)
-        _run_align(corpus_dir, output_dir, dictionary, acoustic_model)
+        _run_align(corpus_dir, output_dir, dictionary, acoustic_model, env=env)
 
         print("Collecting results ...", flush=True)
         records = _collect_results(output_dir, utt_idx_map, dataset)
@@ -207,6 +217,7 @@ if __name__ == "__main__":
     parser.add_argument("--acoustic_model", default="english_mfa")
     parser.add_argument("--sr", type=int, default=16000)
     parser.add_argument("--cache_dir", default="exp/cache/hf")
+    parser.add_argument("--mfa_cache_dir", default=None)
     parser.add_argument(
         "--temp_dir",
         default=None,
@@ -221,5 +232,6 @@ if __name__ == "__main__":
         acoustic_model=args.acoustic_model,
         sr=args.sr,
         cache_dir=args.cache_dir,
+        mfa_cache_dir=args.mfa_cache_dir,
         temp_dir=args.temp_dir,
     )

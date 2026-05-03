@@ -1,0 +1,37 @@
+# @package _global_
+# English and accented-English datasets (TIMIT, Buckeye, GTIMIT L1/L2).
+# Override data.hf_repo at the command line, e.g.:
+#   python src/main.py experiment=inference/mfa_en \
+#       data.hf_repo=changelinglab/timit-segment \
+#       inference.out_file=exp/runs/mfa_en/timit.jsonl
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_mfa_en"
+tags: ["mfa", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/timit-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/mfa_en.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+  inference_runner:
+    _target_: src.model.mfa.inference_single.build_mfa_single_inference
+    dictionary: english_mfa
+    acoustic_model: english_mfa
+    sr: 16000
+    cache_dir: ${paths.cache_dir}/mfa

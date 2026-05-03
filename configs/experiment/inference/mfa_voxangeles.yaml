@@ -1,0 +1,57 @@
+# @package _global_
+# VoxAngeles (100+ languages). Only languages listed in language_model_map
+# are aligned; the rest are silently skipped (returned as empty predictions).
+#
+# Prerequisites — download each model before running:
+#   for lang in bengali czech danish dutch finnish greek hindi hungarian \
+#               persian; do
+#     mfa model download acoustic ${lang}_mfa
+#     mfa model download dictionary ${lang}_mfa
+#   done
+#
+#   python src/main.py experiment=inference/mfa_voxangeles \
+#       inference.out_file=exp/runs/mfa_voxangeles/voxangeles.jsonl
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_mfa_voxangeles"
+tags: ["mfa", "voxangeles", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/voxangeles-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/mfa_voxangeles.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+    - language
+  inference_runner:
+    _target_: src.model.mfa.inference_single.build_mfa_single_inference
+    sr: 16000
+    cache_dir: ${paths.cache_dir}/mfa
+    # ISO 639-3 → [dictionary, acoustic_model]
+    # Only languages with available MFA pretrained models are listed.
+    # Run `mfa model list` after downloading to verify names.
+    language_model_map:
+      ben: [bengali_mfa, bengali_mfa]
+      ces: [czech_mfa, czech_mfa]
+      dan: [danish_mfa, danish_mfa]
+      ell: [greek_mfa, greek_mfa]
+      fin: [finnish_mfa, finnish_mfa]
+      hin: [hindi_mfa, hindi_mfa]
+      hun: [hungarian_mfa, hungarian_mfa]
+      nld: [dutch_mfa, dutch_mfa]
+      pes: [persian_mfa, persian_mfa]
+      prs: [persian_mfa, persian_mfa]  # Dari — same model as Iranian Persian

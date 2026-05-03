@@ -1,13 +1,72 @@
 """Shared utilities for MFA inference modules."""
 
 import json
+import os
+import subprocess
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
 
 import torch
 import torchaudio
 
 from src.metrics.segmentation_evaluator import SegmentationUnit
+
+
+def mfa_env(cache_dir: Optional[str] = None) -> Dict[str, str]:
+    """Return an os.environ copy with MFA_ROOT_DIR set to cache_dir.
+
+    MFA reads and writes pretrained models from MFA_ROOT_DIR.  Setting it
+    explicitly keeps models out of ~/Documents/MFA and in the project cache.
+
+    Args:
+        cache_dir: Directory for MFA models. If None, MFA uses its default
+            (~~/Documents/MFA).
+
+    Returns:
+        A copy of os.environ, optionally with MFA_ROOT_DIR added.
+    """
+    env = os.environ.copy()
+    if cache_dir is not None:
+        env["MFA_ROOT_DIR"] = str(Path(cache_dir).resolve())
+    return env
+
+
+def ensure_mfa_model(
+    acoustic_model: str,
+    dictionary: str,
+    env: Optional[Dict[str, str]] = None,
+) -> None:
+    """Download acoustic_model and dictionary into MFA_ROOT_DIR if absent.
+
+    Uses ``mfa model list`` to check before downloading so already-present
+    models are not re-fetched.
+
+    Args:
+        acoustic_model: MFA acoustic model name (e.g. ``english_mfa``).
+        dictionary: MFA dictionary name (e.g. ``english_mfa``).
+        env: Environment dict (from ``mfa_env``).  Uses os.environ if None.
+    """
+    if env is None:
+        env = os.environ.copy()
+
+    def _is_present(model_type: str, name: str) -> bool:
+        result = subprocess.run(
+            ["mfa", "model", "list", model_type],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        return name in result.stdout
+
+    for model_type, name in [("acoustic", acoustic_model), ("dictionary", dictionary)]:
+        if not _is_present(model_type, name):
+            print(f"Downloading MFA {model_type} model: {name}", flush=True)
+            subprocess.run(
+                ["mfa", "model", "download", model_type, name],
+                env=env,
+                check=True,
+            )
 
 
 def _phones_from_mfa_json(json_path: Path) -> List[SegmentationUnit]:
