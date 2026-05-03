@@ -25,6 +25,7 @@ Usage:
         --mfa_cache_dir exp/cache/mfa \
         --run_dir exp/runs/mfa/topline_buckeye
 
+        
     python -m scripts.eval_segmentation "exp/runs/mfa/topline_timit/results.jsonl" --strip-outer-silences
     
     To align with orthographic transcript, use --units words and 
@@ -84,15 +85,14 @@ def _build_corpus(
         spk_dir = corpus_dir / str(item["speaker_id"])
         spk_dir.mkdir(parents=True, exist_ok=True)
         wav_path = spk_dir / f"{utt_id}.wav"
-        if not wav_path.exists():
-            speech = item["speech"][: item["speech_length"]].float()
-            if units == "phones":
-                phones = item["phones"]
-                transcript = " ".join(phones)
-                all_phones.update(p for p in phones if p)
-            else:
-                transcript = item["text"]
-            _save_utterance(speech, transcript, wav_path, sr)
+        speech = item["speech"][: item["speech_length"]].float()
+        if units == "phones":
+            phones = item["phones"]
+            transcript = " ".join(phones)
+            all_phones.update(p for p in phones if p)
+        else:
+            transcript = item["text"]
+        _save_utterance(speech, transcript, wav_path, sr)
         utt_idx_map[utt_id] = i
     return utt_idx_map, all_phones
 
@@ -190,7 +190,11 @@ def run_mfa_batch_inference(
     )
 
     dataset = build_segmentation_dataset(
-        hf_repo, split, tokenizer=DummyTokenizer(), cache_dir=cache_dir
+        hf_repo,
+        split,
+        tokenizer=DummyTokenizer(),
+        cache_dir=cache_dir,
+        transform=False,
     )
 
     run_dir = Path(run_dir)

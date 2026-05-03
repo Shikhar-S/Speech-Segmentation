@@ -323,12 +323,24 @@ if __name__ == "__main__":
         (),
         {"tokens2ids": lambda self, phones: [i for i in range(len(phones))]},
     )()
-    DATASET = "changelinglab/buckeye-segment"
+    # DATASET = "changelinglab/buckeye-segment"
     DATASET = "changelinglab/timit-segment"
-    dl = SegmentationDataModule(
-        hf_repo=DATASET, tokenizer=tokenizer, batch_size=2
+    # DATASET = "changelinglab/torgo-segment"
+    dataset = build_segmentation_dataset(
+        hf_repo=DATASET,
+        split="test",
+        tokenizer=tokenizer,
+        train_fraction=1.0,
+        cache_dir="exp/cache/hf",
+        transform=False,
     )
-    dl.setup()
-    for batch in dl.train_dataloader():
-        print(batch)
+    for item in dataset:
+        print(item)
         break
+    # dl = SegmentationDataModule(
+    #     hf_repo=DATASET, tokenizer=tokenizer, batch_size=2
+    # )
+    # dl.setup()
+    # for batch in dl.train_dataloader():
+    #     print(batch)
+    #     break
