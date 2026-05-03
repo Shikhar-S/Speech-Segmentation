@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import torch
 import torchaudio
@@ -33,17 +33,18 @@ def mfa_env(cache_dir: Optional[str] = None) -> Dict[str, str]:
 
 def ensure_mfa_model(
     acoustic_model: str,
-    dictionary: str,
+    dictionary: Optional[str] = None,
     env: Optional[Dict[str, str]] = None,
 ) -> None:
-    """Download acoustic_model and dictionary into MFA_ROOT_DIR if absent.
+    """Download acoustic_model and (optionally) dictionary if absent.
 
     Uses ``mfa model list`` to check before downloading so already-present
-    models are not re-fetched.
+    models are not re-fetched.  Pass ``dictionary=None`` when providing a
+    custom phone-to-phone dictionary file at runtime (use_phones=True).
 
     Args:
         acoustic_model: MFA acoustic model name (e.g. ``english_mfa``).
-        dictionary: MFA dictionary name (e.g. ``english_mfa``).
+        dictionary: MFA dictionary name, or None to skip dictionary download.
         env: Environment dict (from ``mfa_env``).  Uses os.environ if None.
     """
     if env is None:
@@ -59,7 +60,11 @@ def ensure_mfa_model(
         )
         return name in result.stdout
 
-    for model_type, name in [("acoustic", acoustic_model), ("dictionary", dictionary)]:
+    targets = [("acoustic", acoustic_model)]
+    if dictionary is not None:
+        targets.append(("dictionary", dictionary))
+
+    for model_type, name in targets:
         if not _is_present(model_type, name):
             print(f"Downloading MFA {model_type} model: {name}", flush=True)
             subprocess.run(
@@ -67,6 +72,27 @@ def ensure_mfa_model(
                 env=env,
                 check=True,
             )
+
+
+def build_phone_dict(phones_iter: Iterable[List[str]], dict_path: Path) -> None:
+    """Write a phone-to-phone MFA pronunciation dictionary.
+
+    Each unique non-empty phone symbol is written as a single-phone "word"
+    that maps to itself, e.g. ``ʃ\\tʃ``.  This lets MFA align a phone-sequence
+    transcript directly without a word-level pronunciation dictionary.
+
+    Note: Phone symbols must belong to the acoustic model's phone set for
+    alignment to succeed.  For ``english_mfa`` that means ARPABET; for IPA
+    phones use an IPA-compatible acoustic model.
+
+    Args:
+        phones_iter: Iterable of phone lists, one per utterance.
+        dict_path: Destination path for the dictionary file.
+    """
+    unique = sorted({p for phones in phones_iter for p in phones if p})
+    with open(dict_path, "w", encoding="utf-8") as f:
+        for phone in unique:
+            f.write(f"{phone}\t{phone}\n")
 
 
 def _phones_from_mfa_json(json_path: Path) -> List[SegmentationUnit]:
@@ -99,7 +125,7 @@ def _save_utterance(
 
     Args:
         speech: 1D float waveform tensor.
-        text: Utterance transcript.
+        text: Utterance transcript (word text or space-joined phone sequence).
         wav_path: Destination WAV path; the .lab file is written alongside it.
         sr: Sample rate.
     """

@@ -18,7 +18,7 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from src.data.segmentation.segmentation_dataset import (
     DummyTokenizer,
@@ -27,27 +27,36 @@ from src.data.segmentation.segmentation_dataset import (
 from src.model.mfa.utils import (
     _phones_from_mfa_json,
     _save_utterance,
+    build_phone_dict,
     ensure_mfa_model,
     mfa_env,
 )
 
 
-def _build_corpus(dataset, corpus_dir: Path, sr: int = 16000) -> Dict[str, int]:
+def _build_corpus(
+    dataset,
+    corpus_dir: Path,
+    sr: int = 16000,
+    use_phones: bool = True,
+) -> Tuple[Dict[str, int], Set[str]]:
     """Write a Prosodylab-format corpus from a SegmentationDataset.
 
     Creates corpus_dir/{speaker_id}/{utt_id}.wav and .lab for each item.
-    Skips existing WAV files so the function is safe to call on a partially
-    built corpus.
+    Skips existing WAV files so the function is safe to resume.
 
     Args:
         dataset: A SegmentationDataset instance.
         corpus_dir: Destination directory (must exist).
         sr: Sample rate for saved WAV files.
+        use_phones: If True, write the phone sequence to .lab instead of
+            the word transcript.
 
     Returns:
-        Mapping {utt_id: dataset_index} for all items written.
+        Tuple of ({utt_id: dataset_index}, set of all phone symbols seen).
+        The phone set is empty when use_phones is False.
     """
     utt_idx_map: Dict[str, int] = {}
+    all_phones: Set[str] = set()
     for i in range(len(dataset)):
         item = dataset[i]
         utt_id: str = item["utt_id"]
@@ -56,9 +65,15 @@ def _build_corpus(dataset, corpus_dir: Path, sr: int = 16000) -> Dict[str, int]:
         wav_path = spk_dir / f"{utt_id}.wav"
         if not wav_path.exists():
             speech = item["speech"][: item["speech_length"]].float()
-            _save_utterance(speech, item["text"], wav_path, sr)
+            if use_phones:
+                phones = item["phones"]
+                transcript = " ".join(phones)
+                all_phones.update(p for p in phones if p)
+            else:
+                transcript = item["text"]
+            _save_utterance(speech, transcript, wav_path, sr)
         utt_idx_map[utt_id] = i
-    return utt_idx_map
+    return utt_idx_map, all_phones
 
 
 def _run_align(
@@ -73,22 +88,15 @@ def _run_align(
     Args:
         corpus_dir: Prosodylab-format corpus directory.
         output_dir: Directory where MFA writes output JSON files.
-        dictionary: MFA dictionary name or path.
+        dictionary: MFA dictionary name or path to a custom dictionary file.
         acoustic_model: MFA acoustic model name or path.
         env: Environment dict (from ``mfa_env``); controls MFA_ROOT_DIR.
     """
     subprocess.run(
         [
-            "mfa",
-            "align",
-            str(corpus_dir),
-            dictionary,
-            acoustic_model,
-            str(output_dir),
-            "--clean",
-            "--overwrite",
-            "--output_format",
-            "json",
+            "mfa", "align",
+            str(corpus_dir), dictionary, acoustic_model, str(output_dir),
+            "--clean", "--overwrite", "--output_format", "json",
         ],
         env=env,
         check=True,
@@ -140,6 +148,7 @@ def run_mfa_batch_inference(
     cache_dir: str = "exp/cache/hf",
     mfa_cache_dir: Optional[str] = None,
     temp_dir: Optional[str] = None,
+    use_phones: bool = True,
 ) -> None:
     """Build a speaker corpus, run mfa align, write eval-compatible JSONL.
 
@@ -150,18 +159,28 @@ def run_mfa_batch_inference(
         hf_repo: HuggingFace dataset repository.
         split: Dataset split to process (e.g. "test").
         out_file: Output JSONL path.
-        dictionary: MFA dictionary name or path.
+        dictionary: MFA dictionary name or path.  Ignored when use_phones=True.
         acoustic_model: MFA acoustic model name or path.
         sr: Target sample rate for saved WAV files.
         cache_dir: HuggingFace dataset cache directory.
         mfa_cache_dir: Directory for MFA pretrained models (sets MFA_ROOT_DIR).
             Models are downloaded here if not already present.
         temp_dir: If given, use this directory for intermediate corpus and
-            output files instead of a managed temporary directory. Useful
-            for inspecting intermediate files during debugging.
+            output files instead of a managed temporary directory.
+        use_phones: If True (default), write the dataset's phone sequence to
+            .lab and generate a phone-to-phone dictionary on the fly, bypassing
+            word-level dictionary lookup.  Requires the phone symbols to be in
+            the acoustic model's phone set.  If False, use the word transcript
+            and the named dictionary.
     """
     env = mfa_env(mfa_cache_dir)
-    ensure_mfa_model(acoustic_model, dictionary, env)
+    # When use_phones=True we supply our own dictionary file; only the
+    # acoustic model needs to be pre-downloaded.
+    ensure_mfa_model(
+        acoustic_model,
+        dictionary=None if use_phones else dictionary,
+        env=env,
+    )
 
     dataset = build_segmentation_dataset(
         hf_repo, split, tokenizer=DummyTokenizer(), cache_dir=cache_dir
@@ -180,10 +199,21 @@ def run_mfa_batch_inference(
         output_dir.mkdir(exist_ok=True)
 
         print(f"Building corpus in {corpus_dir} ...", flush=True)
-        utt_idx_map = _build_corpus(dataset, corpus_dir, sr=sr)
+        utt_idx_map, all_phones = _build_corpus(
+            dataset, corpus_dir, sr=sr, use_phones=use_phones
+        )
+
+        if use_phones:
+            dict_path = tmp / "phone_dict.txt"
+            build_phone_dict([list(all_phones)], dict_path)
+            effective_dictionary = str(dict_path)
+        else:
+            effective_dictionary = dictionary
 
         print("Running mfa align ...", flush=True)
-        _run_align(corpus_dir, output_dir, dictionary, acoustic_model, env=env)
+        _run_align(
+            corpus_dir, output_dir, effective_dictionary, acoustic_model, env=env
+        )
 
         print("Collecting results ...", flush=True)
         records = _collect_results(output_dir, utt_idx_map, dataset)
@@ -194,12 +224,7 @@ def run_mfa_batch_inference(
         for i, record in records.items():
             pred_dicts = [dataclasses.asdict(u) for u in record["pred"]]
             line = json.dumps(
-                {
-                    str(i): {
-                        "pred": pred_dicts,
-                        "passthrough": record["passthrough"],
-                    }
-                },
+                {str(i): {"pred": pred_dicts, "passthrough": record["passthrough"]}},
                 ensure_ascii=False,
             )
             f.write(line + "\n")
@@ -223,6 +248,13 @@ if __name__ == "__main__":
         default=None,
         help="Keep intermediate corpus/output here instead of a temp dir.",
     )
+    parser.add_argument(
+        "--no_use_phones",
+        dest="use_phones",
+        action="store_false",
+        help="Use word transcripts + named dictionary instead of phone sequences.",
+    )
+    parser.set_defaults(use_phones=True)
     args = parser.parse_args()
     run_mfa_batch_inference(
         hf_repo=args.hf_repo,
@@ -234,4 +266,5 @@ if __name__ == "__main__":
         cache_dir=args.cache_dir,
         mfa_cache_dir=args.mfa_cache_dir,
         temp_dir=args.temp_dir,
+        use_phones=args.use_phones,
     )

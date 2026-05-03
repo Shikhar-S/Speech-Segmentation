@@ -21,6 +21,7 @@ from src.metrics.segmentation_evaluator import SegmentationUnit
 from src.model.mfa.utils import (
     _phones_from_mfa_json,
     _save_utterance,
+    build_phone_dict,
     ensure_mfa_model,
     mfa_env,
 )
@@ -45,10 +46,11 @@ class MFASingleInference:
         sr: int = 16000,
         language_model_map: Optional[Dict[str, _ModelEntry]] = None,
         cache_dir: Optional[str] = None,
+        use_phones: bool = True,
     ):
         """Args:
-        dictionary: Default MFA dictionary name or path (used when
-            language_model_map is None or language is absent from kwargs).
+        dictionary: Default MFA dictionary name or path.  Ignored when
+            use_phones=True.
         acoustic_model: Default MFA acoustic model name or path.
         sr: Expected sample rate of incoming waveforms.
         language_model_map: Optional mapping from ISO 639-3 language code to
@@ -57,22 +59,35 @@ class MFASingleInference:
             whose language is absent from the map are skipped.
         cache_dir: Directory for MFA pretrained models (sets MFA_ROOT_DIR).
             Models are downloaded here if not already present.
+        use_phones: If True (default), write the dataset's phone sequence to
+            .lab and generate a per-utterance phone-to-phone dictionary,
+            bypassing word-level dictionary lookup.  Requires the phone
+            symbols to be in the acoustic model's phone set.  If False, use
+            the word transcript and the named dictionary.
         """
         self.dictionary = dictionary
         self.acoustic_model = acoustic_model
         self.sr = sr
         self.language_model_map = language_model_map
+        self.use_phones = use_phones
         self._env = mfa_env(cache_dir)
         self._download_all_models()
 
     def _download_all_models(self) -> None:
-        """Ensure every model referenced by this instance is downloaded."""
-        pairs: List[Tuple[str, str]] = [(self.dictionary, self.acoustic_model)]
-        if self.language_model_map:
-            pairs += [(v[0], v[1]) for v in self.language_model_map.values()]
-        # deduplicate while preserving order
-        for dictionary, acoustic_model in dict.fromkeys(pairs):
-            ensure_mfa_model(acoustic_model, dictionary, self._env)
+        """Ensure every acoustic model (and dictionary if not use_phones) is downloaded."""
+        if self.use_phones:
+            # Provide our own dictionary file at runtime; only acoustic models needed.
+            acoustic_models = [self.acoustic_model]
+            if self.language_model_map:
+                acoustic_models += [v[1] for v in self.language_model_map.values()]
+            for am in dict.fromkeys(acoustic_models):
+                ensure_mfa_model(am, dictionary=None, env=self._env)
+        else:
+            pairs: List[Tuple[str, str]] = [(self.dictionary, self.acoustic_model)]
+            if self.language_model_map:
+                pairs += [(v[0], v[1]) for v in self.language_model_map.values()]
+            for dictionary, acoustic_model in dict.fromkeys(pairs):
+                ensure_mfa_model(acoustic_model, dictionary, env=self._env)
 
     def _resolve_model(self, language: Optional[str]) -> Optional[Tuple[str, str]]:
         """Return (dictionary, acoustic_model) for this utterance, or None to skip."""
@@ -91,9 +106,10 @@ class MFASingleInference:
         Args:
             speech: 1D waveform tensor or numpy array.
             speech_length: Number of valid samples.
-            text: Utterance transcript.
-            **kwargs: Dataset item extras; ``language`` (ISO 639-3) is used
-                when language_model_map is set.
+            text: Utterance word transcript (used when use_phones=False).
+            **kwargs: Dataset item extras.  ``language`` (ISO 639-3) is used
+                when language_model_map is set; ``phones`` (list of phone
+                strings) is used when use_phones=True.
 
         Returns:
             Phone-level SegmentationUnit list with start/end in seconds.
@@ -102,7 +118,9 @@ class MFASingleInference:
         model = self._resolve_model(kwargs.get("language"))
         if model is None:
             return []
-        dictionary, acoustic_model = model
+        _, acoustic_model = model
+        # When use_phones=False, use the pretrained dictionary from the model pair.
+        pretrained_dictionary = model[0]
 
         if isinstance(speech, np.ndarray):
             speech = torch.from_numpy(speech)
@@ -110,7 +128,16 @@ class MFASingleInference:
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            _save_utterance(sp, text, tmp / "item.wav", self.sr)
+            if self.use_phones:
+                phones: List[str] = kwargs.get("phones", [])
+                transcript = " ".join(phones)
+                build_phone_dict([phones], tmp / "phone_dict.txt")
+                dictionary = str(tmp / "phone_dict.txt")
+            else:
+                transcript = text
+                dictionary = pretrained_dictionary
+
+            _save_utterance(sp, transcript, tmp / "item.wav", self.sr)
             subprocess.run(
                 [
                     "mfa", "align_one",
@@ -133,6 +160,7 @@ def build_mfa_single_inference(
     sr: int = 16000,
     language_model_map: Optional[Dict[str, _ModelEntry]] = None,
     cache_dir: Optional[str] = None,
+    use_phones: bool = True,
 ) -> MFASingleInference:
     """Hydra entry point: instantiate MFASingleInference.
 
@@ -142,7 +170,9 @@ def build_mfa_single_inference(
         sr: Expected sample rate of incoming waveforms.
         language_model_map: Optional ISO 639-3 → [dictionary, acoustic_model]
             mapping for multilingual datasets.
-        cache_dir: Directory for MFA pretrained models.  Downloaded here if absent.
+        cache_dir: Directory for MFA pretrained models.  Downloaded if absent.
+        use_phones: If True (default), align phone sequences directly instead
+            of word transcripts.
     """
     return MFASingleInference(
         dictionary=dictionary,
@@ -150,4 +180,5 @@ def build_mfa_single_inference(
         sr=sr,
         language_model_map=language_model_map,
         cache_dir=cache_dir,
+        use_phones=use_phones,
     )
