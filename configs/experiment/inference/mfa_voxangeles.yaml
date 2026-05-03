@@ -38,7 +38,7 @@ inference:
     - split
     - language
   inference_runner:
-    _target_: src.model.mfa.inference_single.build_mfa_single_inference
+    _target_: src.model.mfa.inference_baseline.build_mfa_single_inference
     sr: 16000
     cache_dir: ${paths.cache_dir}/mfa
     # ISO 639-3 → [dictionary, acoustic_model]

@@ -29,9 +29,7 @@ def mfa_env(cache_dir: str | None = None) -> dict[str, str]:
     return env
 
 
-def _mfa_model_present(
-    model_type: str, name: str, env: dict[str, str]
-) -> bool:
+def _mfa_model_present(model_type: str, name: str, env: dict[str, str]) -> bool:
     result = subprocess.run(
         ["mfa", "model", "list", model_type],
         capture_output=True,
@@ -50,7 +48,7 @@ def ensure_mfa_model(
     """Download acoustic_model and (optionally) dictionary if absent.
 
     Pass dictionary=None when supplying a custom phone-to-phone dictionary
-    file at runtime (use_phones=True mode).
+    file at runtime (units="phones" mode).
 
     Args:
         acoustic_model: MFA acoustic model name (e.g. ``english_mfa``).
@@ -72,9 +70,7 @@ def ensure_mfa_model(
             )
 
 
-def build_phone_dict(
-    phones_iter: Iterable[list[str]], dict_path: Path
-) -> None:
+def build_phone_dict(phones_iter: Iterable[list[str]], dict_path: Path) -> None:
     """Write a phone-to-phone MFA pronunciation dictionary.
 
     Each unique non-empty phone is written as a one-phone "word" mapping to
@@ -98,20 +94,14 @@ def _phones_from_mfa_json(json_path: Path) -> list[SegmentationUnit]:
         json_path: MFA-produced JSON file for a single utterance.
 
     Returns:
-        Phone-level segments with start/end in seconds. Silence intervals
-        are included; strip them downstream if needed.
+        Phone-level segments with start/end in seconds.
     """
     with open(json_path) as f:
         data = json.load(f)
-    tiers = data["tiers"]
-    # tiers may be a list or dict depending on MFA version.
-    tier_iter = tiers.values() if isinstance(tiers, dict) else tiers
-    phones_tier = next(
-        t for t in tier_iter if t["name"].endswith(" - phones")
-    )
+    entries = data["tiers"]["phones"]["entries"]
     return [
         SegmentationUnit(start=s, end=e, label=label if label else None)
-        for s, e, label in phones_tier["entries"]
+        for s, e, label in entries
     ]
 
 
@@ -126,5 +116,6 @@ def _save_utterance(
         wav_path: Destination WAV path; .lab is written alongside it.
         sr: Sample rate.
     """
+    os.makedirs(wav_path.parent, exist_ok=True)
     torchaudio.save(str(wav_path), speech.unsqueeze(0), sr)
     wav_path.with_suffix(".lab").write_text(text + "\n")
