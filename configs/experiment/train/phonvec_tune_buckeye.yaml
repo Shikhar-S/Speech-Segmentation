@@ -1,0 +1,57 @@
+# @package _global_
+# python -m src.recipe.phonvec.train experiment=train/phonvec_tune_buckeye
+#
+# Cross-dataset tuning: reuses the TIMIT-fit PhonologicalVectors and
+# tunes hyperparameters on Buckeye's pre-existing 'val' split (4
+# speakers, ~997 utts), exposed as 'tune' by the registered Buckeye
+# split transform. Buckeye train/val/test speakers are already disjoint.
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "tune_phonvec_buckeye"
+tags: ["phonvec", "tune", "buckeye"]
+
+train: false
+test: false
+distributed_predict: false
+
+# Fit data is unused when phonvec_tune.fit_artifact is set, but Hydra
+# still resolves the datamodule config — point at TIMIT for consistency.
+data:
+  hf_repo: changelinglab/timit-segment
+
+phonvec_tune:
+  # Skip the fit stage; reuse the TIMIT-fit Segmenter and retune on buckeye.
+  fit_artifact: exp/runs/phonvec_tune/timit/phonvec_timit.pt
+  device: cuda
+  tolerance_ms: 20
+  strip_outer_silences: false  # buckeye GT has no h#/pau bookends
+  silence_detector_path: exp/data/phonological_vector/logistic_regression_silence_detector.joblib
+  frame_shift: 320
+  sr: 16000
+  mel_frame_shift_ms: 10
+  net:
+    _target_: src.model.wavlm.builders.build_wavlm_model
+    hf_repo: microsoft/wavlm-large
+    encoder_layer: 24
+    cache_dir: ${paths.cache_dir}/hf
+  # Dataset for tuning; the registered split transform exposes 'val' as 'tune'.
+  tune_data:
+    _target_: src.data.segmentation.segmentation_dataset.SegmentationDataModule
+    hf_repo: changelinglab/buckeye-segment
+    tokenizer:
+      _target_: src.data.segmentation.segmentation_dataset.DummyTokenizer
+    batch_size: 1
+    num_workers: 4
+    pin_memory: true
+    target_sr: 16000
+  grid:
+    use_combined: [true]
+    drop_k: [0, 1, 2, 3]
+    norm_method: [min, minmax]
+    combined_prominence: [0.001]
+    snap_silence: [true]
+  out_artifact: ${paths.output_dir}/phonvec_buckeye.pt

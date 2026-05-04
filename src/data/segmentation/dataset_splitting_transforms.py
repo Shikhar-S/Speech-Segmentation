@@ -48,6 +48,51 @@ def split_voxangeles_test_for_tuning(ddict: Any) -> Any:
     return new_dd
 
 
+def split_buckeye_val_as_tune(ddict: Any) -> Any:
+    """Use Buckeye's pre-existing ``val`` split as ``tune``.
+
+    Buckeye ships disjoint train/val/test speaker sets (32/4/4 speakers).
+    The ``val`` split (4 speakers, ~997 utts) is already held out from
+    both train and test, so we simply expose it under the name ``tune``
+    that the phonvec pipeline expects. ``test`` is left untouched.
+    """
+    new_dd = {k: v for k, v in ddict.items()}
+    new_dd["tune"] = ddict["val"]
+    return new_dd
+
+
+def split_torgo_test_speaker_independent(ddict: Any) -> Any:
+    """Speaker-independent tune carve from Torgo ``test``.
+
+    Torgo has 14 speakers: 7 dysarthric (id starts with ``M`` or ``F``,
+    no ``C``) and 7 typical-controls (id starts with ``MC`` or ``FC``).
+    Picks 2 dysarthric + 2 control speakers at random (seed=42); their
+    utterances form ``tune`` and the remaining 10 speakers form ``test``.
+    Tune and test speaker sets are disjoint and the tune set is balanced
+    across both speaking conditions.
+    """
+    test = ddict["test"]
+    speakers = list(test["speaker_id"])
+    unique = sorted(set(speakers))
+    control = [s for s in unique if s.startswith(("MC", "FC"))]
+    dysarthric = [s for s in unique if s not in control]
+    rng = np.random.default_rng(42)
+    n_each = 2
+    tune_spk_set = set()
+    for group in (dysarthric, control):
+        if not group:
+            continue
+        idx = rng.choice(len(group), size=min(n_each, len(group)), replace=False)
+        tune_spk_set.update(group[int(i)] for i in idx)
+    tune_idx = [i for i, s in enumerate(speakers) if s in tune_spk_set]
+    test_idx = [i for i, s in enumerate(speakers) if s not in tune_spk_set]
+
+    new_dd = {k: v for k, v in ddict.items()}
+    new_dd["tune"] = test.select(tune_idx)
+    new_dd["test"] = test.select(test_idx)
+    return new_dd
+
+
 def split_gtimit_test_speaker_independent(ddict: Any) -> Any:
     """Speaker-independent tune carve from GTIMIT ``test``.
 
@@ -77,9 +122,11 @@ def split_gtimit_test_speaker_independent(ddict: Any) -> Any:
 HF_REPO_SPLIT_TRANSFORMS: Dict[str, Callable[[Any], Any]] = {
     "changelinglab/timit-segment": split_timit_train_for_tuning,
     "changelinglab/voxangeles-segment": split_voxangeles_test_for_tuning,
+    "changelinglab/buckeye-segment": split_buckeye_val_as_tune,
     "changelinglab/gtimit-l2simple-segment": split_gtimit_test_speaker_independent,
     "changelinglab/gtimit-l2tbnk-segment": split_gtimit_test_speaker_independent,
     "changelinglab/gtimit-l1simple-segment": split_gtimit_test_speaker_independent,
     "changelinglab/gtimit-l1tbnk-segment": split_gtimit_test_speaker_independent,
     "changelinglab/gtimit-tha-segment": split_gtimit_test_speaker_independent,
+    "changelinglab/torgo-segment": split_torgo_test_speaker_independent,
 }
