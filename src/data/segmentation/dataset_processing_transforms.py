@@ -171,10 +171,11 @@ HF_REPO_TRANSFORMS: Dict[
     ],
 ] = {
     "changelinglab/timit-segment": process_timit_symbols,
-    "changelinglab/buckeye-segmentation": arpabet_phones_to_ipa,
+    "changelinglab/buckeye-segment": arpabet_phones_to_ipa,
     "changelinglab/gtimit-l2simple-segment": process_gtimit_arpabet_symbols,
     "changelinglab/gtimit-l2tbnk-segment": process_gtimit_arpabet_symbols,
     "changelinglab/gtimit-l1simple-segment": process_gtimit_arpabet_symbols,
     "changelinglab/gtimit-l1tbnk-segment": process_gtimit_arpabet_symbols,
     "changelinglab/gtimit-tha-segment": process_gtimit_thai_symbols,
+    "changelinglab/torgo-segment": process_gtimit_arpabet_symbols,
 }

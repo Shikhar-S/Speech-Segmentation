@@ -48,11 +48,13 @@ from src.data.segmentation.segmentation_dataset import (
     build_segmentation_dataset,
 )
 from src.model.mfa.utils import (
+    MFA_SILENCE_PHONES,
     _phones_from_mfa_json,
     _save_utterance,
     build_phone_dict,
     ensure_mfa_model,
     mfa_env,
+    normalize_phones_for_mfa_english,
 )
 
 
@@ -61,17 +63,20 @@ def _build_corpus(
     corpus_dir: Path,
     sr: int = 16000,
     units: str = "phones",
+    phone_normalizer=None,
 ) -> tuple[dict[str, int], set[str]]:
     """Write a Prosodylab-format corpus from a SegmentationDataset.
 
     Creates corpus_dir/{speaker_id}/{utt_id}.wav and .lab for each item.
-    Skips existing WAV files so the function is safe to resume.
 
     Args:
         dataset: A SegmentationDataset instance.
         corpus_dir: Destination directory (must exist).
         sr: Sample rate for saved WAV files.
         units: The units to align, either "phones" or "words".
+        phone_normalizer: Optional callable mapping a list of phones to
+            acoustic-model-compatible phones. Silence phones are always
+            stripped from the transcript so MFA handles them automatically.
 
     Returns:
         Tuple of ({utt_id: dataset_index}, set of all phone symbols seen).
@@ -88,8 +93,11 @@ def _build_corpus(
         speech = item["speech"][: item["speech_length"]].float()
         if units == "phones":
             phones = item["phones"]
-            transcript = " ".join(phones)
-            all_phones.update(p for p in phones if p)
+            if phone_normalizer is not None:
+                phones = phone_normalizer(phones)
+            content = [p for p in phones if p and p not in MFA_SILENCE_PHONES]
+            transcript = " ".join(content)
+            all_phones.update(content)
         else:
             transcript = item["text"]
         _save_utterance(speech, transcript, wav_path, sr)
@@ -194,7 +202,6 @@ def run_mfa_batch_inference(
         split,
         tokenizer=DummyTokenizer(),
         cache_dir=cache_dir,
-        transform=False,
     )
 
     run_dir = Path(run_dir)
@@ -203,9 +210,18 @@ def run_mfa_batch_inference(
     corpus_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    phone_normalizer = (
+        normalize_phones_for_mfa_english
+        if acoustic_model == "english_mfa" and units == "phones"
+        else None
+    )
     print(f"Building corpus in {corpus_dir} ...", flush=True)
     utt_idx_map, all_phones = _build_corpus(
-        dataset, corpus_dir, sr=sr, units=units
+        dataset,
+        corpus_dir,
+        sr=sr,
+        units=units,
+        phone_normalizer=phone_normalizer,
     )
 
     if units == "phones":

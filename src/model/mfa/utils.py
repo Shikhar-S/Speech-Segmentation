@@ -11,6 +11,38 @@ import torchaudio
 
 from src.metrics.segmentation_evaluator import SegmentationUnit
 
+# Phones to exclude from MFA transcripts: silence labels + Buckeye non-speech
+# markers that survive arpabet_phones_to_ipa as lowercase pass-throughs.
+MFA_SILENCE_PHONES: frozenset[str] = frozenset(
+    {
+        "sil", "sp", "spn", "pau", "h#", "ʔ̞", "epi",
+        "vocnoise", "laugh", "noise", "unknown", "iver", "<exclude-name>",
+    }
+)
+
+# IPA conventions in our phone set that differ from MFA english_mfa's phone set.
+_IPA_TO_MFA_ENGLISH: dict[str, str] = {
+    "aɪ": "aj", "oʊ": "ow", "eɪ": "ej", "aʊ": "aw", "ɔɪ": "ɔj",
+    "ɜ˞": "ɝ", "ə˞": "ɚ", "ʌ": "ɐ",
+    "d͡ʒ": "dʒ", "t͡ʃ": "tʃ",
+}
+
+
+def normalize_phones_for_mfa_english(phones: list[str]) -> list[str]:
+    """Map our IPA phones to the MFA english_mfa acoustic model phone set.
+
+    Applies after the per-dataset transform (which converts ARPABET to our IPA
+    convention). Remaps diphthongs, r-colored vowels, and the strut vowel to
+    the notation used by the MFA english_mfa acoustic model.
+
+    Args:
+        phones: Phone labels in our IPA convention.
+
+    Returns:
+        Phone labels in the MFA english_mfa phone set.
+    """
+    return [_IPA_TO_MFA_ENGLISH.get(p, p) for p in phones]
+
 
 def mfa_env(cache_dir: str | None = None) -> dict[str, str]:
     """Return os.environ with MFA_ROOT_DIR set to cache_dir.
