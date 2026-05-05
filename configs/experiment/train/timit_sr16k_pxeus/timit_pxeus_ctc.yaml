@@ -1,6 +1,6 @@
 # @package _global_
 
-# ASG only on TIMIT with PhoneticXEUS
+# CTC only on TIMIT with PhoneticXEUS (16 kHz)
 
 defaults:
   - override /data: joint_prseg
@@ -11,8 +11,8 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "timit_pxeus_asg"
-tags: ["pxeus", "segment_recognize", "timit", "single", "asg"]
+task_name: "timit_pxeus_ctc"
+tags: ["pxeus", "segment_recognize", "timit", "sr16k", "ctc"]
 
 seed: 42
 test: False
@@ -22,7 +22,7 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   min_epochs: 0
   max_epochs: -1
-  max_steps: 20000
+  max_steps: 25000
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
   val_check_interval: 250
@@ -41,19 +41,16 @@ callbacks:
     patience: 100
 
 model:
-  audio_sr: 32000
+  audio_sr: 16000
   optimizer:
     lr: 0.0001
-  # ASG is the segmentation training signal here, so the head lives under
+  # CTC is the segmentation training signal here, so the head lives under
   # seg_losses (consumes the seg sub-batch, which has boundary GT for rval).
   seg_losses:
-    asg:
-      _target_: src.recipe.segment_recognize.heads.asg_recognition.ASGRecognitionHead
+    ctc:
+      _target_: src.recipe.segment_recognize.heads.ctc_recognition.CTCRecognitionHead
       _partial_: true
-      num_labels: 428
       weight: 1.0
-      use_transitions: true
-      use_double_scores: false
       tolerance_ms: 20
 
 data:
@@ -66,7 +63,7 @@ data:
           tokenizer:
             _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
             vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
-          target_sr: 32000
+          target_sr: 16000
           max_speech_length: 8
         - 1.0
   validation_datasets:
@@ -77,7 +74,7 @@ data:
         tokenizer:
           _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
           vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
-        target_sr: 32000
+        target_sr: 16000
         max_speech_length: 8
 
 logger:

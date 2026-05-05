@@ -15,6 +15,7 @@ task_name: "timit_pxeus_bce"
 tags: ["pxeus", "segment_recognize", "timit", "single", "bce"]
 
 seed: 42
+test: False
 
 trainer:
   devices: -1
@@ -52,18 +53,28 @@ model:
       tolerance_ms: 20
 
 data:
-  pr_weight: 0.0
-  seg_weight: 1.0
   batch_size: 8
-  seg_datamodule:
-    hf_repo: changelinglab/timit-segment
-    target_sr: 32000
-    max_speech_length: 8
-    batch_size: 32
-  pr_datamodule:
-    train_split: "train_timit"
-    dev_splits: ["dev_timit"]
-    batch_size: 16
+  train_datasets:
+    segmentation:
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: changelinglab/timit-segment
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 32000
+          max_speech_length: 8
+        - 1.0
+  validation_datasets:
+    segmentation:
+      - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+        hf_repo: changelinglab/timit-segment
+        split: val
+        tokenizer:
+          _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+          vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+        target_sr: 32000
+        max_speech_length: 8
 
 logger:
   wandb:
