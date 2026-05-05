@@ -28,10 +28,18 @@ class ForcedAlignmentInference:
         bs=len(logprobs)
         device=logprobs[0].device
         for bidx in range(bs):
+            T = input_lengths[bidx]
+            if len(target[bidx]) == 0:
+                # Empty target (e.g. all-blank greedy decode at init) —
+                # forced_align rejects empty tensors. Emit all-blank labels
+                # so downstream produces no boundaries.
+                labels.append(torch.full((T,), self.blank_idx, dtype=torch.long, device=device))
+                scores.append(torch.zeros((T,), dtype=torch.float, device=device))
+                continue
             tgt=torch.tensor(target[bidx], dtype=torch.long, device=device).unsqueeze(0)
             tgtlen=torch.tensor(len(target[bidx]), dtype=torch.long, device=device).unsqueeze(0)
-            logp=logprobs[bidx][:input_lengths[bidx],:].unsqueeze(0)  # (1, T, C)
-            ilen=torch.tensor(input_lengths[bidx], dtype=torch.long, device=device).unsqueeze(0)
+            logp=logprobs[bidx][:T,:].unsqueeze(0)  # (1, T, C)
+            ilen=torch.tensor(T, dtype=torch.long, device=device).unsqueeze(0)
             label, score = forced_align(logp, tgt, ilen, tgtlen, blank=self.blank_idx)
             labels.append(label[0])
             scores.append(score[0])
