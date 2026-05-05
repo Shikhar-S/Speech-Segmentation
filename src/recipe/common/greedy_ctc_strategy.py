@@ -30,7 +30,7 @@ class GreedyCTCInference:
         speech_lengths: torch.Tensor,
         features: torch.Tensor = None,
         logits: torch.Tensor = None,
-        **kwargs
+        **kwargs,
     ) -> List[Dict[str, Any]]:
         """
         Return schema:
@@ -40,7 +40,7 @@ class GreedyCTCInference:
             - "ids": List[int] of predicted token ids (after CTC collapse)
             - "logits": Optional[torch.Tensor] of frame logits (if return_logits=True)
         """
-        
+
         if logits is None:
             if features is None:
                 # 1. Standardized Forward pass
@@ -60,16 +60,22 @@ class GreedyCTCInference:
 
         # 4. Map to text
         results = []
-        for ids in collapsed_ids:
+        for b, ids in enumerate(collapsed_ids):
             tokens = [self.token_list[i] for i in ids]
             raw_text = "/".join(tokens)
             # Filter special tokens
             clean_tokens = [
                 t for t in tokens if not (t.startswith("<") and t.endswith(">"))
             ]
-            processed = "".join(clean_tokens).strip()  # replace(self.sym_space, " ")
-            result={"processed_transcript": processed, "predicted_transcript": raw_text, "ids": ids}
+            processed = "".join(
+                clean_tokens
+            ).strip()  # replace(self.sym_space, " ")
+            result = {
+                "processed_transcript": processed,
+                "predicted_transcript": raw_text,
+                "ids": ids,
+            }
             if kwargs.get("return_logits", False):
-                result["logits"] = logits
+                result["logits"] = logits[b : b + 1]  # 1,T,C
             results.append(result)
         return results

@@ -91,6 +91,17 @@ def preprocess_inputs_wavlm(
     }
 
 
+class _CTCAdapter(nn.Module):
+    """Expose a CTC linear projection at ``ctc.ctc_lo`` for head compatibility."""
+
+    def __init__(self, lo: nn.Linear) -> None:
+        super().__init__()
+        self.ctc_lo = lo
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.ctc_lo(features)
+
+
 class WavLMEncoderModel(nn.Module):
     """WavLM encoder wrapper with optional CTC head for forced alignment.
 
@@ -168,9 +179,9 @@ class WavLMEncoderModel(nn.Module):
         )
         self._points_by_frames = int(np.prod(conv_stride))
 
-        self.ctc_head: Optional[nn.Linear] = None
+        self.ctc: Optional[_CTCAdapter] = None
         if output_vocabsz is not None and output_vocabsz > 0:
-            self.ctc_head = nn.Linear(self.encoder_dim, output_vocabsz)
+            self.ctc = _CTCAdapter(nn.Linear(self.encoder_dim, output_vocabsz))
             log.info(
                 f"Created CTC head: {self.encoder_dim} -> {output_vocabsz}"
             )
@@ -308,14 +319,55 @@ class WavLMEncoderModel(nn.Module):
         Raises:
             RuntimeError: If CTC head is not configured.
         """
-        if self.ctc_head is None:
+        if self.ctc is None:
             raise RuntimeError(
                 "CTC head not configured. Set output_vocabsz to enable ctc_logits."
             )
 
         encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
-        logits = self.ctc_head(encoder_out)
+        logits = self.ctc(encoder_out)
         return logits, encoder_out_lens
+
+    def _calc_ctc_loss(
+        self,
+        features: torch.Tensor,
+        feature_lens: torch.Tensor,
+        target: torch.Tensor,
+        target_length: torch.Tensor,
+        return_logits: bool = False,
+        **_: object,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], Optional[torch.Tensor]]:
+        """CTC loss over already-encoded features, matching the XEUS interface.
+
+        Args:
+            features: ``(B, T, D)`` encoder output.
+            feature_lens: ``(B,)`` valid frame counts.
+            target: ``(B, L)`` token ids.
+            target_length: ``(B,)`` target lengths.
+            return_logits: If True, also returns ``(B, T, V)`` logits.
+
+        Returns:
+            ``(loss, stats, logits)`` where ``stats`` mirrors the espnet form
+            (``loss_ctc`` detached scalar) and ``logits`` is ``None`` unless
+            ``return_logits`` is set.
+        """
+        if self.ctc is None:
+            raise RuntimeError(
+                "CTC head not configured. Set output_vocabsz to enable _calc_ctc_loss."
+            )
+        logits = self.ctc(features)
+        log_probs = F.log_softmax(logits, dim=-1).transpose(0, 1)
+        loss = F.ctc_loss(
+            log_probs,
+            target,
+            feature_lens,
+            target_length,
+            blank=self.blank_id,
+            reduction="mean",
+            zero_infinity=True,
+        )
+        stats = {"loss_ctc": loss.detach()}
+        return loss, stats, (logits if return_logits else None)
 
     @torch.no_grad()
     def forced_align(
@@ -343,7 +395,7 @@ class WavLMEncoderModel(nn.Module):
             RuntimeError: If CTC head is not configured.
             AssertionError: If batch size is not 1.
         """
-        if self.ctc_head is None:
+        if self.ctc is None:
             raise RuntimeError(
                 "CTC head not configured. Set output_vocabsz to enable forced_align."
             )
