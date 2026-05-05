@@ -39,8 +39,6 @@ source .venv/bin/activate
 Before submitting SLURM jobs, always run the recipe module directly to catch import/data errors early:
 
 ```bash
-python -m src.recipe.segmentation.model_module
-python -m src.recipe.phone_recognition.model_module
 python -m src.recipe.segment_recognize.model_module
 ```
 
@@ -169,5 +167,12 @@ When running experiments (training, inference, evaluation):
 
 ## Cluster / Job Submission
 
-SLURM batch scripts: `scripts/daixpr.batch` (Delta-AI), `scripts/deltaxpr.batch` (Delta), `scripts/babel.batch` (Babel), `scripts/daixpr_inference.batch` (inference)
+Do no create new scripts unnecessarily, use CLI along with following SLURM batch scripts: `scripts/daixpr.batch` (Delta-AI), `scripts/deltaxpr.batch` (Delta), `scripts/babel.batch` (Babel), `scripts/daixpr_inference.batch` (inference)
+Use command line arguments to override the defaults:
+```bash
+sbatch <sbatcharg1> <sbatcharg2> scripts/daixpr.batch <scriptarg1> <scriptarg2>
+```
+here <sbatcharg> overrides the slurm header arguments, <scriptarg> overrides the command line argument to hydra (because it resolves the last value).
 
+## Protected code
+Do not change code inside src/core without requiring permission from the user explicitly.
