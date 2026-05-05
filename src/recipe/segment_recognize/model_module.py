@@ -115,10 +115,17 @@ class SegmentRecognizeModel(LightningModule):
         for head in losses.values():
             out = head(features, feature_lens, batch, net=self.net)
             total = total + head.weight * out["loss"]
-            #TODO(shikhar): Before scaling implement a cheaper metric for training batches.
+            # TODO(shikhar): Before scaling implement a cheaper metric for training batches.
             # Use stage to activate cheap metric mode
             metrics = head.eval_metrics(out, feature_lens, batch)
-            head.log_output(self, stage, prefix, out, metrics, on_step=on_step)
+            head.log_output(
+                stage=stage,
+                pl_module=self,
+                prefix=prefix,
+                output=out,
+                eval_metrics=metrics,
+                on_step=on_step,
+            )
         return total
 
     def _step(
@@ -220,7 +227,7 @@ class SegmentRecognizeModel(LightningModule):
         Return schema:
             {'pred': { head_name: head-specific output dict, ... } }
             head-specific output dict is usually {utt_id: List[SegmentationUnit], ...}
-        Distributed inference harness will pick up the pred dict and 
+        Distributed inference harness will pick up the pred dict and
             store it in jsonl
         """
         features, lens = self._encode(batch["speech"], batch["speech_length"])
