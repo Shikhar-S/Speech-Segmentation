@@ -106,8 +106,11 @@ class CTCRecognitionHead(TaskHead):
             decode_strategy=GreedyCTCInference(token_list=token_list, blank_id=blank_id),
             align_strategy=ForcedAlignmentInference(blank_idx=blank_id),
         )
-        results = strategy(net=None, speech=None, speech_lengths=None, logits=logits)
-        
+        results = strategy(
+            net=None, speech=None, speech_lengths=None,
+            logits=logits, feature_lens=feature_lens,
+        )
+
         # postprocess
         processed_results = [{"labels": r['aligned_labels']} for r in results]
         # convert into segmentation units

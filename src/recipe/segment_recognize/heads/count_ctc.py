@@ -141,11 +141,20 @@ class CountCTCHead(TaskHead):
         # count ctc metric
         logits = output["logits"]
         target_length = batch["target_length"]
-        B = logits.shape[0]
-        preds = logits.argmax(dim=-1) # (B, T)
-        preds = ctc_collapse_vectorized(preds, feature_lens, self.blank_id) # (B, max_target_length)
-        preds = (preds == 1).sum(dim=1) # count of predicted boundaries
-        count_abs_err_sum = (preds - target_length).abs().sum().item()
+        B, T = logits.shape[0], logits.shape[1]
+        preds = logits.argmax(dim=-1)  # (B, T)
+        # Mask padded frames to blank so they collapse out.
+        pad_mask = (
+            torch.arange(T, device=preds.device).unsqueeze(0)
+            >= feature_lens.unsqueeze(1)
+        )
+        preds = preds.masked_fill(pad_mask, self.blank_id)
+        # Vocab is {blank, boundary}; collapsed length is the boundary count.
+        collapsed = ctc_collapse_vectorized(preds, self.blank_id)
+        counts = torch.tensor(
+            [len(seq) for seq in collapsed], device=target_length.device,
+        )
+        count_abs_err_sum = (counts - target_length).abs().sum().item()
         metrics: dict[str, float] = {
             "mae": count_abs_err_sum / B,
         }
@@ -177,8 +186,10 @@ class CountCTCHead(TaskHead):
         boundaries.
         """
         predid = logits.argmax(dim=-1)
-        predid_leftshift = torch.cat([predid[:, 1:], torch.tensor([[self.blank_id]], device=predid.device)], dim=1)
-        predid_rightshift = torch.cat([torch.tensor([[self.blank_id]], device=predid.device), predid[:, :-1]], dim=1)
+        B = predid.shape[0]
+        pad = torch.full((B, 1), self.blank_id, dtype=predid.dtype, device=predid.device)
+        predid_leftshift = torch.cat([predid[:, 1:], pad], dim=1)
+        predid_rightshift = torch.cat([pad, predid[:, :-1]], dim=1)
         onsets = (predid != predid_rightshift)
         offsets = (predid != predid_leftshift) 
         out: dict[str, List[SegmentationUnit]] = {}
@@ -188,9 +199,9 @@ class CountCTCHead(TaskHead):
             start, end = None, None
             for i in range(vlen):
                 if onsets[b, i]:
-                    start=i
-                if offsets[b, i]:
-                    end=i
+                    start = i
+                if offsets[b, i] and start is not None:
+                    end = i
                     segmentation_units.append(SegmentationUnit(
                         start=start * self.effective_pbf / self.audio_sr,
                         end=end * self.effective_pbf / self.audio_sr,
