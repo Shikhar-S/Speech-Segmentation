@@ -186,6 +186,7 @@ class CountCTCHead(TaskHead):
             feature_lens,
             self.effective_pbf,
             self.audio_sr,
+            batch["utt_id"],
         )
         metrics.update(evaluate_boundaries(self.evaluator, preds_dict, gt_dict))
         return metrics

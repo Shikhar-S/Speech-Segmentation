@@ -106,7 +106,7 @@ class ASGRecognitionHead(TaskHead):
         batch: Mapping[str, Any],
     ) -> dict[str, float]:
         """Run boundary rval when supervision is present, else {}."""
-        if "phone_start_idx" not in batch:
+        if "target_start_idx" not in batch:
             return {}
         return boundary_rval_metrics(
             output["logits"], feature_lens, batch,

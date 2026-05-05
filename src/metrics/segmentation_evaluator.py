@@ -420,6 +420,11 @@ class SegmentationEvaluator:
         micro_pred_counter = 0
         micro_gt_counter = 0
 
+        assert any(seg_id in predictions for seg_id in ground_truth), (
+            "No ground_truth seg_id matched any prediction key — likely a "
+            "key-scheme mismatch (e.g. utt_id vs str(b)). Sample keys: "
+            f"gt={list(ground_truth)[:3]}, pred={list(predictions)[:3]}"
+        )
         for seg_id in ground_truth:
             if seg_id not in predictions:
                 log.warning(

@@ -118,6 +118,7 @@ class BCEBoundaryHead(TaskHead):
             feature_lens,
             self.effective_pbf,
             self.audio_sr,
+            batch["utt_id"],
         )
         return evaluate_boundaries(self.evaluator, preds_dict, gt_dict)
 

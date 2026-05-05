@@ -83,8 +83,9 @@ class FCESegmentationHead(TaskHead):
         B = logits.shape[0]
         preds_dict = {}
         for b in range(B):
-            frame_labels = logits[b].argmax(dim=-1)[:int(feature_lens[b])].tolist()
-            preds_dict[utt_id[b]] = frame_label_to_units(frame_labels, feature_lens[b], self.effective_pbf, self.audio_sr)
+            vlen = int(feature_lens[b])
+            frame_labels = logits[b].argmax(dim=-1)[:vlen].tolist()
+            preds_dict[utt_id[b]] = frame_label_to_units(frame_labels, vlen, self.effective_pbf, self.audio_sr)
         return preds_dict
 
     @torch.no_grad()
@@ -104,9 +105,9 @@ class FCESegmentationHead(TaskHead):
             feature_lens,
             self.effective_pbf,
             self.audio_sr,
+            batch["utt_id"],
         )
         pred_dict = self._process_predictions(output["logits"], feature_lens, batch['utt_id'])
-        print(pred_dict)
         return evaluate_boundaries(self.evaluator, pred_dict, gt_dict)
 
     def eval_metrics(

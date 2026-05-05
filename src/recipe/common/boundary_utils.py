@@ -153,6 +153,7 @@ def target_boundaries_to_gt_units(
     feature_lens: torch.Tensor,
     points_by_frames: float,
     sampling_rate: int,
+    utt_id: List[str],
 ) -> dict[str, List[SegmentationUnit]]:
     """Build per-utterance ground-truth segments from target starts and ends.
 
@@ -164,18 +165,19 @@ def target_boundaries_to_gt_units(
             segment of each utterance).
         points_by_frames: Audio points per frame.
         sampling_rate: Audio sampling rate in Hz.
+        utt_id: Per-batch utterance ids; used as dict keys so they match
+            the predictions dict in ``evaluate_batch``.
 
     Returns:
-        ``{str(b): [SegmentationUnit, ...]}`` keyed by batch index.
+        ``{utt_id[b]: [SegmentationUnit, ...]}`` keyed by utterance id.
     """
     gt: dict[str, List[SegmentationUnit]] = {}
     B = target_start_idx.shape[0]
     for b in range(B):
         n = int(target_length[b])
-        vlen = int(feature_lens[b])
         starts = target_start_idx[b, :n].tolist()
         ends = target_end_idx[b, :n].tolist()
-        gt[str(b)] = [
+        gt[utt_id[b]] = [
             SegmentationUnit(
                 start=starts[i] * points_by_frames / sampling_rate,
                 end=ends[i] * points_by_frames / sampling_rate,

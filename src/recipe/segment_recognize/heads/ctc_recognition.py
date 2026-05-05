@@ -135,10 +135,11 @@ class CTCRecognitionHead(TaskHead):
         for b, res in enumerate(decoded):
             preds_dict[batch['utt_id'][b]] = res["boundaries"]
         gt_dict = target_boundaries_to_gt_units(
-            batch["target_start_idx"], 
-            batch["target_end_idx"], 
+            batch["target_start_idx"],
+            batch["target_end_idx"],
             batch["target_length"],
             feature_lens, self.effective_pbf, self.audio_sr,
+            batch["utt_id"],
         )
         return evaluate_boundaries(self.evaluator, preds_dict, gt_dict)
     # helpers, end
