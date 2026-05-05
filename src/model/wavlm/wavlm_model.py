@@ -1,6 +1,6 @@
 """WavLM model wrapper for PhoneBench probing and forced alignment.
 
-Provides the interface for PhoneBench probing and forced alignment:
+Provides the interface:
 - encode(speech, speech_lengths) -> (B, T, D), (B,)
 - ctc_logits(speech, speech_lengths) -> (B, T, V), (B,)  [if output_vocabsz is set]
 - forced_align(speech, speech_lengths, text, text_lengths) -> (align_label, align_prob)
@@ -125,8 +125,12 @@ class WavLMEncoderModel(nn.Module):
         # Therefore, fall back to an audio-only feature extractor when AutoProcessor fails.
         self.feature_extractor = None
         try:
-            self.processor = AutoProcessor.from_pretrained(hf_repo, cache_dir=cache_dir)
-            self.feature_extractor = getattr(self.processor, "feature_extractor", None)
+            self.processor = AutoProcessor.from_pretrained(
+                hf_repo, cache_dir=cache_dir
+            )
+            self.feature_extractor = getattr(
+                self.processor, "feature_extractor", None
+            )
             if self.feature_extractor is None:
                 raise RuntimeError(
                     "Loaded AutoProcessor does not expose `feature_extractor`."
@@ -159,13 +163,17 @@ class WavLMEncoderModel(nn.Module):
         # Compute points_by_frames from conv_stride
         # WavLM uses convolutional feature extractor with specific strides
         # Default: [5, 2, 2, 2, 2, 2, 2] -> product = 320
-        conv_stride = getattr(self.model.config, "conv_stride", [5, 2, 2, 2, 2, 2, 2])
+        conv_stride = getattr(
+            self.model.config, "conv_stride", [5, 2, 2, 2, 2, 2, 2]
+        )
         self._points_by_frames = int(np.prod(conv_stride))
 
         self.ctc_head: Optional[nn.Linear] = None
         if output_vocabsz is not None and output_vocabsz > 0:
             self.ctc_head = nn.Linear(self.encoder_dim, output_vocabsz)
-            log.info(f"Created CTC head: {self.encoder_dim} -> {output_vocabsz}")
+            log.info(
+                f"Created CTC head: {self.encoder_dim} -> {output_vocabsz}"
+            )
 
         # Freeze encoder if requested
         if freeze_encoder:

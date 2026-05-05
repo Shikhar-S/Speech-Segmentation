@@ -1,9 +1,9 @@
 # @package _global_
 
-# FCE (frame-wise cross-entropy) only on TIMIT with PhoneticXEUS
+# BCE only on TIMIT with PhoneticXEUS
 
 defaults:
-  - override /data: sr_joint_prseg
+  - override /data: joint_prseg
   - override /model: segment_recognize_bare
   - override /model/net: phoneticxeus
 
@@ -11,8 +11,8 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "timit_pxeus_fce"
-tags: ["pxeus", "segment_recognize", "timit", "single", "fce"]
+task_name: "timit_pxeus_bce"
+tags: ["pxeus", "segment_recognize", "timit", "single", "bce"]
 
 seed: 42
 
@@ -21,7 +21,7 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   min_epochs: 0
   max_epochs: -1
-  max_steps: 10000
+  max_steps: 20000
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
   val_check_interval: 250
@@ -44,10 +44,11 @@ model:
   optimizer:
     lr: 0.0001
   seg_losses:
-    fa:
-      _target_: src.recipe.segment_recognize.heads.fa_segmentation.FASegmentationHead
+    bce:
+      _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
       _partial_: true
       weight: 1.0
+      pos_weight: 1.0
       tolerance_ms: 20
 
 data:

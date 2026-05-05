@@ -3,7 +3,7 @@
 # python src/main.py experiment=train/sr_pxeus_32k
 
 defaults:
-  - override /data: sr_joint_prseg
+  - override /data: joint_prseg
   - override /model: segment_recognize
   - override /model/net: phoneticxeus
 

@@ -3,7 +3,7 @@
 # python src/main.py experiment=train/sr_xeus_32k_count_ctc
 
 defaults:
-  - override /data: sr_joint_prseg
+  - override /data: joint_prseg
   - override /model: segment_recognize
   - override /model/net: xeuspr
 

@@ -1,9 +1,9 @@
 # @package _global_
 
-# ASG only on TIMIT with PhoneticXEUS
+# CountCTC only on TIMIT with PhoneticXEUS
 
 defaults:
-  - override /data: sr_joint_prseg
+  - override /data: joint_prseg
   - override /model: segment_recognize_bare
   - override /model/net: phoneticxeus
 
@@ -11,8 +11,8 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "timit_pxeus_asg"
-tags: ["pxeus", "segment_recognize", "timit", "single", "asg"]
+task_name: "timit_pxeus_count_ctc"
+tags: ["pxeus", "segment_recognize", "timit", "single", "count_ctc"]
 
 seed: 42
 
@@ -43,19 +43,18 @@ model:
   audio_sr: 32000
   optimizer:
     lr: 0.0001
-  pr_losses:
-    asg:
-      _target_: src.recipe.segment_recognize.heads.asg_recognition.ASGRecognitionHead
+  seg_losses:
+    count_ctc:
+      _target_: src.recipe.segment_recognize.heads.count_ctc.CountCTCHead
       _partial_: true
-      num_labels: 428
       weight: 1.0
-      use_transitions: true
-      use_double_scores: false
+      substitution: "1 0"
+      boundary_token: "1"
       tolerance_ms: 20
 
 data:
-  pr_weight: 1.0
-  seg_weight: 0.0
+  pr_weight: 0.0
+  seg_weight: 1.0
   batch_size: 8
   seg_datamodule:
     hf_repo: changelinglab/timit-segment

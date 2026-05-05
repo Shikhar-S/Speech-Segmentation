@@ -1,9 +1,9 @@
 # @package _global_
 
-# CountCTC only on TIMIT with PhoneticXEUS
+# FCE (frame-wise cross-entropy) only on TIMIT with PhoneticXEUS
 
 defaults:
-  - override /data: sr_joint_prseg
+  - override /data: joint_prseg
   - override /model: segment_recognize_bare
   - override /model/net: phoneticxeus
 
@@ -11,8 +11,8 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "timit_pxeus_count_ctc"
-tags: ["pxeus", "segment_recognize", "timit", "single", "count_ctc"]
+task_name: "timit_pxeus_fce"
+tags: ["pxeus", "segment_recognize", "timit", "single", "fce"]
 
 seed: 42
 
@@ -21,7 +21,7 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   min_epochs: 0
   max_epochs: -1
-  max_steps: 20000
+  max_steps: 10000
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
   val_check_interval: 250
@@ -44,12 +44,10 @@ model:
   optimizer:
     lr: 0.0001
   seg_losses:
-    count_ctc:
-      _target_: src.recipe.segment_recognize.heads.count_ctc.CountCTCHead
+    fa:
+      _target_: src.recipe.segment_recognize.heads.fa_segmentation.FASegmentationHead
       _partial_: true
       weight: 1.0
-      substitution: "1 0"
-      boundary_token: "1"
       tolerance_ms: 20
 
 data:

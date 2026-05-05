@@ -1,9 +1,9 @@
 # @package _global_
 
-# BCE only on TIMIT with PhoneticXEUS
+# CTC only on TIMIT with PhoneticXEUS
 
 defaults:
-  - override /data: sr_joint_prseg
+  - override /data: joint_prseg
   - override /model: segment_recognize_bare
   - override /model/net: phoneticxeus
 
@@ -11,8 +11,8 @@ defaults:
   - override /callbacks: default
   - override /logger: wandb
 
-task_name: "timit_pxeus_bce"
-tags: ["pxeus", "segment_recognize", "timit", "single", "bce"]
+task_name: "timit_pxeus_ctc"
+tags: ["pxeus", "segment_recognize", "timit", "single", "ctc"]
 
 seed: 42
 
@@ -21,7 +21,7 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   min_epochs: 0
   max_epochs: -1
-  max_steps: 20000
+  max_steps: 25000
   gradient_clip_val: 1.0
   accumulate_grad_batches: 1
   val_check_interval: 250
@@ -43,17 +43,16 @@ model:
   audio_sr: 32000
   optimizer:
     lr: 0.0001
-  seg_losses:
-    bce:
-      _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
+  pr_losses:
+    ctc:
+      _target_: src.recipe.segment_recognize.heads.ctc_recognition.CTCRecognitionHead
       _partial_: true
       weight: 1.0
-      pos_weight: 1.0
       tolerance_ms: 20
 
 data:
-  pr_weight: 0.0
-  seg_weight: 1.0
+  pr_weight: 1.0
+  seg_weight: 0.0
   batch_size: 8
   seg_datamodule:
     hf_repo: changelinglab/timit-segment
