@@ -174,5 +174,6 @@ sbatch <sbatcharg1> <sbatcharg2> scripts/daixpr.batch <scriptarg1> <scriptarg2>
 ```
 here <sbatcharg> overrides the slurm header arguments, <scriptarg> overrides the command line argument to hydra (because it resolves the last value).
 
-## Protected code
-Do not change code inside src/core without requiring permission from the user explicitly.
+## Do not pollute my code!
+* PROTECTED CODE: Do not change code inside src/core without requiring permission from the user explicitly.
+* Put all temporary scripts in tmp/

@@ -35,7 +35,7 @@ class DecodeAlignStrategy:
         assert feature_lens is not None, (
             "DecodeAlignStrategy requires feature_lens (per-utterance true frame counts)"
         )
-        decode_results = self.decode_strategy(net, speech, speech_lengths, features, logits=logits, return_logits=True, **kwargs)
+        decode_results = self.decode_strategy(net, speech, speech_lengths, features, logits=logits, feature_lens=feature_lens, return_logits=True, **kwargs)
         logprobs = []
         targets = []
         for res in decode_results:

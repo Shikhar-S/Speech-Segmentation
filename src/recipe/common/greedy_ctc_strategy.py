@@ -30,6 +30,7 @@ class GreedyCTCInference:
         speech_lengths: torch.Tensor,
         features: torch.Tensor = None,
         logits: torch.Tensor = None,
+        feature_lens: torch.Tensor = None,
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """
@@ -54,6 +55,17 @@ class GreedyCTCInference:
 
         # 2. Greedy search
         y_hat = torch.argmax(logits, dim=-1)
+
+        # Mask padded frames to blank so collapse never produces tokens
+        # past the true frame count (otherwise downstream forced_align gets
+        # target_len > input_len at random/early stages).
+        if feature_lens is not None:
+            T = y_hat.shape[1]
+            pad_mask = (
+                torch.arange(T, device=y_hat.device).unsqueeze(0)
+                >= feature_lens.to(y_hat.device).unsqueeze(1)
+            )
+            y_hat = y_hat.masked_fill(pad_mask, self.blank_id)
 
         # 3. Collapse
         collapsed_ids = ctc_collapse_vectorized(y_hat, self.blank_id)
