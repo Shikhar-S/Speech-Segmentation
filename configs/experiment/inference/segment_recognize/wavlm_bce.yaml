@@ -1,0 +1,41 @@
+# @package _global_
+
+# Inference config for wavlm-bce segment_recognize checkpoint
+# python src/main.py experiment=inference/segment_recognize/wavlm_bce \
+#     inference.inference_runner.ckpt_path=<path> \
+#     data.prediction_dataset.hf_repo=<repo>
+defaults:
+  - override /data: timit_prseg
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: wavlm
+
+task_name: "inf_segmentrecognize_wavlm_bce_16k"
+tags: ["segmentation", "bce", "inference", "wavlm", "16k"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  prediction_dataset:
+    target_sr: 16000
+
+inference:
+  num_workers: 4
+  out_file: ${paths.output_dir}/wavlm_bce_16k.json
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.recipe.segment_recognize.inference.build_segment_recognize_inference
+    ckpt_path: ???
+    device: cuda
+    net:
+      _target_: src.model.wavlm.builders.build_wavlm_model
+      hf_repo: microsoft/wavlm-large
+      output_vocabsz: 428
+      vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+      cache_dir: ${paths.cache_dir}/hf
