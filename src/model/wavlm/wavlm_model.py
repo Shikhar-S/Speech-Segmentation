@@ -14,6 +14,7 @@ Notes:
       time lengths.
 """
 
+import json
 from typing import Dict, List, Tuple, Optional, Union
 
 import numpy as np
@@ -118,17 +119,29 @@ class WavLMEncoderModel(nn.Module):
         freeze_encoder: bool = True,
         encoder_layer: int = -1,
         cache_dir: Optional[str] = None,
+        vocab_file: Optional[str] = None,
     ):
         """
         Args:
             hf_repo: HuggingFace model ID (e.g., "microsoft/wavlm-base").
-            output_vocabsz: If set, creates a CTC head with this vocab size.
+            output_vocabsz: If set, creates a CTC head with this vocab size. Overwritten by length of vocab.
             blank_id: Blank token ID for CTC (default 0).
             freeze_encoder: Whether to freeze encoder weights (default True).
             encoder_layer: Which encoder layer to use (-1 = last, 0-indexed otherwise).
             cache_dir: Optional cache directory for HuggingFace model.
+            vocab_file: Path to a ``{token: id}`` JSON used at training time.
+                Populates ``self.token_list`` so CTC decoding can map ids back
+                to phones. Must match the training vocab.
         """
         super().__init__()
+        self.token_list: Optional[List[str]] = None
+        if vocab_file is not None:
+            with open(vocab_file) as f:
+                vocab: Dict[str, int] = json.load(f)
+            self.token_list = [
+                t for t, _ in sorted(vocab.items(), key=lambda kv: kv[1])
+            ]
+            output_vocabsz = len(self.token_list)
         # NOTE: Many WavLM HF repos (e.g., microsoft/wavlm-base) do NOT ship a tokenizer/vocab.
         # AutoProcessor may still try to construct a tokenizer and crash with
         # `TypeError: expected str, bytes or os.PathLike object, not NoneType`.

@@ -31,12 +31,12 @@ trainer:
 
 callbacks:
   model_checkpoint:
-    monitor: val_seg/rval
+    monitor: val_seg/f1
     mode: max
     filename: step_{step:06d}
     save_last: true
   early_stopping:
-    monitor: val_seg/rval
+    monitor: val_seg/f1
     mode: max
     patience: 100
 
@@ -47,6 +47,7 @@ model:
   net:
     hf_repo: microsoft/wavlm-large
     output_vocabsz: 428
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
     freeze_encoder: false
   # CTC is the segmentation training signal here, so the head lives under
   # seg_losses (consumes the seg sub-batch, which has boundary GT for rval).

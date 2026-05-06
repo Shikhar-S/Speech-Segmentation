@@ -24,6 +24,7 @@ def build_wavlm_model(
     freeze_encoder: bool = False,
     encoder_layer: int = -1,
     cache_dir: Optional[str] = None,
+    vocab_file: Optional[str] = None,
 ) -> WavLMEncoderModel:
     """Build WavLM encoder model for PhoneBench.
 
@@ -46,6 +47,7 @@ def build_wavlm_model(
         freeze_encoder=freeze_encoder,
         encoder_layer=encoder_layer,
         cache_dir=cache_dir,
+        vocab_file=vocab_file,
     )
     log.info(f"WavLM model loaded from {hf_repo}")
     log.info(f"Encoder dim: {model.encoder_output_size()}")

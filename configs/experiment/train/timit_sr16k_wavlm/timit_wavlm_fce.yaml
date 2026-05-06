@@ -47,6 +47,7 @@ model:
   net:
     hf_repo: microsoft/wavlm-large
     output_vocabsz: 428
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
     freeze_encoder: false
   seg_losses:
     fa:
