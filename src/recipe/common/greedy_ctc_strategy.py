@@ -7,10 +7,12 @@ def ctc_collapse_vectorized(
 ) -> List[List[int]]:
     """Optimized CTC collapse for batch tensors."""
     mask = torch.ones_like(ids, dtype=torch.bool)
-    mask[:, 1:] = ids[:, 1:] != ids[:, :-1]
-    mask &= ids != blank_id
+    mask[:, 1:] = (
+        ids[:, 1:] != ids[:, :-1]
+    )  # true if this pred is not same as previous
+    mask &= ids != blank_id  # true if this pred is not blank
     if ignore_id != -1:
-        mask &= ids != ignore_id
+        mask &= ids != ignore_id  # true if this pred is not ignore_id
 
     return [ids[i][mask[i]].tolist() for i in range(ids.size(0))]
 
@@ -61,10 +63,9 @@ class GreedyCTCInference:
         # target_len > input_len at random/early stages).
         if feature_lens is not None:
             T = y_hat.shape[1]
-            pad_mask = (
-                torch.arange(T, device=y_hat.device).unsqueeze(0)
-                >= feature_lens.to(y_hat.device).unsqueeze(1)
-            )
+            pad_mask = torch.arange(T, device=y_hat.device).unsqueeze(
+                0
+            ) >= feature_lens.to(y_hat.device).unsqueeze(1)
             y_hat = y_hat.masked_fill(pad_mask, self.blank_id)
 
         # 3. Collapse
@@ -75,7 +76,8 @@ class GreedyCTCInference:
         for b, ids in enumerate(collapsed_ids):
             tokens = [self.token_list[i] for i in ids]
             raw_text = "/".join(tokens)
-            # Filter special tokens
+            # Filter special tokens - for powsm and eos bos in some tokenizers
+            # TODO(shikhar): this can cause issues. Tokenizer should maintain a special token list
             clean_tokens = [
                 t for t in tokens if not (t.startswith("<") and t.endswith(">"))
             ]

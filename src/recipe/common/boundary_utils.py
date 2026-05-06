@@ -47,7 +47,7 @@ def argmax_to_boundaries(
     if blank_id is None:
         flags[0] = True  # why?
         for i in range(1, valid_len):
-            if preds[i] != preds[i - 1]:
+            if preds[i] != preds[i - 1]:  # pred switches
                 flags[i] = True
         return flags
 
@@ -112,8 +112,8 @@ def frame_label_to_units(
         valid_len: Number of valid (non-padded) frames.
         points_by_frames: Audio points per frame (#points/#frames).
         sampling_rate: Audio sampling rate in Hz.
-        token_list: Optional list mapping class ids to strings; 
-            if provided, will be used to populate the ``label`` field of the output units, 
+        token_list: Optional list mapping class ids to strings;
+            if provided, will be used to populate the ``label`` field of the output units,
             else the raw class id will be used.
     Returns:
         ``List[SegmentationUnit]`` with class labels.
@@ -126,12 +126,16 @@ def frame_label_to_units(
     current_label = frame_labels[0]
     for i in range(1, valid_len):
         if frame_labels[i] != current_label:
-            #TODO(shikhar): remove entries with label = blank id
+            # TODO(shikhar): remove entries with label = blank id?
             units.append(
                 SegmentationUnit(
                     start=start * points_by_frames / sampling_rate,
                     end=i * points_by_frames / sampling_rate,
-                    label=current_label if token_list is None else token_list[current_label],
+                    label=(
+                        current_label
+                        if token_list is None
+                        else token_list[current_label]
+                    ),
                 )
             )
             start = i
@@ -141,10 +145,15 @@ def frame_label_to_units(
         SegmentationUnit(
             start=start * points_by_frames / sampling_rate,
             end=valid_len * points_by_frames / sampling_rate,
-            label=current_label if token_list is None else token_list[current_label],
+            label=(
+                current_label
+                if token_list is None
+                else token_list[current_label]
+            ),
         )
     )
     return units
+
 
 def target_boundaries_to_gt_units(
     target_start_idx: torch.Tensor,
@@ -185,7 +194,6 @@ def target_boundaries_to_gt_units(
             for i in range(n)
         ]
     return gt
-
 
 
 def phone_starts_to_gt_units(

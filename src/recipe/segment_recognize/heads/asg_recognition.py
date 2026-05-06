@@ -3,14 +3,13 @@
 """
 
 from collections.abc import Mapping
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
 
 from src.metrics.segmentation_evaluator import SegmentationEvaluator
 from src.recipe.common.boundary_utils import (
-    argmax_to_boundaries,
     boundaries_to_units,
     boundary_rval_metrics,
 )
@@ -106,8 +105,12 @@ class ASGRecognitionHead(TaskHead):
         if "target_start_idx" not in batch:
             return {}
         return boundary_rval_metrics(
-            output["logits"], feature_lens, batch,
-            self.evaluator, self.effective_pbf, self.audio_sr,
+            output["logits"],
+            feature_lens,
+            batch,
+            self.evaluator,
+            self.effective_pbf,
+            self.audio_sr,
             blank_id=self.repeat_idx,
         )
 
@@ -120,6 +123,28 @@ class ASGRecognitionHead(TaskHead):
         """Boundary rval metrics from argmax phone predictions."""
         return self._rval_metrics(output, feature_lens, batch)
 
+    def _argmax_to_boundaries(self, preds: List[int]) -> List[bool]:
+        """ASG-specific phone-onset flags from per-frame argmax.
+        Args:
+            preds: Per-frame argmax class ids.
+        Returns:
+            Boolean list of the same length; ``True`` marks a phone onset.
+            Example:
+            For repeat_idx=0, [3, 3, 0, 0, 5, 5, 0] -> [T,F,T,T,T,F,T]
+        """
+        flags = [False] * len(preds)
+        prev_phone: Optional[int] = None
+        for i, p in enumerate(preds):
+            if prev_phone is None:
+                # first frame is always a boundary
+                flags[i] = True
+                prev_phone = p
+                continue
+            if p != prev_phone or p == self.repeat_idx:
+                flags[i] = True
+                prev_phone = p
+        return flags
+
     @torch.no_grad()
     def decode(
         self,
@@ -129,9 +154,7 @@ class ASGRecognitionHead(TaskHead):
         **ctx: Any,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Greedy ASG decode + per-frame boundaries.
-
-        Returns ``{utt_id: boundaries}`` per utterance. Boundaries come from
-        argmax phone-change frames (with ``repeat_idx`` treated as blank).
+        Returns ``{utt_id: boundaries}`` per utterance.
         """
         y_hat = torch.argmax(self.proj(features), dim=-1)
         pbf, sr = self.effective_pbf, self.audio_sr
@@ -139,8 +162,6 @@ class ASGRecognitionHead(TaskHead):
         for b in range(y_hat.size(0)):
             vlen = int(feature_lens[b])
             preds = y_hat[b, :vlen].tolist()
-            flags = argmax_to_boundaries(
-                preds, vlen, blank_id=self.repeat_idx,
-            )
+            flags = self._argmax_to_boundaries(preds)
             out[batch["utt_id"][b]] = boundaries_to_units(flags, vlen, pbf, sr)
         return out

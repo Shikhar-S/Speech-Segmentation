@@ -197,9 +197,13 @@ class CountCTCHead(TaskHead):
         feature_lens: torch.Tensor,
         utt_id: List[str],
     ) -> dict[str, List[SegmentationUnit]]:
-        """Convert argmax logits to predicted segmentation based on
-        approach (1), first and last spikes in a contiguous run are the
-        boundaries.
+        """Convert argmax logits to predicted segmentation.
+
+        Each contiguous run of class==1 frames becomes a boundary segment,
+        and each contiguous run of blank frames between/around boundary
+        runs becomes a ``<blank>`` segment, so the output tiles the full
+        utterance and is shape-comparable to CTC's ``frame_label_to_units``
+        output.
         """
         predid = logits.argmax(dim=-1)
         B = predid.shape[0]
@@ -208,25 +212,42 @@ class CountCTCHead(TaskHead):
         )
         predid_leftshift = torch.cat([predid[:, 1:], pad], dim=1)
         predid_rightshift = torch.cat([pad, predid[:, :-1]], dim=1)
-        onsets = predid != predid_rightshift
-        offsets = predid != predid_leftshift
+        # onset: prev=blank, curr=1 (first frame of a 1-run)
+        onsets = (predid_rightshift == self.blank_id) & (predid == 1)
+        # offset: next=blank, curr=1 (last frame of a 1-run)
+        offsets = (predid_leftshift == self.blank_id) & (predid == 1)
+        pbf, sr = self.effective_pbf, self.audio_sr
         out: dict[str, List[SegmentationUnit]] = {}
-        for b in range(logits.shape[0]):
+        for b in range(B):
             vlen = int(feature_lens[b])
-            segmentation_units = []
-            start, end = None, None
-            for i in range(vlen):
-                if onsets[b, i]:
-                    start = i
-                if offsets[b, i] and start is not None:
-                    end = i
-                    segmentation_units.append(
+            on_idx = onsets[b, :vlen].nonzero(as_tuple=True)[0].tolist()
+            off_idx = offsets[b, :vlen].nonzero(as_tuple=True)[0].tolist()
+            units, cursor = [], 0
+            for s, e in zip(on_idx, off_idx):
+                if s > cursor:
+                    units.append(
                         SegmentationUnit(
-                            start=start * self.effective_pbf / self.audio_sr,
-                            end=end * self.effective_pbf / self.audio_sr,
+                            start=cursor * pbf / sr,
+                            end=s * pbf / sr,
+                            label="<blank>",
                         )
                     )
-            out[utt_id[b]] = segmentation_units
+                units.append(
+                    SegmentationUnit(
+                        start=s * pbf / sr,
+                        end=(e + 1) * pbf / sr,
+                    )
+                )
+                cursor = e + 1
+            if cursor < vlen:
+                units.append(
+                    SegmentationUnit(
+                        start=cursor * pbf / sr,
+                        end=vlen * pbf / sr,
+                        label="<blank>",
+                    )
+                )
+            out[utt_id[b]] = units
         return out
 
     @torch.no_grad()

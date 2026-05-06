@@ -323,9 +323,16 @@ if __name__ == "__main__":
         (),
         {"tokens2ids": lambda self, phones: [i for i in range(len(phones))]},
     )()
-    # DATASET = "changelinglab/buckeye-segment"
-    DATASET = "changelinglab/timit-segment"
-    # DATASET = "changelinglab/torgo-segment"
+    # DATASET = "changelinglab/buckeye-segment" # has b_trans, voc_noise
+    # DATASET = "changelinglab/timit-segment" # has silence at start!
+    # DATASET = "changelinglab/gtimit-tha-segment" # has silence at start!
+    # DATASET = "changelinglab/gtimit-l1simple-segment" # has silence at start!
+    # DATASET = "changelinglab/gtimit-l2simple-segment" # has silence at start!
+    # DATASET = "changelinglab/gtimit-l1tbnk-segment"  # has silence at start!
+    # DATASET = "changelinglab/gtimit-l2tbnk-segment"  # has silence at start!
+    # DATASET = "changelinglab/torgo-segment" # no silence at start!
+    # DATASET = "changelinglab/voxangeles-segment" # no silence at start!
+    DATASET = "changelinglab/ssnce-segment"  # no silence at start!
     dataset = build_segmentation_dataset(
         hf_repo=DATASET,
         split="test",
@@ -334,9 +341,13 @@ if __name__ == "__main__":
         cache_dir="exp/cache/hf",
         transform=False,
     )
+    i = 0
     for item in dataset:
         print(item)
-        break
+        i += 1
+        if i > 3:
+            break
+        print("--" * 10)
     # dl = SegmentationDataModule(
     #     hf_repo=DATASET, tokenizer=tokenizer, batch_size=2
     # )
