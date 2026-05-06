@@ -9,9 +9,6 @@ import torch
 import torch.nn as nn
 
 from src.metrics.segmentation_evaluator import SegmentationEvaluator
-from src.recipe.common.greedy_ctc_strategy import (
-    ctc_collapse_vectorized,
-)
 from src.recipe.common.boundary_utils import (
     argmax_to_boundaries,
     boundaries_to_units,
@@ -130,25 +127,20 @@ class ASGRecognitionHead(TaskHead):
         feature_lens: torch.Tensor,
         batch: Mapping[str, Any],
         **ctx: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """Greedy ASG decode + per-frame boundaries.
 
-        Returns one dict per utterance with ``phone_ids`` and
-        segmentation ``boundaries`` derived from argmax phone-change
-        frames (with ``repeat_idx`` treated as blank).
+        Returns ``{utt_id: boundaries}`` per utterance. Boundaries come from
+        argmax phone-change frames (with ``repeat_idx`` treated as blank).
         """
         y_hat = torch.argmax(self.proj(features), dim=-1)
-        collapsed = ctc_collapse_vectorized(y_hat, blank_id=self.repeat_idx)
         pbf, sr = self.effective_pbf, self.audio_sr
-        out: List[Dict[str, Any]] = []
-        for b, ids in enumerate(collapsed):
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for b in range(y_hat.size(0)):
             vlen = int(feature_lens[b])
             preds = y_hat[b, :vlen].tolist()
             flags = argmax_to_boundaries(
                 preds, vlen, blank_id=self.repeat_idx,
             )
-            out.append({
-                "phone_ids": ids,
-                "boundaries": boundaries_to_units(flags, vlen, pbf, sr),
-            })
+            out[batch["utt_id"][b]] = boundaries_to_units(flags, vlen, pbf, sr)
         return out
