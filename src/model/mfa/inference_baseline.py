@@ -22,11 +22,15 @@ import torch
 
 from src.metrics.segmentation_evaluator import SegmentationUnit
 from src.model.mfa.utils import (
+    MFA_SILENCE_PHONES,
     _phones_from_mfa_json,
     _save_utterance,
     build_phone_dict,
     ensure_mfa_model,
     mfa_env,
+    mfa_extracted_path,
+    normalize_phones_for_koel,
+    normalize_phones_for_mfa_english,
 )
 
 _ModelEntry: TypeAlias = tuple[str, str] | Sequence[str]
@@ -58,6 +62,7 @@ class MFASingleInference:
         cache_dir: str | None = None,
         units: str = "phones",
         recognizer: Any | None = None,
+        phone_normalizer: str = "english_mfa",
     ):
         """Args:
         dictionary: Default MFA dictionary name or path. Ignored when
@@ -75,6 +80,9 @@ class MFASingleInference:
             the dataset's phones/text. Expected to return List[Dict] with
             "predicted_transcript" (slash-separated phones) and
             symbols to be in the acoustic model's phone set.
+        phone_normalizer: Which normalizer to apply when units="phones" and
+            acoustic_model="english_mfa". ``"english_mfa"`` (default) expects
+            IPA input (XEUS); ``"koel"`` handles raw ARPABET tokens from Koel.
         """
         self.dictionary = dictionary
         self.acoustic_model = acoustic_model
@@ -82,11 +90,13 @@ class MFASingleInference:
         self.language_model_map = language_model_map
         self.units = units
         self.recognizer = recognizer
+        self.phone_normalizer = phone_normalizer
         self._env = mfa_env(cache_dir)
+        self._acoustic_model_paths: dict[str, Path] = {}
         self._download_all_models()
 
     def _download_all_models(self) -> None:
-        """Download all required MFA models if not already present."""
+        """Download and pre-extract all required MFA models."""
         if self.units == "phones":
             acoustic_models = [self.acoustic_model]
             if self.language_model_map:
@@ -95,6 +105,9 @@ class MFASingleInference:
                 ]
             for am in dict.fromkeys(acoustic_models):
                 ensure_mfa_model(am, dictionary=None, env=self._env)
+                self._acoustic_model_paths[am] = mfa_extracted_path(
+                    am, self._env
+                )
         else:
             pairs: list[tuple[str, str]] = [
                 (self.dictionary, self.acoustic_model)
@@ -105,6 +118,9 @@ class MFASingleInference:
                 ]
             for dict_name, model_name in dict.fromkeys(pairs):
                 ensure_mfa_model(model_name, dict_name, env=self._env)
+                self._acoustic_model_paths[model_name] = mfa_extracted_path(
+                    model_name, self._env
+                )
 
     def _run_recognizer(self, sp: torch.Tensor) -> list[str] | str:
         """Run self.recognizer on sp and return phones or word transcript.
@@ -165,8 +181,18 @@ class MFASingleInference:
                     if self.recognizer is not None
                     else kwargs.get("phones", [])
                 )
-                transcript = " ".join(phones)
-                build_phone_dict([phones], tmp / "phone_dict.txt")
+                if acoustic_model == "english_mfa":
+                    if self.phone_normalizer == "koel":
+                        phones = normalize_phones_for_koel(phones)
+                    else:
+                        phones = normalize_phones_for_mfa_english(phones)
+                content = [
+                    p for p in phones if p and p not in MFA_SILENCE_PHONES
+                ]
+                if not content:
+                    return []
+                transcript = " ".join(content)
+                build_phone_dict([content], tmp / "phone_dict.txt")
                 dictionary = str(tmp / "phone_dict.txt")
             else:
                 transcript = (
@@ -176,6 +202,9 @@ class MFASingleInference:
                 )
                 dictionary = pretrained_dictionary
 
+            acoustic_model_path = str(
+                self._acoustic_model_paths[acoustic_model]
+            )
             _save_utterance(sp, transcript, tmp / "item.wav", self.sr)
             subprocess.run(
                 [
@@ -184,7 +213,7 @@ class MFASingleInference:
                     "item.wav",
                     "item.lab",
                     dictionary,
-                    acoustic_model,
+                    acoustic_model_path,
                     "item.json",
                     "--output_format",
                     "json",
@@ -205,6 +234,8 @@ def build_mfa_single_inference(
     cache_dir: str | None = None,
     units: str = "phones",
     recognizer: Any | None = None,
+    phone_normalizer: str = "english_mfa",
+    **_: Any,
 ) -> MFASingleInference:
     """Hydra entry point: instantiate MFASingleInference.
 
@@ -227,4 +258,5 @@ def build_mfa_single_inference(
         cache_dir=cache_dir,
         units=units,
         recognizer=recognizer,
+        phone_normalizer=phone_normalizer,
     )

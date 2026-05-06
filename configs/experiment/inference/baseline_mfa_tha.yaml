@@ -1,0 +1,44 @@
+# @package _global_
+# Thai MFA baseline: XEUS phone recognizer + per-utterance mfa align_one.
+#   python src/main.py experiment=inference/baseline_mfa_tha \
+#       inference.out_file=exp/runs/baseline_mfa_en/gtimit-tha.jsonl
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_baseline_mfa_tha"
+tags: ["mfa", "baseline", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/gtimit-tha-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/baseline_mfa_tha.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+  inference_runner:
+    _target_: src.model.mfa.inference_baseline.build_mfa_single_inference
+    dictionary: thai_mfa
+    acoustic_model: thai_mfa
+    sr: 16000
+    cache_dir: ${paths.cache_dir}/mfa
+    recognizer:
+      _target_: src.model.xeusphoneme.builders.build_xeus_pr_inference
+      work_dir: ${paths.cache_dir}/xeus
+      hf_repo: espnet/xeus
+      vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+      checkpoint: exp/runs/train_ipapack_xeuspr/20251225_221757/checkpoints/step_030000.ckpt
+      config_file: null
+      device: cuda:0
+      force_download: false

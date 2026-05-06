@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from transformers import AutoModelForCTC, AutoProcessor
 
@@ -18,6 +18,7 @@ def build_koel_inference(
     cache_dir: Optional[str] = None,
     token: Optional[str] = None,
     ignored_tokens: Optional[List[str]] = None,
+    **_: Any,
 ) -> KoelInference:
     """Build KoelLabs XLSR inference module."""
     processor = AutoProcessor.from_pretrained(

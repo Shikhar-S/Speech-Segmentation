@@ -2,13 +2,17 @@
 
 import json
 import os
+import re
+import shutil
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
+import filelock
 import torch
 import torchaudio
 
+from src.core.ipa_utils import ARPABET_TO_IPA
 from src.metrics.segmentation_evaluator import SegmentationUnit
 
 # Phones to exclude from MFA transcripts: silence labels + Buckeye non-speech
@@ -22,10 +26,32 @@ MFA_SILENCE_PHONES: frozenset[str] = frozenset(
 
 # IPA conventions in our phone set that differ from MFA english_mfa's phone set.
 _IPA_TO_MFA_ENGLISH: dict[str, str] = {
+    # Diphthongs / r-colored vowels
     "aɪ": "aj", "oʊ": "ow", "eɪ": "ej", "aʊ": "aw", "ɔɪ": "ɔj",
     "ɜ˞": "ɝ", "ə˞": "ɚ", "ʌ": "ɐ",
+    # Affricates (tie-bar vs plain)
     "d͡ʒ": "dʒ", "t͡ʃ": "tʃ",
+    # Koel-specific: r-trill → English approximant
+    "r": "ɹ",
+    # Koel-specific: voiced h → h
+    "ɦ": "h",
+    # Koel-specific: British diphthong
+    "əʊ": "ow",
+    # Koel-specific: syllabic sonorants
+    "l̩": "ɫ̩", "ŋ̍": "ŋ",
+    # Koel-specific: central vowel
+    "ɨ": "ɪ",
+    # Koel-specific: devoiced schwa
+    "ə̥": "ə",
+    # Koel-specific: nasalized vowels → base vowel
+    "aɪ̃": "aj", "oʊ̃": "ow", "ĩ": "i", "æ̃": "æ",
+    "ɑ̃": "ɑ", "ə̃": "ə", "ɛ̃": "ɛ", "ʊ̃": "ʊ",
+    # Koel-specific: aspirated/rare consonants
+    "sʰ": "s", "θʰ": "θ", "x": "h", "ɣ": "ɡ", "β": "v",
 }
+
+# Trailing stress digit on ARPABET vowels (e.g. AH0, EY1).
+_ARPABET_STRESS_RE = re.compile(r"[012]$")
 
 
 def normalize_phones_for_mfa_english(phones: list[str]) -> list[str]:
@@ -42,6 +68,32 @@ def normalize_phones_for_mfa_english(phones: list[str]) -> list[str]:
         Phone labels in the MFA english_mfa phone set.
     """
     return [_IPA_TO_MFA_ENGLISH.get(p, p) for p in phones]
+
+
+def normalize_phones_for_koel(phones: list[str]) -> list[str]:
+    """Map raw Koel ARPABET tokens to the MFA english_mfa acoustic model phone set.
+
+    Koel's ``predicted_transcript`` contains raw CTC-collapsed tokens including
+    word-boundary markers (``|``) and special tokens (``<PAD>``, ``<UNK>`` …).
+    This function filters those out, strips stress digits, converts ARPABET to
+    IPA via ``ARPABET_TO_IPA``, and then applies the same IPA→MFA remapping as
+    ``normalize_phones_for_mfa_english``.
+
+    Args:
+        phones: Raw token strings from Koel's ``predicted_transcript``.
+
+    Returns:
+        Phone labels in the MFA english_mfa phone set, with non-speech tokens
+        removed.
+    """
+    result = []
+    for p in phones:
+        if not p or p.startswith("<") or p == "|":
+            continue
+        p_clean = _ARPABET_STRESS_RE.sub("", p)
+        ipa = ARPABET_TO_IPA.get(p_clean.lower(), p_clean.lower())
+        result.append(_IPA_TO_MFA_ENGLISH.get(ipa, ipa))
+    return result
 
 
 def mfa_env(cache_dir: str | None = None) -> dict[str, str]:
@@ -100,6 +152,51 @@ def ensure_mfa_model(
                 env=env,
                 check=True,
             )
+
+
+def mfa_extracted_path(
+    acoustic_model: str,
+    env: dict[str, str] | None = None,
+) -> Path:
+    """Return the extracted acoustic model directory, extracting if needed.
+
+    Uses a per-model file lock so concurrent workers never race to extract the
+    same zip. MFA's Archive.__init__ re-extracts every time when given a model
+    name; passing a directory path bypasses that.
+
+    Args:
+        acoustic_model: MFA acoustic model name (e.g. ``english_mfa``).
+        env: Environment dict from ``mfa_env``; used to locate MFA_ROOT_DIR.
+
+    Returns:
+        Path to the extracted acoustic model directory.
+    """
+    if env is None:
+        env = os.environ.copy()
+    mfa_root = Path(env.get("MFA_ROOT_DIR", Path.home() / "Documents" / "MFA"))
+    extract_dir = (
+        mfa_root / "extracted_models" / "acoustic" / f"{acoustic_model}_acoustic"
+    )
+    lock_path = mfa_root / f".{acoustic_model}.extract.lock"
+    with filelock.FileLock(str(lock_path)):
+        if not extract_dir.exists():
+            zip_path = (
+                mfa_root / "pretrained_models" / "acoustic" / f"{acoustic_model}.zip"
+            )
+            if not zip_path.exists():
+                raise FileNotFoundError(
+                    f"MFA model zip not found: {zip_path}. "
+                    "Run ensure_mfa_model() first."
+                )
+            extract_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.unpack_archive(str(zip_path), str(extract_dir))
+            files = sorted(extract_dir.iterdir())
+            if len(files) == 1 and files[0].is_dir():
+                inner = files[0]
+                for f in list(inner.iterdir()):
+                    shutil.move(str(f), str(extract_dir / f.name))
+                inner.rmdir()
+    return extract_dir
 
 
 def build_phone_dict(phones_iter: Iterable[list[str]], dict_path: Path) -> None:

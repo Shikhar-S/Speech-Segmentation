@@ -1,0 +1,56 @@
+# @package _global_
+# VoxAngeles MFA baseline: XEUS phone recognizer + per-utterance mfa align_one.
+# Languages with available MFA models are listed in language_model_map;
+# all others are silently skipped (returned as empty predictions).
+#   python src/main.py experiment=inference/baseline_mfa_voxangeles \
+#       inference.out_file=exp/runs/baseline_mfa_en/voxangeles.jsonl
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_baseline_mfa_voxangeles"
+tags: ["mfa", "baseline", "voxangeles", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/voxangeles-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/baseline_mfa_voxangeles.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+    - language
+  inference_runner:
+    _target_: src.model.mfa.inference_baseline.build_mfa_single_inference
+    sr: 16000
+    cache_dir: ${paths.cache_dir}/mfa
+    language_model_map:
+      ben: [bengali_mfa, bengali_mfa]
+      ces: [czech_mfa, czech_mfa]
+      dan: [danish_mfa, danish_mfa]
+      ell: [greek_mfa, greek_mfa]
+      fin: [finnish_mfa, finnish_mfa]
+      hin: [hindi_mfa, hindi_mfa]
+      hun: [hungarian_mfa, hungarian_mfa]
+      nld: [dutch_mfa, dutch_mfa]
+      pes: [persian_mfa, persian_mfa]
+      prs: [persian_mfa, persian_mfa]
+    recognizer:
+      _target_: src.model.xeusphoneme.builders.build_xeus_pr_inference
+      work_dir: ${paths.cache_dir}/xeus
+      hf_repo: espnet/xeus
+      vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+      checkpoint: exp/runs/train_ipapack_xeuspr/20251225_221757/checkpoints/step_030000.ckpt
+      config_file: null
+      device: cuda:0
+      force_download: false
