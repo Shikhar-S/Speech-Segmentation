@@ -162,6 +162,53 @@ def process_gtimit_thai_symbols(
     return list(phone_timestamps), [p.lower() for p in phones]
 
 
+# SSNCE Tamil romanization -> IPA. Vowel doubles encode length (aa -> aː);
+# *x consonants are retroflex (tx -> ʈ); `eu` is the Tamil centralized high
+# vowel; `aɪ` and `n̪d̪` are not in xeuspr ipa_vocab.json and tokenize to
+# <unk> until the vocab is extended.
+_TAMIL_TO_IPA: Dict[str, str] = {
+    "a": "a",   "aa": "aː",
+    "i": "i",   "ii": "iː",
+    "u": "u",   "uu": "uː",
+    "e": "e",   "ee": "eː",
+    "o": "o",   "oo": "oː",
+    "ai": "aɪ", "eu": "ɨ",
+    "k": "k",   "g": "ɡ",
+    "c": "t͡ɕ", "j": "d͡ʒ",
+    "t": "t̪",  "d": "d̪",
+    "tx": "ʈ",  "dx": "ɖ",
+    "p": "p",   "b": "b",
+    "m": "m",   "n": "n̪",
+    "nx": "ɳ",  "nj": "ɲ",  "ng": "ŋ",
+    "nd": "n̪d̪",
+    "l": "l",   "lx": "ɭ",
+    "r": "r",   "rx": "ɽ",  "zh": "ɻ",
+    "s": "s",   "sx": "ʂ",  "h": "h",
+    "w": "ʋ",   "y": "j",
+}
+
+
+def process_ssnce_symbols(
+    phone_timestamps: List[Tuple[float, float]],
+    phones: List[str],
+) -> Tuple[List[Tuple[float, float]], List[str]]:
+    """SSNCE Tamil romanization -> IPA via ``_TAMIL_TO_IPA``.
+
+    No closure-stop merge, no silence collapse — SSNCE GT has no silence
+    labels and no closures. Idempotent: tokens already in IPA pass through
+    via the lowercase fallback.
+
+    Args:
+        phone_timestamps: list of ``(start, end)`` tuples (seconds).
+        phones: parallel list of Tamil-romanization phone labels.
+
+    Returns:
+        Unmodified timestamps; phones mapped to IPA.
+    """
+    ipa = [_TAMIL_TO_IPA.get(p.lower(), p.lower()) for p in phones]
+    return list(phone_timestamps), ipa
+
+
 # Registry: HuggingFace repo id -> default per-row GT transform.
 HF_REPO_TRANSFORMS: Dict[
     str,
@@ -178,4 +225,5 @@ HF_REPO_TRANSFORMS: Dict[
     "changelinglab/gtimit-l1tbnk-segment": process_gtimit_arpabet_symbols,
     "changelinglab/gtimit-tha-segment": process_gtimit_thai_symbols,
     "changelinglab/torgo-segment": process_gtimit_arpabet_symbols,
+    "changelinglab/ssnce-segment": process_ssnce_symbols,
 }

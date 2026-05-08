@@ -118,6 +118,47 @@ def split_gtimit_test_speaker_independent(ddict: Any) -> Any:
     return new_dd
 
 
+def split_ssnce_test_speaker_independent(ddict: Any) -> Any:
+    """Speaker-independent tune carve from SSNCE ``test``.
+
+    SSNCE has 30 speakers (262 utts each). Speaker IDs follow the Torgo
+    convention: ``MC*/FC*`` are typical controls (5 male + 5 female),
+    everyone else is dysarthric (13 male + 7 female).
+
+    Picks 4 dysarthric (2 male + 2 female) and 2 control speakers (1 male
+    + 1 female) at random (seed=42). Their utterances form ``tune``; the
+    remaining 24 speakers' utterances stay in ``test``. Tune and test
+    speaker sets are disjoint and balanced across both gender and
+    condition.
+    """
+    test = ddict["test"]
+    speakers = list(test["speaker_id"])
+    unique = sorted(set(speakers))
+    control = [s for s in unique if s.startswith(("MC", "FC"))]
+    dysarthric = [s for s in unique if s not in control]
+
+    def _pick(group, n, rng):
+        if not group or n <= 0:
+            return []
+        idx = rng.choice(len(group), size=min(n, len(group)), replace=False)
+        return [group[int(i)] for i in idx]
+
+    rng = np.random.default_rng(42)
+    tune_spk = set()
+    tune_spk.update(_pick([s for s in dysarthric if s.startswith("M")], 2, rng))
+    tune_spk.update(_pick([s for s in dysarthric if s.startswith("F")], 2, rng))
+    tune_spk.update(_pick([s for s in control if s.startswith("MC")], 1, rng))
+    tune_spk.update(_pick([s for s in control if s.startswith("FC")], 1, rng))
+
+    tune_idx = [i for i, s in enumerate(speakers) if s in tune_spk]
+    test_idx = [i for i, s in enumerate(speakers) if s not in tune_spk]
+
+    new_dd = {k: v for k, v in ddict.items()}
+    new_dd["tune"] = test.select(tune_idx)
+    new_dd["test"] = test.select(test_idx)
+    return new_dd
+
+
 # Registry: HuggingFace repo id -> default DatasetDict-level split transform.
 HF_REPO_SPLIT_TRANSFORMS: Dict[str, Callable[[Any], Any]] = {
     "changelinglab/timit-segment": split_timit_train_for_tuning,
@@ -129,4 +170,5 @@ HF_REPO_SPLIT_TRANSFORMS: Dict[str, Callable[[Any], Any]] = {
     "changelinglab/gtimit-l1tbnk-segment": split_gtimit_test_speaker_independent,
     "changelinglab/gtimit-tha-segment": split_gtimit_test_speaker_independent,
     "changelinglab/torgo-segment": split_torgo_test_speaker_independent,
+    "changelinglab/ssnce-segment": split_ssnce_test_speaker_independent,
 }
