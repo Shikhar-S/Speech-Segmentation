@@ -6,7 +6,6 @@ import panphon
 import torch
 import torchaudio.compliance.kaldi as kaldi
 from scipy.signal import find_peaks
-from scipy.spatial.distance import cosine as cos_dist
 
 warnings.filterwarnings(
     "ignore", message="Support for mismatched key_padding_mask"
@@ -295,14 +294,18 @@ def _mel_svf(mel_frames, left, right):
     mel_frames = np.asarray(mel_frames, dtype=float)
     n = mel_frames.shape[0]
     signal = np.full(n, np.nan)
-    norms = np.linalg.norm(mel_frames, axis=1)
-    for t in range(left, n - right):
-        denom = norms[t - left] * norms[t + right]
-        if denom > 0:
-            signal[t] = (
-                1.0
-                - np.dot(mel_frames[t - left], mel_frames[t + right]) / denom
-            )
+    if n <= left + right:
+        return signal
+    a = mel_frames[: n - left - right]
+    b = mel_frames[left + right :]
+    dots = np.sum(a * b, axis=1)
+    norms_a = np.linalg.norm(a, axis=1)
+    norms_b = np.linalg.norm(b, axis=1)
+    denom = norms_a * norms_b
+    valid = denom > 0
+    out = np.full(len(a), np.nan)
+    out[valid] = 1.0 - dots[valid] / denom[valid]
+    signal[left : n - right] = out
     finite = np.isfinite(signal)
     if finite.any():
         lo, hi = np.nanmin(signal), np.nanmax(signal)
@@ -328,12 +331,23 @@ def _mel_svf_signal(
     return sig[indices].astype(np.float32)
 
 
+def _cos_dist_pairs(a, b):
+    """Vectorized cosine distance between corresponding rows of a and b."""
+    dots = np.sum(a * b, axis=1)
+    norms = np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1)
+    out = np.ones(len(a))
+    valid = norms > 0
+    out[valid] = 1.0 - dots[valid] / norms[valid]
+    return out
+
+
 def _delta(proj, offset):
     """Compare phonological projections at t and t+offset using cosine distance."""
     T = proj.shape[0]
     delta = np.full(T, np.nan)
-    for t in range(T - offset):
-        delta[t] = cos_dist(proj[t], proj[t + offset])
+    if T <= offset:
+        return delta
+    delta[: T - offset] = _cos_dist_pairs(proj[:-offset], proj[offset:])
     return delta
 
 
@@ -346,10 +360,14 @@ def _fwd_contrast(proj_ipa, proj_r1, W_r1_to_ipa, lookahead):
     T = proj_ipa.shape[0]
     fwd_proj = proj_r1 @ W_r1_to_ipa
     contrast = np.full(T, np.nan)
-    for t in range(T - lookahead):
-        contrast[t] = cos_dist(fwd_proj[t], proj_ipa[t]) - cos_dist(
-            fwd_proj[t], proj_ipa[t + lookahead]
-        )
+    if T <= lookahead:
+        return contrast
+    n = T - lookahead
+    fp = fwd_proj[:n]
+    contrast[:n] = (
+        _cos_dist_pairs(fp, proj_ipa[:n])
+        - _cos_dist_pairs(fp, proj_ipa[lookahead:])
+    )
     return contrast
 
 
@@ -362,10 +380,13 @@ def _bwd_contrast(proj_ipa, proj_l1, W_l1_to_ipa, lookbehind):
     T = proj_ipa.shape[0]
     bwd_proj = proj_l1 @ W_l1_to_ipa
     contrast = np.full(T, np.nan)
-    for t in range(lookbehind, T):
-        contrast[t] = cos_dist(bwd_proj[t], proj_ipa[t]) - cos_dist(
-            bwd_proj[t], proj_ipa[t - lookbehind]
-        )
+    if T <= lookbehind:
+        return contrast
+    bp = bwd_proj[lookbehind:]
+    contrast[lookbehind:] = (
+        _cos_dist_pairs(bp, proj_ipa[lookbehind:])
+        - _cos_dist_pairs(bp, proj_ipa[: T - lookbehind])
+    )
     return contrast
 
 

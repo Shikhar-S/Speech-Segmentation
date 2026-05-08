@@ -51,6 +51,7 @@ from src.recipe.phonvec.utils import (
     instantiate_fit_dataset,
     instantiate_tune_dataset,
     log,
+    make_cache_id,
     run_grid_search,
     save_phonvec_artifact,
 )
@@ -73,18 +74,20 @@ def main(cfg: DictConfig) -> None:
     log.info(f"Instantiating net <{pt.net._target_}>")
     net = hydra.utils.instantiate(pt.net).to(device).eval()
 
+    fit_cache_id = make_cache_id(pt.net, cfg.data.hf_repo, "train")
+    tune_cache_id = make_cache_id(
+        pt.net, pt.tune_data.hf_repo, "tune"
+    )
+
     base_seg, saved_net_spec = fit_or_load_segmenter(
-        pt,
-        fit_ds,
-        net,
-        device,
-        frame_shift,
-        sr,
-        mel_frame_shift_ms,
+        pt, fit_ds, net, device, frame_shift, sr,
+        mel_frame_shift_ms, fit_cache_id=fit_cache_id,
     )
 
     log.info("Caching encoder features for tune subset...")
-    tune_cache = collect_eval_inputs(tune_ds, net, device, frame_shift, sr)
+    tune_cache = collect_eval_inputs(
+        tune_cache_id, tune_ds, net, device, frame_shift, sr
+    )
 
     best_seg, results = run_grid_search(
         base_seg,

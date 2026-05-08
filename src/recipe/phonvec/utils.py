@@ -12,6 +12,7 @@ Sections:
     ``fit_or_load_segmenter``, ``run_grid_search``, ``save_phonvec_artifact``.
 """
 
+import hashlib
 import itertools
 import os
 from typing import Iterable, List, Optional, Tuple
@@ -24,15 +25,58 @@ import torch.nn.functional as F
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
+from joblib import Memory
+from scipy.signal import find_peaks
+
 from src.core.ipa_utils import IPA_SILENCE_LABELS
+
+
 from src.metrics.segmentation_evaluator import (
     SegmentationEvaluator,
     SegmentationUnit,
 )
-from src.model.phonvec.model import Segmenter, SilenceHandler
+from src.model.phonvec.model import (
+    Segmenter,
+    SilenceHandler,
+    _combine_stacked,
+    _normalize_signal,
+    _shift_signal,
+)
 from src.utils import RankedLogger
 
 log = RankedLogger(__name__, rank_zero_only=True)
+
+_cache_path = os.environ.get("CACHE_DIR")
+_feat_memory = (
+    Memory(
+        location=os.path.join(_cache_path, "phonvec_feats"),
+        verbose=0,
+    )
+    if _cache_path
+    else None
+)
+if _feat_memory is None:
+    print("Warning: CACHE_DIR is not set. Proceeding without caching.")
+
+
+def _maybe_cache(**kwargs):
+    """``@_feat_memory.cache`` when CACHE_DIR is set, no-op otherwise."""
+    def decorator(fn):
+        if _feat_memory is not None:
+            return _feat_memory.cache(fn, **kwargs)
+        return fn
+    return decorator
+
+
+def make_cache_id(
+    net_cfg: DictConfig,
+    hf_repo: str,
+    split: str,
+) -> str:
+    """Deterministic hash identifying a (model, dataset-split) pair."""
+    net_yaml = OmegaConf.to_yaml(net_cfg, resolve=True)
+    raw = f"{net_yaml}|{hf_repo}|{split}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -62,22 +106,22 @@ def _extract_net_feats(net, speech, device, frame_shift):
     return feats[0, :vlen].cpu().numpy(), vlen
 
 
+@_maybe_cache(ignore=["dataset", "net", "device"])
 def build_per_phone_df(
+    cache_id: str,
     dataset,
     net,
     device: str,
     frame_shift: int,
     sr: int,
 ) -> pd.DataFrame:
-    """Builds a dataframe by walking over each phone in each utterance in the dataset.
-    A row corresponds to the phone with center-frame encoder features and has columns:
-        feat: encoder features at the center frame of the current phone
-        ipa: IPA label of the current phone (NaN if in IPA_SILENCE_LABELS)
-        l_1: IPA label of the left-adjacent phone (None if no left neighbor)
-        r_1: IPA label of the right-adjacent phone (None if no right neighbor)
-        audio_path: the utt_id of the current phone, a backpointer to the original audio and metadata
-        min: start time of the phone in seconds,
-    This is the schema `Segmenter._fit_from_df` expects.
+    """Build per-phone center-frame features from encoder output.
+
+    Each row has columns: feat, ipa, l_1, r_1, audio_path, min.
+    This is the schema ``Segmenter._fit_from_df`` expects.
+
+    Args:
+        cache_id: Opaque key for joblib caching (not used in logic).
     """
     rows: List[dict] = []
     for i in tqdm(
@@ -123,7 +167,9 @@ def build_per_phone_df(
     return pd.DataFrame(rows)
 
 
+@_maybe_cache(ignore=["dataset", "net", "device", "desc"])
 def collect_eval_inputs(
+    cache_id: str,
     dataset,
     net,
     device: str,
@@ -135,6 +181,9 @@ def collect_eval_inputs(
 
     Used during tuning so each grid point only re-runs the cheap segmenter
     pipeline, not the encoder forward.
+
+    Args:
+        cache_id: Opaque key for joblib caching (not used in logic).
     """
     cache: List[dict] = []
     for i in tqdm(range(len(dataset)), desc=desc, leave=False):
@@ -294,12 +343,12 @@ def fit_or_load_segmenter(
     frame_shift: int,
     sr: int,
     mel_frame_shift_ms: int,
+    fit_cache_id: str = "",
 ) -> Tuple[Segmenter, Optional[dict]]:
-    """
-    Returns (Segmentation, saved_net_spec).
-        Segmentation: either a newly fit Segmenter or one loaded from artifact.
-        saved_net_spech: non-None when loaded from artifact, useful to restore
-            saved net_spec rather than deriving from config
+    """Returns (Segmenter, saved_net_spec).
+
+    Args:
+        fit_cache_id: Passed to ``build_per_phone_df`` for joblib caching.
     """
     fit_artifact_path = pt_cfg.get("fit_artifact")
     if fit_artifact_path is not None:
@@ -313,7 +362,9 @@ def fit_or_load_segmenter(
 
     # FIT
     log.info("Building per-phone DataFrame for fit...")
-    train_df = build_per_phone_df(fit_ds, net, device, frame_shift, sr)
+    train_df = build_per_phone_df(
+        fit_cache_id, fit_ds, net, device, frame_shift, sr
+    )
     log.info(f"Rows in the fit DataFrame: {len(train_df)}")
 
     log.info(f"Loading silence detector from {pt_cfg.silence_detector_path}")
@@ -328,6 +379,43 @@ def fit_or_load_segmenter(
         mel_frame_shift_ms=mel_frame_shift_ms,
     )
     return seg, None
+
+
+def _precompute_signals(base_seg, tune_cache):
+    """Pre-compute shifted signals and silence masks for all utterances.
+
+    Everything computed here is invariant across grid hparams
+    (drop_k, norm_method, prominence, snap_silence).
+    """
+    h = base_seg.hparams
+    signal_names = h["combined_signals"]
+    signal_kwargs = h["signal_kwargs"]
+    signal_shifts = h["signal_shifts"]
+
+    precomputed = []
+    for c in tqdm(tune_cache, desc="Pre-computing signals", leave=False):
+        net_feats = c["net_feats"]
+        waveform_np = c["waveform_np"]
+        proj_ipa = base_seg.pv_ipa.project_raw(net_feats)
+        proj_r1 = base_seg.pv_r1.project_raw(net_feats)
+        proj_l1 = base_seg.pv_l1.project_raw(net_feats)
+
+        shifted = {}
+        for name in signal_names:
+            sig = base_seg._signal(
+                name, proj_ipa, proj_r1, proj_l1,
+                waveform_np, kwargs=signal_kwargs[name],
+            )
+            shifted[name] = _shift_signal(sig, signal_shifts[name])
+
+        silence_mask = base_seg.silence_handler.predict_silence_mask(
+            net_feats
+        )
+        precomputed.append({
+            "shifted_signals": shifted,
+            "silence_mask": silence_mask,
+        })
+    return precomputed
 
 
 def run_grid_search(
@@ -345,23 +433,49 @@ def run_grid_search(
     grid_cfg = OmegaConf.to_container(pt_cfg.grid, resolve=True)
     default_hparams = base_seg.default_hparams()
 
+    precomputed = _precompute_signals(base_seg, tune_cache)
+
+    gt_dict = {}
+    for c in tune_cache:
+        gt_dict[c["utt_id"]] = gt_units(
+            c["phone_timestamps"],
+            c["phones"],
+            strip_outer_silences=strip_outer,
+        )
+
     log.info("Running grid search...")
     results = []
     for point in iter_grid_points(grid_cfg):
-        seg = base_seg.with_hparams(apply_grid_point(default_hparams, point))
-        preds_dict, gt_dict = {}, {}
-        for c in tune_cache:
-            pred_frames = seg.segment(c["net_feats"], c["waveform_np"])
+        hp = apply_grid_point(default_hparams, point)
+        norm = hp["norm_method"]
+        drop_k = hp["drop_k"]
+        prominence = hp["combined_prominence"]
+        snap_silence = hp["snap_silence"]
+        snap_tolerance = hp["snap_tolerance"]
+        signal_names = hp["combined_signals"]
+
+        preds_dict = {}
+        for c, pc in zip(tune_cache, precomputed):
+            components = [
+                _normalize_signal(
+                    pc["shifted_signals"][name].copy(), norm
+                )
+                for name in signal_names
+            ]
+            stacked = np.stack(components, axis=0)
+            if drop_k > 0:
+                stacked = np.sort(stacked, axis=0)[drop_k:]
+            signal = _combine_stacked(stacked, norm)
+
+            preds = find_peaks(signal, prominence=prominence)[0]
+            if snap_silence:
+                preds = base_seg.silence_handler.handle_silence(
+                    preds=preds,
+                    silence_mask=pc["silence_mask"],
+                    snap_tolerance=snap_tolerance,
+                )
             preds_dict[c["utt_id"]] = pred_frames_to_units(
-                pred_frames,
-                c["vlen"],
-                frame_shift,
-                sr,
-            )
-            gt_dict[c["utt_id"]] = gt_units(
-                c["phone_timestamps"],
-                c["phones"],
-                strip_outer_silences=strip_outer,
+                preds, c["vlen"], frame_shift, sr,
             )
         score = evaluator.evaluate_batch(preds_dict, gt_dict)
         rval = float(score.get("rval", 0.0))

@@ -40,9 +40,9 @@ class SegmentationEvaluator:
             If False (default), operate in free mode: accepts any segment counts
             and returns only boundary-level metrics.
         match_mode: How to count boundary TPs.
-            ``"strict"`` (default): greedy one-to-one assignment — each
+            ``"strict"``: greedy one-to-one assignment — each
             boundary can be claimed by at most one counterpart, from Strgar & Harwath.
-            ``"lenient"``: independent nearest-neighbour — every boundary
+            ``"lenient"`` (default): independent nearest-neighbour — every boundary
             counts as TP iff any counterpart lies within tolerance, with no
             exclusivity.
     """
