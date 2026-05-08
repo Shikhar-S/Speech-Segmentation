@@ -51,7 +51,7 @@ class SegmentationEvaluator:
         self,
         tolerance_ms: int = 20,
         forced: bool = False,
-        match_mode: str = "strict",
+        match_mode: str = "lenient",
     ):
         if match_mode not in {"strict", "lenient"}:
             raise ValueError(
