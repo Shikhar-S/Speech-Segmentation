@@ -88,6 +88,7 @@ class CountCTCHead(TaskHead):
         zero_infinity: bool = True,
         blank_id: int = 0,
         projection_module: Optional[nn.Module] = None,
+        boundary_mode: str = "up_switch",
         **kwargs: Any,
     ) -> None:
         super().__init__(weight)
@@ -106,6 +107,8 @@ class CountCTCHead(TaskHead):
         self.evaluator = evaluator
         self.effective_pbf = effective_pbf
         self.audio_sr = audio_sr
+        assert boundary_mode in {"up_switch", "any_switch"}, boundary_mode
+        self.boundary_mode = boundary_mode
 
     def forward(
         self,
@@ -197,13 +200,25 @@ class CountCTCHead(TaskHead):
         feature_lens: torch.Tensor,
         utt_id: List[str],
     ) -> dict[str, List[SegmentationUnit]]:
-        """Convert argmax logits to predicted segmentation.
+        """Dispatch on ``self.boundary_mode``."""
+        if self.boundary_mode == "any_switch":
+            return self._process_predictions_any_switch(
+                logits, feature_lens, utt_id
+            )
+        return self._process_predictions_up_switch(
+            logits, feature_lens, utt_id
+        )
 
-        Each contiguous run of class==1 frames becomes a boundary segment,
-        and each contiguous run of blank frames between/around boundary
-        runs becomes a ``<blank>`` segment, so the output tiles the full
-        utterance and is shape-comparable to CTC's ``frame_label_to_units``
-        output.
+    def _process_predictions_any_switch(
+        self,
+        logits: torch.Tensor,
+        feature_lens: torch.Tensor,
+        utt_id: List[str],
+    ) -> dict[str, List[SegmentationUnit]]:
+        """Tile utterance with alternating ``<blank>`` and 1-run units.
+
+        Boundaries fire on both 0->1 onsets and 1->0 offsets of each 1-run.
+        Output is shape-comparable to CTC's ``frame_label_to_units``.
         """
         predid = logits.argmax(dim=-1)
         B = predid.shape[0]
@@ -246,6 +261,35 @@ class CountCTCHead(TaskHead):
                         end=vlen * pbf / sr,
                         label="<blank>",
                     )
+                )
+            out[utt_id[b]] = units
+        return out
+
+    def _process_predictions_up_switch(
+        self,
+        logits: torch.Tensor,
+        feature_lens: torch.Tensor,
+        utt_id: List[str],
+    ) -> dict[str, List[SegmentationUnit]]:
+        """Emit one segment per 0->1 rising edge; ignore 1->0 offsets."""
+        predid = logits.argmax(dim=-1)
+        B = predid.shape[0]
+        pad = torch.full(
+            (B, 1), self.blank_id, dtype=predid.dtype, device=predid.device
+        )
+        predid_rightshift = torch.cat([pad, predid[:, :-1]], dim=1)
+        # onset: prev=blank, curr=1 (first frame of a 1-run)
+        onsets = (predid_rightshift == self.blank_id) & (predid == 1)
+        pbf, sr = self.effective_pbf, self.audio_sr
+        out: dict[str, List[SegmentationUnit]] = {}
+        for b in range(B):
+            vlen = int(feature_lens[b])
+            on_idx = onsets[b, :vlen].nonzero(as_tuple=True)[0].tolist()
+            units = []
+            for j, s in enumerate(on_idx):
+                e = on_idx[j + 1] if j + 1 < len(on_idx) else vlen
+                units.append(
+                    SegmentationUnit(start=s * pbf / sr, end=e * pbf / sr)
                 )
             out[utt_id[b]] = units
         return out
