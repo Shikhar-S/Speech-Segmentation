@@ -22,11 +22,11 @@ import torch
 
 from src.metrics.segmentation_evaluator import SegmentationUnit
 from src.model.mfa.utils import (
-    MFA_SILENCE_PHONES,
     _phones_from_mfa_json,
     _save_utterance,
     build_phone_dict,
     ensure_mfa_model,
+    is_mfa_silence,
     mfa_env,
     mfa_extracted_path,
     normalize_phones_for_koel,
@@ -186,9 +186,7 @@ class MFASingleInference:
                         phones = normalize_phones_for_koel(phones)
                     else:
                         phones = normalize_phones_for_mfa_english(phones)
-                content = [
-                    p for p in phones if p and p not in MFA_SILENCE_PHONES
-                ]
+                content = [p for p in phones if p and not is_mfa_silence(p)]
                 if not content:
                     return []
                 transcript = " ".join(content)
@@ -206,23 +204,34 @@ class MFASingleInference:
                 self._acoustic_model_paths[acoustic_model]
             )
             _save_utterance(sp, transcript, tmp / "item.wav", self.sr)
-            subprocess.run(
-                [
-                    "mfa",
-                    "align_one",
-                    "item.wav",
-                    "item.lab",
-                    dictionary,
-                    acoustic_model_path,
-                    "item.json",
-                    "--output_format",
-                    "json",
-                    "--overwrite",
-                ],
-                cwd=tmp,
-                env=self._env,
-                check=True,
-            )
+            utterance_env = {**self._env, "MFA_ROOT_DIR": str(tmp)}
+            try:
+                subprocess.run(
+                    [
+                        "mfa",
+                        "align_one",
+                        "item.wav",
+                        "item.lab",
+                        dictionary,
+                        acoustic_model_path,
+                        "item.json",
+                        "--output_format",
+                        "json",
+                        "--overwrite",
+                    ],
+                    cwd=tmp,
+                    env=utterance_env,
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as e:
+                return [
+                    {
+                        "error": "mfa_align_one_failed",
+                        "stderr": e.stderr.decode(errors="replace"),
+                        "stdout": e.stdout.decode(errors="replace"),
+                    }
+                ]
             return _phones_from_mfa_json(tmp / "item.json")
 
 

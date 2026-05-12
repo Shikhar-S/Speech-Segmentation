@@ -17,6 +17,7 @@ from src.metrics.segmentation_evaluator import SegmentationUnit
 
 # Phones to exclude from MFA transcripts: silence labels + Buckeye non-speech
 # markers that survive arpabet_phones_to_ipa as lowercase pass-throughs.
+# Membership is case-insensitive; compare via ``is_mfa_silence`` below.
 MFA_SILENCE_PHONES: frozenset[str] = frozenset(
     {
         "sil", "sp", "spn", "pau", "h#", "ʔ̞", "epi",
@@ -24,11 +25,22 @@ MFA_SILENCE_PHONES: frozenset[str] = frozenset(
     }
 )
 
+
+def is_mfa_silence(phone: str) -> bool:
+    """Case-insensitive membership test against ``MFA_SILENCE_PHONES``."""
+    return phone.lower() in MFA_SILENCE_PHONES
+
 # IPA conventions in our phone set that differ from MFA english_mfa's phone set.
 _IPA_TO_MFA_ENGLISH: dict[str, str] = {
     # Diphthongs / r-colored vowels
     "aɪ": "aj", "oʊ": "ow", "eɪ": "ej", "aʊ": "aw", "ɔɪ": "ɔj",
     "ɜ˞": "ɝ", "ə˞": "ɚ", "ʌ": "ɐ",
+    # TIMIT unreleased stops → released equivalents
+    "b̚": "b", "d̚": "d", "ɡ̚": "ɡ", "k̚": "k", "p̚": "p", "t̚": "t",
+    # Latin 'g' (U+0067) → IPA 'ɡ' (U+0261)
+    "g": "ɡ",
+    # TIMIT-style glottal stop variant
+    "q": "ʔ",
     # Affricates (tie-bar vs plain)
     "d͡ʒ": "dʒ", "t͡ʃ": "tʃ",
     # Koel-specific: r-trill → English approximant
