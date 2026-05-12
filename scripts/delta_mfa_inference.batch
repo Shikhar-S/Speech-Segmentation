@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH -A bbjs-delta-gpu
+#SBATCH -p gpuA40x4,gpuA100x4
+#SBATCH -J mfa_inference
+#SBATCH -N 1
+#SBATCH --gpus-per-node=1
+#SBATCH -c 8
+#SBATCH --mem=32G
+#SBATCH -t 5:00:00
+#SBATCH -o exp/slurm_logs/%j.out
+#SBATCH -e exp/slurm_logs/%j.out
+
+# === Directory Setup ===
+cd /work/nvme/bbjs/sbharadwaj/powsm/xeuspr
+mkdir -p "exp/slurm_logs"
+# === Environment setup ===
+source ~/.bashrc
+export LD_LIBRARY_PATH=/u/sbharadwaj/micromamba/envs/mfa310/lib:$LD_LIBRARY_PATH
+export HF_HOME=/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/hf
+export MFA_ROOT_DIR=/work/nvme/bbjs/sbharadwaj/powsm/xeuspr/exp/cache/mfa
+export HYDRA_FULL_ERROR=1
+export PYTHONFAULTHANDLER=1
+
+micromamba run -n mfa310 python src/main.py "$@"
