@@ -14,6 +14,7 @@ import torch.nn as nn
 from src.recipe.segment_recognize.model_module import (
     SegmentRecognizeModel,
 )
+from src.recipe.segment_recognize.weight_tying import BoundaryFromBinary
 
 
 class SegmentRecognizeInference:
@@ -56,16 +57,39 @@ def build_segment_recognize_inference(
     net: nn.Module,
     ckpt_path: str,
     device: str = "cuda",
+    tied_weights: bool = False,
+    count_ctc_boundary_mode: str = None,
 ) -> SegmentRecognizeInference:
-    """Build an inference wrapper from a Lightning checkpoint. 
-    Heads are loaded from ckpt_path."""
+    """Build an inference wrapper from a Lightning checkpoint.
+
+    Args:
+        tied_weights: Set ``True`` for checkpoints trained with
+            ``TieBCECountCTCProj``. Such checkpoints lack
+            ``seg_losses.bce.boundary_head.*`` keys (the head was replaced
+            with a parameter-less ``BoundaryFromBinary`` wrapper); we load
+            with ``strict=False`` and re-apply the same tying so the BCE
+            branch reads its log-odds from ``count_ctc.proj``.
+    """
     model = SegmentRecognizeModel.load_from_checkpoint(
         ckpt_path,
         net=net,
         map_location="cpu",
-        strict=True,
+        strict=not tied_weights,
         weights_only=False,
     )
+    if tied_weights:
+        if "bce" not in model.seg_losses:
+            raise RuntimeError("tied_weights=True but 'bce' missing from seg_losses.")
+        if "count_ctc" in model.pr_losses:
+            cc = model.pr_losses["count_ctc"]
+        elif "count_ctc" in model.seg_losses:
+            cc = model.seg_losses["count_ctc"]
+        else:
+            raise RuntimeError("tied_weights=True but 'count_ctc' missing from heads.")
+        model.seg_losses["bce"].boundary_head = BoundaryFromBinary(cc.proj)
+    if count_ctc_boundary_mode is not None:
+        cc = model.pr_losses["count_ctc"] if "count_ctc" in model.pr_losses else model.seg_losses["count_ctc"]
+        cc.boundary_mode = count_ctc_boundary_mode
     return SegmentRecognizeInference(model=model, device=device)
 
 

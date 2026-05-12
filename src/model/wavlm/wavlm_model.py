@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
-from transformers import AutoProcessor, AutoFeatureExtractor, WavLMModel
+from transformers import AutoProcessor, AutoFeatureExtractor, WavLMConfig, WavLMModel
 
 from src.utils import RankedLogger
 
@@ -120,6 +120,7 @@ class WavLMEncoderModel(nn.Module):
         encoder_layer: int = -1,
         cache_dir: Optional[str] = None,
         vocab_file: Optional[str] = None,
+        pretrained: bool = True,
     ):
         """
         Args:
@@ -132,6 +133,10 @@ class WavLMEncoderModel(nn.Module):
             vocab_file: Path to a ``{token: id}`` JSON used at training time.
                 Populates ``self.token_list`` so CTC decoding can map ids back
                 to phones. Must match the training vocab.
+            pretrained: If False, build the model with random init from
+                ``WavLMConfig.from_pretrained(hf_repo)`` instead of loading
+                pretrained weights. Architecture / processor still come from
+                ``hf_repo``.
         """
         super().__init__()
         self.token_list: Optional[List[str]] = None
@@ -174,7 +179,11 @@ class WavLMEncoderModel(nn.Module):
                 ) from e2
             self.feature_extractor = self.processor
 
-        self.model = WavLMModel.from_pretrained(hf_repo, cache_dir=cache_dir)
+        if pretrained:
+            self.model = WavLMModel.from_pretrained(hf_repo, cache_dir=cache_dir)
+        else:
+            config = WavLMConfig.from_pretrained(hf_repo, cache_dir=cache_dir)
+            self.model = WavLMModel(config)
         self.encoder_layer = encoder_layer
 
         # WavLM config

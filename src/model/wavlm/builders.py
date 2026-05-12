@@ -25,6 +25,7 @@ def build_wavlm_model(
     encoder_layer: int = -1,
     cache_dir: Optional[str] = None,
     vocab_file: Optional[str] = None,
+    pretrained: bool = True,
 ) -> WavLMEncoderModel:
     """Build WavLM encoder model for PhoneBench.
 
@@ -48,8 +49,9 @@ def build_wavlm_model(
         encoder_layer=encoder_layer,
         cache_dir=cache_dir,
         vocab_file=vocab_file,
+        pretrained=pretrained,
     )
-    log.info(f"WavLM model loaded from {hf_repo}")
+    log.info(f"WavLM model loaded from {hf_repo} (pretrained={pretrained})")
     log.info(f"Encoder dim: {model.encoder_output_size()}")
     if output_vocabsz is not None:
         log.info(f"CTC head vocab size: {output_vocabsz}")
