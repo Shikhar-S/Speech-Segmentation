@@ -112,6 +112,7 @@ class Task:
             out_file=self.task_cfg.inference.out_file,
             passthrough_keys=self.task_cfg.inference.get("passthrough_keys"),
             limit_samples=self.task_cfg.inference.get("limit_samples"),
+            batch_size=self.task_cfg.inference.get("batch_size", 1),
         )
 
     def run_experiment(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:

@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -A bbjs-dtai-gh
-#SBATCH -p ghx4-interactive
+#SBATCH -p ghx4
 #SBATCH -J main
 #SBATCH -N 1                       # Default to 1, override via CLI
 #SBATCH --ntasks-per-node=1        # Matches number of GPUs per node

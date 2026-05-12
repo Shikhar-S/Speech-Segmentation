@@ -30,6 +30,7 @@ def work_chunk_(
     inference_config,
     inference_call_args=None,
     passthrough_keys=None,
+    batch_size: int = 1,
 ):
     """Worker function to run inference on a chunk of data."""
     try:
@@ -46,16 +47,31 @@ def work_chunk_(
         inference_obj = hydra.utils.instantiate(inference_config, device=device)
         out = []
         dataset = get_dataset_from_cfg(dataset_cfg)
-        for i in tqdm(idxs, desc="Processing", leave=False):
-            it = dataset[i]
-            # keys from dataset override those in inference_call_args
-            call_args = {**(inference_call_args or {}), **it}
-            pred = inference_obj(**call_args)
-            # keys from dataset that must be passed to
-            # output to be written
-            out.append(
-                (i, pred, {k: it[k] for k in (passthrough_keys or []) if k in it})
-            )
+        if batch_size <= 1:
+            for i in tqdm(idxs, desc="Processing", leave=False):
+                it = dataset[i]
+                # keys from dataset override those in inference_call_args
+                call_args = {**(inference_call_args or {}), **it}
+                pred = inference_obj(**call_args)
+                # keys from dataset that must be passed to
+                # output to be written
+                out.append(
+                    (i, pred, {k: it[k] for k in (passthrough_keys or []) if k in it})
+                )
+        else:
+            idxs = list(idxs)
+            for start in tqdm(range(0, len(idxs), batch_size), desc="Processing batches"):
+                chunk_idxs = idxs[start : start + batch_size]
+                chunk_items = [dataset[i] for i in chunk_idxs]
+                # keys from dataset override those in inference_call_args
+                batch_args = [{**(inference_call_args or {}), **it} for it in chunk_items]
+                preds = inference_obj(batch_args)
+                # keys from dataset that must be passed to
+                # output to be written
+                for i, pred, it in zip(chunk_idxs, preds, chunk_items):
+                    out.append(
+                        (i, pred, {k: it[k] for k in (passthrough_keys or []) if k in it})
+                    )
         return out
     except Exception as e:
         tb = traceback.format_exc()
@@ -85,6 +101,7 @@ def run_distributed_inference_(
     out_file=None,
     passthrough_keys=None,
     limit_samples: int = None,
+    batch_size: int = 1,
 ):
     """Splits dataset and runs inference in parallel workers.
 
@@ -97,6 +114,8 @@ def run_distributed_inference_(
         passthrough_keys: list of keys in dataset item to be written directly to
             output without processing
         limit_samples: if set, limit the number of samples to process (useful for testing)
+        batch_size: number of dataset items passed to inference_obj per call; when >1
+            inference_obj receives a list[dict] and must return a list of predictions
     """
 
     if OmegaConf.is_config(dataset_cfg):
@@ -175,6 +194,7 @@ def run_distributed_inference_(
         inference_config=inference_config,
         inference_call_args=inference_call_args,
         passthrough_keys=passthrough_keys,
+        batch_size=batch_size,
     )
     print("Total chunks to process:", len(chunks), flush=True)
     worker_args = [
