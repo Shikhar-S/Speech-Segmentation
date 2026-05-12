@@ -107,7 +107,11 @@ class CountCTCHead(TaskHead):
         self.evaluator = evaluator
         self.effective_pbf = effective_pbf
         self.audio_sr = audio_sr
-        assert boundary_mode in {"up_switch", "any_switch"}, boundary_mode
+        assert boundary_mode in {
+            "up_switch",
+            "any_switch",
+            "mid_switch",
+        }, boundary_mode
         self.boundary_mode = boundary_mode
 
     def forward(
@@ -205,9 +209,15 @@ class CountCTCHead(TaskHead):
             return self._process_predictions_any_switch(
                 logits, feature_lens, utt_id
             )
-        return self._process_predictions_up_switch(
-            logits, feature_lens, utt_id
-        )
+        if self.boundary_mode == "mid_switch":
+            return self._process_predictions_mid_switch(
+                logits, feature_lens, utt_id
+            )
+        if self.boundary_mode == "up_switch":
+            return self._process_predictions_up_switch(
+                logits, feature_lens, utt_id
+            )
+        raise ValueError(f"Invalid boundary_mode: {self.boundary_mode}")
 
     def _process_predictions_any_switch(
         self,
@@ -261,6 +271,38 @@ class CountCTCHead(TaskHead):
                         end=vlen * pbf / sr,
                         label="<blank>",
                     )
+                )
+            out[utt_id[b]] = units
+        return out
+
+    def _process_predictions_mid_switch(
+        self,
+        logits: torch.Tensor,
+        feature_lens: torch.Tensor,
+        utt_id: List[str],
+    ) -> dict[str, List[SegmentationUnit]]:
+        """Emit one boundary at the midpoint frame of each 1-run."""
+        predid = logits.argmax(dim=-1)
+        B = predid.shape[0]
+        pad = torch.full(
+            (B, 1), self.blank_id, dtype=predid.dtype, device=predid.device
+        )
+        predid_leftshift = torch.cat([predid[:, 1:], pad], dim=1)
+        predid_rightshift = torch.cat([pad, predid[:, :-1]], dim=1)
+        onsets = (predid_rightshift == self.blank_id) & (predid == 1)
+        offsets = (predid_leftshift == self.blank_id) & (predid == 1)
+        pbf, sr = self.effective_pbf, self.audio_sr
+        out: dict[str, List[SegmentationUnit]] = {}
+        for b in range(B):
+            vlen = int(feature_lens[b])
+            on_idx = onsets[b, :vlen].nonzero(as_tuple=True)[0].tolist()
+            off_idx = offsets[b, :vlen].nonzero(as_tuple=True)[0].tolist()
+            mids = [(s + e) // 2 for s, e in zip(on_idx, off_idx)]
+            units = []
+            for j, s in enumerate(mids):
+                e = mids[j + 1] if j + 1 < len(mids) else vlen
+                units.append(
+                    SegmentationUnit(start=s * pbf / sr, end=e * pbf / sr)
                 )
             out[utt_id[b]] = units
         return out
