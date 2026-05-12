@@ -22,6 +22,8 @@ MFA_SILENCE_PHONES: frozenset[str] = frozenset(
     {
         "sil", "sp", "spn", "pau", "h#", "ʔ̞", "epi",
         "vocnoise", "laugh", "noise", "unknown", "iver", "<exclude-name>",
+        # Buckeye transcription endpoint markers
+        "{b_trans}", "{e_trans}",
     }
 )
 
@@ -60,6 +62,16 @@ _IPA_TO_MFA_ENGLISH: dict[str, str] = {
     "ɑ̃": "ɑ", "ə̃": "ə", "ɛ̃": "ɛ", "ʊ̃": "ʊ",
     # Koel-specific: aspirated/rare consonants
     "sʰ": "s", "θʰ": "θ", "x": "h", "ɣ": "ɡ", "β": "v",
+    # Buckeye glottalized t
+    "tq": "t",
+    # Buckeye nasalized vowels (n-suffixed ARPABET extensions)
+    "ihn": "ɪ", "ahn": "ɐ", "aen": "æ", "ehn": "ɛ", "iyn": "i",
+    "aan": "ɑ", "ayn": "aj", "eyn": "ej", "awn": "aw", "aon": "ɔ",
+    "oyn": "ɔj", "own": "ow", "uhn": "ʊ", "uwn": "u",
+    # Buckeye surface-realization compound tokens (underlying phoneme)
+    "ah ix": "ɐ", "ah l": "ɐ", "ah r": "ɐ", "ih l": "ɪ",
+    # Bare lowercase ARPABET passthroughs
+    "a": "ɐ", "e": "ɛ",
 }
 
 # Trailing stress digit on ARPABET vowels (e.g. AH0, EY1).
