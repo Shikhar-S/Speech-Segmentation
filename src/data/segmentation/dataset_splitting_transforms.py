@@ -12,6 +12,16 @@ fit / eval. Applied inside ``SegmentationDataModule.setup`` and
 from typing import Any, Callable, Dict
 
 import numpy as np
+from datasets import concatenate_datasets
+
+
+def merge_librispeech_train_clean_460(ddict: Any) -> Any:
+    """Expose ``train.clean.100 + train.clean.360`` (460h) as ``train``."""
+    out = {k: v for k, v in ddict.items()}
+    out["train"] = concatenate_datasets(
+        [ddict["train.clean.100"], ddict["train.clean.360"]]
+    )
+    return out
 
 
 def split_timit_train_for_tuning(ddict: Any) -> Any:
@@ -171,4 +181,5 @@ HF_REPO_SPLIT_TRANSFORMS: Dict[str, Callable[[Any], Any]] = {
     "changelinglab/gtimit-tha-segment": split_gtimit_test_speaker_independent,
     "changelinglab/torgo-segment": split_torgo_test_speaker_independent,
     "changelinglab/ssnce-segment": split_ssnce_test_speaker_independent,
+    "exp/downloads/librispeech-mfa-seg": merge_librispeech_train_clean_460,
 }
