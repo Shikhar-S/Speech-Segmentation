@@ -259,11 +259,9 @@ def gt_units(
 # ──────────────────────────────────────────────────────────────────────
 
 _GRID_KEYS = (
-    "use_combined",
     "drop_k",
     "norm_method",
-    "combined_prominence",
-    "single_signal_prominence",
+    "prominence",
     "snap_silence",
     "snap_tolerance",
 )
@@ -449,7 +447,7 @@ def run_grid_search(
         hp = apply_grid_point(default_hparams, point)
         norm = hp["norm_method"]
         drop_k = hp["drop_k"]
-        prominence = hp["combined_prominence"]
+        prominence = hp["prominence"]
         snap_silence = hp["snap_silence"]
         snap_tolerance = hp["snap_tolerance"]
         signal_names = hp["combined_signals"]

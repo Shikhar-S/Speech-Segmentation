@@ -49,9 +49,8 @@ phonvec_tune:
     pin_memory: true
     target_sr: 16000
   grid:
-    use_combined: [true]
     drop_k: [0, 1, 2, 3]
     norm_method: [min, minmax]
-    combined_prominence: [0.001]
+    prominence: [0.001]
     snap_silence: [true]
   out_artifact: ${paths.output_dir}/phonvec_buckeye.pt

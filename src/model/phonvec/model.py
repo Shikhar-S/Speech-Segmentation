@@ -465,25 +465,20 @@ class Segmenter:
         "mel_svf": 1,
     }
     COMBINED_DROP_K = 2
-    COMBINED_PROMINENCE = 0.001
+    DEFAULT_PROMINENCE = 0.001
 
     @classmethod
     def default_hparams(cls):
         """Default hyperparameters; mirror the class constants exactly."""
         return {
-            "use_combined": True,
             "combined_signals": list(cls.COMBINED_SIGNALS),
             "signal_kwargs": {
                 k: dict(v) for k, v in cls.COMBINED_SIGNAL_KWARGS.items()
             },
             "signal_shifts": dict(cls.COMBINED_SIGNAL_SHIFTS),
             "drop_k": cls.COMBINED_DROP_K,
-            "combined_prominence": cls.COMBINED_PROMINENCE,
+            "prominence": cls.DEFAULT_PROMINENCE,
             "norm_method": "min",
-            "single_signal_name": "fwd_contrast",
-            "single_signal_kwargs": {"lookahead": 1},
-            "single_signal_shift": 1,
-            "single_signal_prominence": 0.2,
             "snap_silence": True,
             "snap_tolerance": 2,
         }
@@ -733,12 +728,8 @@ class Segmenter:
             stacked = np.sort(stacked, axis=0)[h["drop_k"] :]
         return _combine_stacked(stacked, norm)
 
-    def segment(
-        self, net_feats, waveform_np, use_combined=None, snap_silence=None
-    ):
+    def segment(self, net_feats, waveform_np, snap_silence=None):
         h = self.hparams
-        if use_combined is None:
-            use_combined = h["use_combined"]
         if snap_silence is None:
             snap_silence = h["snap_silence"]
 
@@ -746,24 +737,10 @@ class Segmenter:
         proj_r1 = self.pv_r1.project_raw(net_feats)
         proj_l1 = self.pv_l1.project_raw(net_feats)
 
-        if use_combined:
-            signal = self._combined_signal(
-                proj_ipa, proj_r1, proj_l1, waveform_np
-            )
-            prominence = h["combined_prominence"]
-        else:
-            sig = self._signal(
-                h["single_signal_name"],
-                proj_ipa,
-                proj_r1,
-                proj_l1,
-                waveform_np,
-                kwargs=h["single_signal_kwargs"],
-            )
-            signal = _shift_signal(sig, h["single_signal_shift"])
-            prominence = h["single_signal_prominence"]
-
-        preds = find_peaks(signal, prominence=prominence)[0]
+        signal = self._combined_signal(
+            proj_ipa, proj_r1, proj_l1, waveform_np
+        )
+        preds = find_peaks(signal, prominence=h["prominence"])[0]
         if snap_silence:
             silence_mask = self.silence_handler.predict_silence_mask(net_feats)
             preds = self.silence_handler.handle_silence(
