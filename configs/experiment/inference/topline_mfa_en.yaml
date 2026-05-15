@@ -1,8 +1,7 @@
 # @package _global_
-# English / accented-English MFA baseline: Koel phone recognizer +
-# per-utterance mfa align_one (text-independent forced alignment).
-# Override data.hf_repo at the command line, e.g.:
-#   python src/main.py experiment=inference/baseline_mfa_en \
+# English MFA topline: per-utterance text-dependent forced alignment using GT
+# phones from the dataset (no recognizer). Override data.hf_repo at the CLI:
+#   python src/main.py experiment=inference/topline_mfa_en \
 #       data.hf_repo=changelinglab/timit-segment
 defaults:
   - override /data: segmentation_phonvec
@@ -10,8 +9,8 @@ defaults:
   - override /model: null
   - override /model/net: null
 
-task_name: "inf_baseline_mfa_en"
-tags: ["mfa", "baseline", "inference"]
+task_name: "inf_topline_mfa_en"
+tags: ["mfa", "topline", "inference"]
 
 train: false
 test: false
@@ -25,7 +24,7 @@ inference:
   num_workers: 16
   batch_size: 1
   limit_samples: null
-  out_file: ${paths.output_dir}/baseline_mfa_en.jsonl
+  out_file: ${paths.output_dir}/topline_mfa_en.jsonl
   passthrough_keys:
     - utt_id
     - phone_timestamps
@@ -37,10 +36,5 @@ inference:
     acoustic_model: english_mfa
     sr: 16000
     cache_dir: ${paths.cache_dir}/mfa
-    phone_normalizer: koel
-    recognizer:
-      _target_: src.model.koel.builders.build_koel_inference
-      hf_repo: KoelLabs/xlsr-english-01
-      device: cuda
-      dtype: float32
-      cache_dir: ${paths.cache_dir}/hf
+    phone_normalizer: english_mfa
+    recognizer: null
