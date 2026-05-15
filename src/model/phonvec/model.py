@@ -273,6 +273,64 @@ class PhonologicalVectors:
         return 1.0 / (1.0 + np.exp(-raw))
 
 
+################################################################################################
+
+
+class PhoneClassifier:
+    """Panphon-template phone classifier built from a PhonologicalVectors."""
+
+    def __init__(self, pv: "PhonologicalVectors"):
+        ft = panphon.FeatureTable()
+        full_names = (
+            ["speech+"]
+            + [f"{n}+" for n in ft.fts("a").names]
+            + [f"{n}-" for n in ft.fts("a").names]
+        )
+        filt_idx = [full_names.index(n) for n in pv.featnames]
+
+        sil = [1] + [0] * (len(full_names) - 1)
+        rows = [[sil[i] for i in filt_idx]]
+        vocab = ["_"]
+        for seg, fts in ft.seg_dict.items():
+            if fts["cons"] != 0:
+                nums = fts.numeric()
+                vec = (
+                    [0]
+                    + [1 if x == 1 else 0 for x in nums]
+                    + [1 if x == -1 else 0 for x in nums]
+                )
+                rows.append([vec[i] for i in filt_idx])
+                vocab.append(seg)
+
+        predmat = np.array(rows, dtype=float)
+        row_sums = predmat.sum(1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0
+        self.predmat = predmat / row_sums
+        self.vocab = np.array(vocab)
+        self.pv = pv
+
+    def classify(
+        self,
+        net_feats: np.ndarray,
+        seg_bounds,
+        silence_mask: np.ndarray,
+    ) -> np.ndarray:
+        """Center-frame classification per segment; silence segments -> "_"."""
+        centers = np.array(
+            [
+                min(
+                    (seg_bounds[i] + seg_bounds[i + 1]) // 2,
+                    len(net_feats) - 1,
+                )
+                for i in range(len(seg_bounds) - 1)
+            ]
+        )
+        phon = self.pv.project(net_feats[centers])
+        preds = self.vocab[(phon @ self.predmat.T).argmax(1)]
+        preds[silence_mask[centers]] = "_"
+        return preds
+
+
 # Signals
 def _melspec_kaldi(y, *, sr, frame_shift_ms, n_mels=40):
     waveform = torch.from_numpy(np.asarray(y, dtype=np.float32)).unsqueeze(0)
@@ -364,9 +422,8 @@ def _fwd_contrast(proj_ipa, proj_r1, W_r1_to_ipa, lookahead):
         return contrast
     n = T - lookahead
     fp = fwd_proj[:n]
-    contrast[:n] = (
-        _cos_dist_pairs(fp, proj_ipa[:n])
-        - _cos_dist_pairs(fp, proj_ipa[lookahead:])
+    contrast[:n] = _cos_dist_pairs(fp, proj_ipa[:n]) - _cos_dist_pairs(
+        fp, proj_ipa[lookahead:]
     )
     return contrast
 
@@ -383,10 +440,9 @@ def _bwd_contrast(proj_ipa, proj_l1, W_l1_to_ipa, lookbehind):
     if T <= lookbehind:
         return contrast
     bp = bwd_proj[lookbehind:]
-    contrast[lookbehind:] = (
-        _cos_dist_pairs(bp, proj_ipa[lookbehind:])
-        - _cos_dist_pairs(bp, proj_ipa[: T - lookbehind])
-    )
+    contrast[lookbehind:] = _cos_dist_pairs(
+        bp, proj_ipa[lookbehind:]
+    ) - _cos_dist_pairs(bp, proj_ipa[: T - lookbehind])
     return contrast
 
 

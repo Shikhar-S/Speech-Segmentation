@@ -28,6 +28,7 @@ inference:
   inference_runner:
     _target_: src.model.phonvec.inference.build_phonvec_inference
     artifact_path: ???
+    recognize: false # set to true to also run classification after segmentation
     device: cuda
     # frame_shift / sr default to the artifact's saved net spec.
     # Uncomment to override at inference time:
