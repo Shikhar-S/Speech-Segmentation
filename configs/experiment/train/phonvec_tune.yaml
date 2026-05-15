@@ -42,10 +42,31 @@ phonvec_tune:
     hf_repo: microsoft/wavlm-large
     encoder_layer: 24
     cache_dir: ${paths.cache_dir}/hf
-  # hyper-params to run grid search over
+  # Per-signal kwargs grid (correlation analysis tunes these)
+  signal_grid:
+    frame_delta:
+      offset: [1, 2]
+    fwd_delta:
+      offset: [1, 2]
+    bwd_delta:
+      offset: [1, 2]
+    fwd_sim:
+      lookbehind: [0, 1, 2]
+    bwd_sim:
+      lookahead: [0, 1, 2]
+    fwd_contrast:
+      lookahead: [1, 2]
+    bwd_contrast:
+      lookbehind: [1, 2]
+    mel_svf:
+      left: [1, 2]
+      right: [1, 2]
+  shift_values: [-2, -1, 0, 1, 2]
+  # Combined-level hyper-params to grid search over
   grid:
-    drop_k: [0, 1, 2, 3]
-    norm_method: [min, minmax]
+    drop_k: [2] # let's pin this for now, since it's what seems to be less susceptible to noise
+    norm_method: [min] # could do minmax but it doesn't seem to make much difference
     prominence: [0.001]
     snap_silence: [true]
+    min_correlation: [0.2, 0.3, 0.4]
   out_artifact: ${paths.output_dir}/phonvec_timit.pt

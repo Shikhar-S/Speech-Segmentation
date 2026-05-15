@@ -446,6 +446,32 @@ def _bwd_contrast(proj_ipa, proj_l1, W_l1_to_ipa, lookbehind):
     return contrast
 
 
+def _fwd_sim(proj_ipa, proj_r1, W_r1_to_ipa, lookbehind):
+    """Cosine similarity between proj_ipa[t] and fwd_pred[t-lookbehind]."""
+    T = proj_ipa.shape[0]
+    fwd_proj = proj_r1 @ W_r1_to_ipa
+    sim = np.full(T, np.nan)
+    if T <= lookbehind:
+        return sim
+    sim[lookbehind:] = 1.0 - _cos_dist_pairs(
+        proj_ipa[lookbehind:], fwd_proj[: T - lookbehind]
+    )
+    return sim
+
+
+def _bwd_sim(proj_ipa, proj_l1, W_l1_to_ipa, lookahead):
+    """Cosine similarity between proj_ipa[t] and bwd_pred[t+lookahead]."""
+    T = proj_ipa.shape[0]
+    bwd_proj = proj_l1 @ W_l1_to_ipa
+    sim = np.full(T, np.nan)
+    if T <= lookahead:
+        return sim
+    sim[: T - lookahead] = 1.0 - _cos_dist_pairs(
+        proj_ipa[: T - lookahead], bwd_proj[lookahead:]
+    )
+    return sim
+
+
 def _normalize_signal(signal, method):
     """Normalize a 1D signal in-place semantics.
 
@@ -496,157 +522,50 @@ def _shift_signal(signal, shift_frames):
 
 
 class Segmenter:
-    COMBINED_SIGNALS = (
+    ALL_SIGNALS = (
         "frame_delta",
         "fwd_delta",
         "bwd_delta",
         "fwd_contrast",
         "bwd_contrast",
+        "fwd_sim",
+        "bwd_sim",
         "mel_svf",
     )
-    COMBINED_SIGNAL_KWARGS = {
-        "frame_delta": {"offset": 2},
-        "fwd_delta": {"offset": 2},
-        "bwd_delta": {"offset": 1},
-        "fwd_contrast": {"lookahead": 1},
-        "bwd_contrast": {"lookbehind": 2},
-        "mel_svf": {"left": 1, "right": 2},
-    }
-    COMBINED_SIGNAL_SHIFTS = {
-        "frame_delta": 1,
-        "fwd_delta": 1,
-        "bwd_delta": 1,
-        "fwd_contrast": 1,
-        "bwd_contrast": -1,
-        "mel_svf": 1,
-    }
-    COMBINED_DROP_K = 2
-    DEFAULT_PROMINENCE = 0.001
-
-    @classmethod
-    def default_hparams(cls):
-        """Default hyperparameters; mirror the class constants exactly."""
-        return {
-            "combined_signals": list(cls.COMBINED_SIGNALS),
-            "signal_kwargs": {
-                k: dict(v) for k, v in cls.COMBINED_SIGNAL_KWARGS.items()
-            },
-            "signal_shifts": dict(cls.COMBINED_SIGNAL_SHIFTS),
-            "drop_k": cls.COMBINED_DROP_K,
-            "prominence": cls.DEFAULT_PROMINENCE,
-            "norm_method": "min",
-            "snap_silence": True,
-            "snap_tolerance": 2,
-        }
 
     def __init__(
         self,
-        train_df=None,
-        silence_detector_path="logistic_regression_silence_detector.joblib",
         *,
         frame_shift: int,
         sr: int,
         mel_frame_shift_ms: int,
-        _from_components=None,
-        hparams=None,
+        _from_components: dict,
+        hparams: dict,
     ):
-        """Build segmenter, either by fitting from a per-phone DataFrame
-        (legacy path used by scripts/phonvec_eval.py) or by loading
-        pre-fit components (used by from_artifact / Segmenter.fit).
+        """Build a Segmenter from pre-fit components.
 
         Args:
-            frame_shift: encoder hop in samples (e.g. 320 for WavLM-large).
+            frame_shift: encoder hop in samples (e.g. 320).
             sr: encoder sample rate (e.g. 16000).
-            mel_frame_shift_ms: mel-spectrogram hop in ms used by the
-                mel-SVF auxiliary signal.
-
-        train_df: DataFrame with one row per phone, requiring columns:
-            feat       - encoder feature vector (np.ndarray) at phone center frame
-            ipa        - IPA label for this phone (NaN for silence)
-            l_1        - IPA label of the preceding phone
-            r_1        - IPA label of the following phone
-            audio_path - path to the source audio file
-            min        - phone onset time (for sorting phones within utterances)
+            mel_frame_shift_ms: mel-spectrogram hop in ms for
+                the mel-SVF auxiliary signal.
+            _from_components: dict with keys ``pv_ipa``, ``pv_l1``,
+                ``pv_r1``, ``W_r1_to_ipa``, ``W_l1_to_ipa``,
+                ``silence_handler``.
+            hparams: segmenter hyperparameters (signal config,
+                drop_k, prominence, etc.).  Use ``{}`` during fit
+                before tuning has run.
         """
-        self.hparams = (
-            dict(hparams) if hparams is not None else self.default_hparams()
-        )
+        self.hparams = dict(hparams)
         self.frame_shift = int(frame_shift)
         self.sr = int(sr)
         self.mel_frame_shift_ms = int(mel_frame_shift_ms)
-
-        if _from_components is not None:
-            self.pv_ipa = _from_components["pv_ipa"]
-            self.pv_l1 = _from_components["pv_l1"]
-            self.pv_r1 = _from_components["pv_r1"]
-            self.W_r1_to_ipa = np.asarray(_from_components["W_r1_to_ipa"])
-            self.W_l1_to_ipa = np.asarray(_from_components["W_l1_to_ipa"])
-            self.silence_handler = _from_components["silence_handler"]
-            return
-
-        assert (
-            train_df is not None
-        ), "Segmenter requires train_df unless _from_components is given."
-        self.silence_handler = SilenceHandler(silence_detector_path)
-        self._fit_from_df(train_df)
-
-    def _fit_from_df(self, train_df):
-        pv_train_df = train_df[~train_df.ipa.isna()]
-        vocab = pv_train_df.ipa.unique().tolist()
-
-        self.pv_ipa = PhonologicalVectors(
-            pv_train_df, vocab, group_col="ipa"
-        )  # current phone
-        self.pv_l1 = PhonologicalVectors(
-            pv_train_df, vocab, group_col="l_1"
-        )  # previous phone
-        self.pv_r1 = PhonologicalVectors(
-            pv_train_df, vocab, group_col="r_1"
-        )  # next phone
-
-        df_sorted = train_df[~train_df.ipa.isna()].sort_values(
-            ["audio_path", "min"]
-        )
-        same_utt = (
-            df_sorted.audio_path.values[:-1] == df_sorted.audio_path.values[1:]
-        )
-        prev_feats = np.stack(df_sorted.feat.values[:-1][same_utt])
-        curr_feats = np.stack(df_sorted.feat.values[1:][same_utt])
-
-        proj_ipa_curr = self.pv_ipa.project_raw(curr_feats)
-        proj_ipa_prev = self.pv_ipa.project_raw(prev_feats)
-        proj_r1_prev = self.pv_r1.project_raw(prev_feats)
-        proj_l1_next = self.pv_l1.project_raw(curr_feats)
-
-        self.W_r1_to_ipa = np.linalg.lstsq(
-            proj_r1_prev, proj_ipa_curr, rcond=None
-        )[0]
-        self.W_l1_to_ipa = np.linalg.lstsq(
-            proj_l1_next, proj_ipa_prev, rcond=None
-        )[0]
-
-    @classmethod
-    def fit(
-        cls,
-        train_df,
-        silence_handler,
-        *,
-        frame_shift: int,
-        sr: int,
-        mel_frame_shift_ms: int,
-        hparams=None,
-    ):
-        """Fit a Segmenter from a per-phone DataFrame and a pre-built SilenceHandler."""
-        seg = cls.__new__(cls)
-        seg.hparams = (
-            dict(hparams) if hparams is not None else cls.default_hparams()
-        )
-        seg.frame_shift = int(frame_shift)
-        seg.sr = int(sr)
-        seg.mel_frame_shift_ms = int(mel_frame_shift_ms)
-        seg.silence_handler = silence_handler
-        seg._fit_from_df(train_df)
-        return seg
+        self.pv_ipa = _from_components["pv_ipa"]
+        self.pv_l1 = _from_components["pv_l1"]
+        self.pv_r1 = _from_components["pv_r1"]
+        self.W_r1_to_ipa = np.asarray(_from_components["W_r1_to_ipa"])
+        self.W_l1_to_ipa = np.asarray(_from_components["W_l1_to_ipa"])
+        self.silence_handler = _from_components["silence_handler"]
 
     @classmethod
     def from_artifact(cls, artifact):
@@ -681,7 +600,7 @@ class Segmenter:
             sr=net_spec["sr"],
             mel_frame_shift_ms=net_spec["mel_frame_shift_ms"],
             _from_components=components,
-            hparams=artifact.get("hparams"),
+            hparams=artifact["hparams"],
         )
 
     def to_artifact(self, *, net_spec, tune_metrics=None):
@@ -711,8 +630,8 @@ class Segmenter:
             "tune_metrics": tune_metrics,
         }
 
-    def with_hparams(self, hparams_override):
-        """Return a copy with `hparams_override` merged on top.
+    def with_hparams(self, hparams):
+        """Return a shallow copy with the given hparams (full replacement).
 
         Shares phonological-vector state and the silence handler, so cheap
         enough to call inside a grid loop."""
@@ -726,7 +645,7 @@ class Segmenter:
         new.frame_shift = self.frame_shift
         new.sr = self.sr
         new.mel_frame_shift_ms = self.mel_frame_shift_ms
-        new.hparams = {**self.hparams, **hparams_override}
+        new.hparams = dict(hparams)
         return new
 
     def _signal(
@@ -751,6 +670,16 @@ class Segmenter:
         if name == "bwd_contrast":
             return _bwd_contrast(
                 proj_ipa, proj_l1, self.W_l1_to_ipa, kwargs["lookbehind"]
+            )
+        if name == "fwd_sim":
+            return _fwd_sim(
+                proj_ipa, proj_r1, self.W_r1_to_ipa,
+                kwargs["lookbehind"],
+            )
+        if name == "bwd_sim":
+            return _bwd_sim(
+                proj_ipa, proj_l1, self.W_l1_to_ipa,
+                kwargs["lookahead"],
             )
         if name == "mel_svf":
             return _mel_svf_signal(
