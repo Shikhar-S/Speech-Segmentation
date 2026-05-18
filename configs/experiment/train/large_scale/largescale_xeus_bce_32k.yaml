@@ -1,0 +1,103 @@
+# @package _global_
+# Large-scale BCE-only XEUS at 32 kHz on MFA-synthetic data
+# (cv-aligned-seg + librispeech-mfa-seg + thchs30-seg).
+# Mirrors largescale_xeus_bce.yaml but with target_sr=32000 in every
+# dataset entry + model.audio_sr=32000. XEUS was pretrained at 16 kHz;
+# this run probes whether 32 kHz audio helps boundary detection
+# despite the encoder OOD risk.
+# Validation: changelinglab/timit-segment val (val_seg/rval).
+
+defaults:
+  - override /data: joint_prseg
+  - override /model: segment_recognize_bare
+  - override /model/net: xeuspr
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "largescale_xeus_bce_32k"
+tags: ["xeus", "segment_recognize", "large_scale",
+       "cv", "librispeech", "thchs30", "bce", "32k"]
+
+seed: 42
+test: False
+
+trainer:
+  devices: -1
+  strategy: ddp_find_unused_parameters_true
+  max_steps: 762500              # 5 epochs over 4.88M items at BS=16 × 2 GPUs (effective 32)
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 1000
+  log_every_n_steps: 100
+
+callbacks:
+  log_global_step:
+    _target_: src.core.callbacks.log_global_step.LogGlobalStep
+  model_checkpoint:
+    monitor: global_step
+    mode: max
+    every_n_train_steps: 5000
+    save_top_k: 5
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping: null
+
+model:
+  audio_sr: 32000
+  optimizer:
+    lr: 0.0001
+  seg_losses:
+    bce:
+      _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
+      _partial_: true
+      weight: 1.0
+      pos_weight: 1.0
+
+data:
+  batch_size: 16                 # per-GPU; effective 32 across 2 GPUs (uniform across all 4 runs)
+  num_workers: 8
+  train_datasets:
+    segmentation:
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/cv-aligned-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 32000
+          max_speech_length: 20
+        - 1.0
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/librispeech-mfa-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 32000
+          max_speech_length: 20
+        - 1.0
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/thchs30-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 32000
+          max_speech_length: 20
+        - 1.0
+  validation_datasets:
+    segmentation:
+      - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+        hf_repo: changelinglab/timit-segment
+        split: val
+        tokenizer:
+          _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+          vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+        target_sr: 32000
+        max_speech_length: 8
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}

@@ -1,0 +1,125 @@
+# @package _global_
+# Large-scale tied joint WavLM (Round 5).
+# CountCTC on ipapack train_fixed (recognition slot, ~5M utts, multilingual PR)
+# + BCE on cv-v1.0 / librispeech / thchs30 segment corpora (segmentation slot).
+# bce.boundary_head and count_ctc.proj are tied via TieBCECountCTCProj callback.
+# Validation: changelinglab/timit-segment val (val_seg/rval), comparable to all
+# Round 4 WavLM baselines.
+
+defaults:
+  - override /data: joint_prseg
+  - override /model: segment_recognize_bare
+  - override /model/net: wavlm
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "largescale_wavlm_count_ctc_ipapack_bce"
+tags: ["wavlm", "segment_recognize", "large_scale", "ipapack",
+       "cv", "librispeech", "thchs30", "bce", "count_ctc", "tied"]
+
+seed: 42
+test: False
+
+trainer:
+  devices: -1
+  strategy: ddp_find_unused_parameters_true
+  max_steps: 588175              # 5 epochs over 13.18M items at BS=28×4 GPUs (probe 2276718)
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 1000
+  log_every_n_steps: 100
+
+callbacks:
+  log_global_step:
+    _target_: src.core.callbacks.log_global_step.LogGlobalStep
+  model_checkpoint:
+    monitor: global_step
+    mode: max
+    every_n_train_steps: 5000
+    save_top_k: 5
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping: null
+  tie_bce_count_ctc:
+    _target_: src.recipe.segment_recognize.weight_tying.TieBCECountCTCProj
+
+model:
+  audio_sr: 16000
+  optimizer:
+    lr: 0.0001
+  net:
+    hf_repo: microsoft/wavlm-large
+    output_vocabsz: 428
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+    freeze_encoder: false
+  seg_losses:
+    bce:
+      _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
+      _partial_: true
+      weight: 1.0
+      pos_weight: 1.0
+  pr_losses:
+    count_ctc:
+      _target_: src.recipe.segment_recognize.heads.count_ctc.CountCTCHead
+      _partial_: true
+      weight: 1.0
+
+data:
+  batch_size: 28                 # probe 2276718: max_safe=32, 10% headroom → 28
+  num_workers: 8
+  train_datasets:
+    segmentation:
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/cv-aligned-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 16000
+          max_speech_length: 20
+        - 1.0
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/librispeech-mfa-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 16000
+          max_speech_length: 20
+        - 1.0
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/thchs30-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 16000
+          max_speech_length: 20
+        - 1.0
+    recognition:
+      - - _target_: src.data.recognition.ipapack_pr.IpapackDataset
+          wav_scp_file: /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/wav.scp
+          text_file:    /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text.ctc
+          lang_file:    /work/hdd/bbjs/shared/powsm/s2t1/dump/raw/train_fixed_all/text
+          sampling_rate: 16000
+          split: train
+          vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          task_set: [pr]
+          max_duration_sec: 20
+        - 1.0
+  validation_datasets:
+    segmentation:
+      - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+        hf_repo: changelinglab/timit-segment
+        split: val
+        tokenizer:
+          _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+          vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+        target_sr: 16000
+        max_speech_length: 8
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}

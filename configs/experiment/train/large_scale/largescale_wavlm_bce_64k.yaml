@@ -1,0 +1,107 @@
+# @package _global_
+# Large-scale BCE-only WavLM at 64 kHz.
+# Mirrors largescale_wavlm_bce.yaml exactly except: target_sr=64000 in every
+# dataset entry + model.audio_sr=64000. WavLM-large was pretrained at 16 kHz;
+# this run probes whether 64 kHz audio (4× rate) helps boundary detection
+# despite the encoder OOD risk. batch_size / max_steps placeholders pending
+# the 64 kHz probe.
+
+defaults:
+  - override /data: joint_prseg
+  - override /model: segment_recognize_bare
+  - override /model/net: wavlm
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "largescale_wavlm_bce_64k"
+tags: ["wavlm", "segment_recognize", "large_scale",
+       "cv", "librispeech", "thchs30", "bce", "64k"]
+
+seed: 42
+test: False
+
+trainer:
+  devices: -1
+  strategy: ddp_find_unused_parameters_true
+  max_steps: 3047994             # 5 epochs over 4.88M items at BS=8 × 1 GPU (probe 2282357)
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 1000
+  log_every_n_steps: 100
+
+callbacks:
+  log_global_step:
+    _target_: src.core.callbacks.log_global_step.LogGlobalStep
+  model_checkpoint:
+    monitor: global_step
+    mode: max
+    every_n_train_steps: 5000
+    save_top_k: 5
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping: null
+
+model:
+  audio_sr: 64000
+  optimizer:
+    lr: 0.0001
+  net:
+    hf_repo: microsoft/wavlm-large
+    output_vocabsz: 428
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+    freeze_encoder: false
+  seg_losses:
+    bce:
+      _target_: src.recipe.segment_recognize.heads.bce_boundary.BCEBoundaryHead
+      _partial_: true
+      weight: 1.0
+      pos_weight: 1.0
+
+data:
+  batch_size: 8                  # probe 2282357: max_safe=8 @ 69 GB / 80 GB (~14% headroom); /4-align would give 4 but BS=8 is comparable to 32k BS=12 utilization (90%)
+  num_workers: 8
+  train_datasets:
+    segmentation:
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/cv-aligned-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 64000
+          max_speech_length: 20
+        - 1.0
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/librispeech-mfa-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 64000
+          max_speech_length: 20
+        - 1.0
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: exp/downloads/thchs30-seg
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+          target_sr: 64000
+          max_speech_length: 20
+        - 1.0
+  validation_datasets:
+    segmentation:
+      - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+        hf_repo: changelinglab/timit-segment
+        split: val
+        tokenizer:
+          _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+          vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+        target_sr: 64000
+        max_speech_length: 8
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ${task_name}

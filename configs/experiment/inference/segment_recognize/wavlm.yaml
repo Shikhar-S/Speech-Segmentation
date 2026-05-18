@@ -1,0 +1,61 @@
+# @package _global_
+
+# Inference for any segment_recognize WavLM checkpoint (single-loss BCE,
+# single-loss CountCTC, or tied BCE+CountCTC).
+#
+# predict_step iterates over every registered head; the JSONL output therefore
+# contains one decoding per head (e.g. {"bce": ..., "count_ctc": ...} for tied
+# runs) keyed by head name.
+#
+# Override per-job:
+#   - inference.inference_runner.ckpt_path: path to .ckpt
+#   - inference.inference_runner.tied_weights: true for tied checkpoints
+#   - data.prediction_dataset.hf_repo: HF dataset (timit-segment / buckeye-segment)
+#   - data.prediction_dataset.split: usually "test"
+#   - task_name + inference.out_file: descriptive run/output naming
+#
+# Example:
+#   python src/main.py experiment=inference/segment_recognize/wavlm \
+#       inference.inference_runner.ckpt_path=<ckpt> \
+#       inference.inference_runner.tied_weights=true \
+#       data.prediction_dataset.hf_repo=changelinglab/buckeye-segment \
+#       task_name=inf_<run>_buckeye \
+#       inference.out_file='${paths.output_dir}/preds.json'
+
+defaults:
+  - override /data: timit_prseg
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: wavlm
+
+task_name: "inf_segment_recognize_wavlm"
+tags: ["segmentation", "inference", "wavlm", "16k"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  prediction_dataset:
+    target_sr: 16000
+
+inference:
+  num_workers: 4
+  out_file: ${paths.output_dir}/preds.json
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.recipe.segment_recognize.inference.build_segment_recognize_inference
+    ckpt_path: ???
+    device: cuda
+    tied_weights: false
+    count_ctc_boundary_mode: null
+    net:
+      _target_: src.model.wavlm.builders.build_wavlm_model
+      hf_repo: microsoft/wavlm-large
+      output_vocabsz: 428
+      vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+      cache_dir: ${paths.cache_dir}/hf

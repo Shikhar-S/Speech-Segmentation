@@ -1,16 +1,18 @@
 # @package _global_
 
-# Inference config for pxeus style checkpoint trained with bce head using segment_recognize recipe
-# Override data.prediction_dataset.target_sr (16000 or 32000) per run.
-# python src/main.py experiment=inference/segment_recognize/pxeus_bce inference.inference_runner.ckpt_path=<path>
+# Inference config for plain XEUS (no interCTC) checkpoint trained with bce
+# head using segment_recognize recipe.
+# python src/main.py experiment=inference/segment_recognize/xeus_bce \
+#     inference.inference_runner.ckpt_path=<path> \
+#     data.prediction_dataset.hf_repo=<repo>
 defaults:
   - override /data: timit_prseg
   - override /logger: csv
   - override /model: null
   - override /model/net: powsm
 
-task_name: "inf_segmentrecognize_pxeus_bce"
-tags: ["segmentation", "bce", "inference", "pxeus"]
+task_name: "inf_segmentrecognize_xeus_bce"
+tags: ["segmentation", "bce", "inference", "xeus"]
 
 train: false
 test: false
@@ -22,7 +24,7 @@ data:
 
 inference:
   num_workers: 4
-  out_file: ${paths.output_dir}/pxeus_bce.json
+  out_file: ${paths.output_dir}/xeus_bce.json
   passthrough_keys:
     - "utt_id"
     - "phone_timestamps"
@@ -38,7 +40,7 @@ inference:
       hf_repo: espnet/xeus
       vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
       load_ckpt: false
-      interctc_weight: 0.3
-      interctc_layer_idx: [4, 8, 12]
-      interctc_use_conditioning: true
+      interctc_weight: 0.0
+      interctc_layer_idx: null
+      interctc_use_conditioning: false
       ctc_weight: 1.0
