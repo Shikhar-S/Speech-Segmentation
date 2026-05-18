@@ -50,12 +50,15 @@ def parse_predictions(pred, head=None):
       - head-keyed dict ``{head: {utt_id: [{start, end, label}, ...]}}``
         (segment_recognize multi-head)
     """
+    if isinstance(pred, dict) and "error" in pred:
+        return []
     if isinstance(pred, list):
         return [
             SegmentationUnit(
                 start=u["start"], end=u["end"], label=u.get("label", 0)
             )
             for u in pred
+            if "start" in u
         ]
     results = []
     for head_name, head_output in pred.items():
@@ -77,6 +80,7 @@ def parse_predictions(pred, head=None):
 
 def load_utterances_from_shards(files, forced, strip_outer=False):
     predictions, ground_truth, symbols_dict = {}, {}, {}
+    n_errors = 0
     for filepath in tqdm(files, desc="Loading shards"):
         with open(filepath) as fh:
             for line in fh:
@@ -90,13 +94,16 @@ def load_utterances_from_shards(files, forced, strip_outer=False):
                     if passthrough.get("split") != "test":
                         continue
                     utt_id = passthrough.get("utt_id", str(idx))
-                    predictions[utt_id] = parse_predictions(data["pred"])
+                    pred = data["pred"]
+                    if isinstance(pred, dict) and "error" in pred:
+                        n_errors += 1
+                    predictions[utt_id] = parse_predictions(pred)
                     ground_truth[utt_id] = parse_groundtruth(
                         passthrough, forced, strip_outer=strip_outer
                     )
                     if forced:
                         symbols_dict[utt_id] = passthrough["phones"]
-    return predictions, ground_truth, symbols_dict
+    return predictions, ground_truth, symbols_dict, n_errors
 
 
 def main():
@@ -130,10 +137,11 @@ def main():
     args = parser.parse_args()
 
     files = [f for p in args.files for f in (sorted(glob.glob(p)) or [p])]
-    predictions, ground_truth, symbols_dict = load_utterances_from_shards(
+    predictions, ground_truth, symbols_dict, n_errors = load_utterances_from_shards(
         files, args.forced, strip_outer=args.strip_outer_silences
     )
-    print(f"Loaded {len(predictions)} utterances from {len(files)} file(s)")
+    print(f"Loaded {len(predictions)} utterances from {len(files)} file(s)"
+          f" ({n_errors} skipped/error, scored as 0)")
 
     evaluator = SegmentationEvaluator(
         tolerance_ms=args.tolerance_ms, forced=args.forced, match_mode=args.mode
