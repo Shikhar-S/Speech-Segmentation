@@ -1,0 +1,33 @@
+# @package _global_
+# uv run python src/main.py experiment=inference/kreuk inference.inference_runner.checkpoint=timit_pretrained
+# uv run python src/main.py experiment=inference/kreuk inference.inference_runner.checkpoint=buckeye+_pretrained data.hf_repo=changelinglab/buckeye-segment
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_kreuk"
+tags: ["kreuk", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: changelinglab/timit-segment
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/kreuk_${inference.inference_runner.checkpoint}.jsonl
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.model.kreuk.inference.build_kreuk_inference
+    checkpoint: ???
+    device: cuda
+    cache_dir: ${paths.cache_dir}/kreuk-unsupseg

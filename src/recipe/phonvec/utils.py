@@ -1,15 +1,19 @@
 """Phonvec training/tuning utilities.
 
 Holds every helper that ``src/recipe/phonvec/train.py`` calls so the
-entrypoint stays a thin three-stage pipeline (load data → fit/load
-Segmenter → grid-search + save artifact).
+entrypoint stays a four-stage pipeline (load data → fit/load Segmenter →
+per-signal correlation tuning → combined grid-search + save artifact).
 
 Sections:
-  - Encoder feature extraction: ``build_per_phone_df`` (fit), ``collect_eval_inputs`` (tune).
+  - Encoder feature extraction: ``build_per_phone_df`` (fit),
+    ``collect_eval_inputs`` (tune).
   - GT/pred conversion: ``gt_units``, ``pred_frames_to_units``.
-  - Grid utilities: ``iter_grid_points``, ``apply_grid_point``.
-  - Pipeline stages: ``instantiate_fit_dataset``, ``instantiate_tune_dataset``,
-    ``fit_or_load_segmenter``, ``run_grid_search``, ``save_phonvec_artifact``.
+  - Grid utilities: ``iter_grid_points``.
+  - Per-signal tuning: ``run_signal_tuning``.
+  - Combined grid search: ``run_grid_search``.
+  - Pipeline stages: ``instantiate_fit_dataset``,
+    ``instantiate_tune_dataset``, ``fit_or_load_segmenter``,
+    ``save_phonvec_artifact``.
 """
 
 import hashlib
@@ -36,6 +40,7 @@ from src.metrics.segmentation_evaluator import (
     SegmentationUnit,
 )
 from src.model.phonvec.model import (
+    PhonologicalVectors,
     Segmenter,
     SilenceHandler,
     _combine_stacked,
@@ -167,6 +172,52 @@ def build_per_phone_df(
     return pd.DataFrame(rows)
 
 
+@_maybe_cache(ignore=["train_df"])
+def _fit_components(cache_id: str, train_df) -> dict:
+    """Fit PhonologicalVectors + cross-position regressors.
+
+    Returns a dict suitable for ``Segmenter(..., _from_components=)``,
+    minus the ``silence_handler`` (which is not data-dependent).
+
+    Args:
+        cache_id: Opaque key for joblib caching (not used in logic).
+    """
+    pv_train_df = train_df[~train_df.ipa.isna()]
+    vocab = pv_train_df.ipa.unique().tolist()
+
+    pv_ipa = PhonologicalVectors(pv_train_df, vocab, group_col="ipa")
+    pv_l1 = PhonologicalVectors(pv_train_df, vocab, group_col="l_1")
+    pv_r1 = PhonologicalVectors(pv_train_df, vocab, group_col="r_1")
+
+    df_sorted = pv_train_df.sort_values(["audio_path", "min"])
+    same_utt = (
+        df_sorted.audio_path.values[:-1]
+        == df_sorted.audio_path.values[1:]
+    )
+    prev_feats = np.stack(df_sorted.feat.values[:-1][same_utt])
+    curr_feats = np.stack(df_sorted.feat.values[1:][same_utt])
+
+    proj_ipa_curr = pv_ipa.project_raw(curr_feats)
+    proj_ipa_prev = pv_ipa.project_raw(prev_feats)
+    proj_r1_prev = pv_r1.project_raw(prev_feats)
+    proj_l1_next = pv_l1.project_raw(curr_feats)
+
+    W_r1_to_ipa = np.linalg.lstsq(
+        proj_r1_prev, proj_ipa_curr, rcond=None,
+    )[0]
+    W_l1_to_ipa = np.linalg.lstsq(
+        proj_l1_next, proj_ipa_prev, rcond=None,
+    )[0]
+
+    return {
+        "pv_ipa": pv_ipa,
+        "pv_l1": pv_l1,
+        "pv_r1": pv_r1,
+        "W_r1_to_ipa": W_r1_to_ipa,
+        "W_l1_to_ipa": W_l1_to_ipa,
+    }
+
+
 @_maybe_cache(ignore=["dataset", "net", "device", "desc"])
 def collect_eval_inputs(
     cache_id: str,
@@ -258,29 +309,11 @@ def gt_units(
 # Grid utilities
 # ──────────────────────────────────────────────────────────────────────
 
-_GRID_KEYS = (
-    "drop_k",
-    "norm_method",
-    "prominence",
-    "snap_silence",
-    "snap_tolerance",
-)
-
-
 def iter_grid_points(grid_cfg: dict) -> Iterable[dict]:
     """Cartesian product over a dict of lists; yields one dict per point."""
     keys = list(grid_cfg.keys())
     for combo in itertools.product(*(grid_cfg[k] for k in keys)):
         yield dict(zip(keys, combo))
-
-
-def apply_grid_point(default: dict, point: dict) -> dict:
-    """Overlay a flat grid-point dict onto the structured Segmenter hparams."""
-    h = dict(default)
-    for k in _GRID_KEYS:
-        if k in point:
-            h[k] = point[k]
-    return h
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -368,46 +401,169 @@ def fit_or_load_segmenter(
     log.info(f"Loading silence detector from {pt_cfg.silence_detector_path}")
     silence_handler = SilenceHandler(detector_path=pt_cfg.silence_detector_path)
 
-    log.info("Fitting base Segmenter...")
-    seg = Segmenter.fit(
-        train_df,
-        silence_handler,
+    log.info("Fitting PhonologicalVectors + regressors...")
+    components = _fit_components(fit_cache_id, train_df)
+
+    seg = Segmenter(
         frame_shift=frame_shift,
         sr=sr,
         mel_frame_shift_ms=mel_frame_shift_ms,
+        _from_components={**components, "silence_handler": silence_handler},
+        hparams={},
     )
     return seg, None
 
 
-def _precompute_signals(base_seg, tune_cache):
+def _boundary_target(
+    phone_timestamps,
+    phones,
+    n_frames: int,
+    frame_shift: int,
+    sr: int,
+    strip_outer_silences: bool,
+) -> np.ndarray:
+    """Binary boundary-target vector at the encoder frame rate."""
+    units = gt_units(
+        phone_timestamps, phones,
+        strip_outer_silences=strip_outer_silences,
+    )
+    boundary_secs = set()
+    for u in units:
+        boundary_secs.add(u.start)
+        boundary_secs.add(u.end)
+    target = np.zeros(n_frames)
+    for t in boundary_secs:
+        idx = int(round(t * sr / frame_shift))
+        if 0 <= idx < n_frames:
+            target[idx] = 1.0
+    return target
+
+
+def run_signal_tuning(
+    seg: Segmenter,
+    tune_cache: List[dict],
+    signal_grid: dict,
+    shift_values: List[int],
+    frame_shift: int,
+    sr: int,
+    strip_outer_silences: bool = True,
+) -> dict:
+    """Per-signal correlation analysis.
+
+    For each signal, grid-searches kwargs and shift values to find the
+    configuration that maximises mean Pearson correlation with a binary
+    boundary target.
+
+    Args:
+        signal_grid: ``{signal_name: {kwarg_name: [vals], ...}, ...}``
+        shift_values: shift offsets to try (e.g. ``[-2,-1,0,1,2]``).
+
+    Returns:
+        ``{signal_name: {"kwargs": dict, "shift": int,
+        "correlation": float}}``
+    """
+    log.info("Preparing projections for signal tuning...")
+    prepped = []
+    for c in tqdm(
+        tune_cache, desc="Preparing tune data", leave=False,
+    ):
+        net_feats = c["net_feats"]
+        prepped.append({
+            "proj_ipa": seg.pv_ipa.project_raw(net_feats),
+            "proj_r1": seg.pv_r1.project_raw(net_feats),
+            "proj_l1": seg.pv_l1.project_raw(net_feats),
+            "waveform_np": c["waveform_np"],
+            "boundary_target": _boundary_target(
+                c["phone_timestamps"], c["phones"],
+                len(net_feats), frame_shift, sr,
+                strip_outer_silences,
+            ),
+        })
+
+    log.info("Running per-signal correlation analysis...")
+    results = {}
+    for signal_name, kwarg_ranges in signal_grid.items():
+        best_corr = -np.inf
+        best_config = None
+
+        for kwargs in iter_grid_points(kwarg_ranges):
+            corrs_by_shift = {s: [] for s in shift_values}
+
+            for p in prepped:
+                sig = seg._signal(
+                    signal_name,
+                    p["proj_ipa"], p["proj_r1"],
+                    p["proj_l1"], p["waveform_np"],
+                    kwargs=kwargs,
+                )
+                normed = _normalize_signal(sig, "minmax")
+
+                for shift in shift_values:
+                    shifted = _shift_signal(normed, shift)
+                    finite = np.isfinite(shifted)
+                    if finite.sum() < 2:
+                        continue
+                    s = shifted[finite]
+                    t = p["boundary_target"][finite]
+                    s_std, t_std = s.std(), t.std()
+                    if s_std > 0 and t_std > 0:
+                        corr = float(np.mean(
+                            (s - s.mean()) / s_std
+                            * (t - t.mean()) / t_std
+                        ))
+                        corrs_by_shift[shift].append(corr)
+
+            for shift in shift_values:
+                if not corrs_by_shift[shift]:
+                    continue
+                mean_corr = float(np.mean(corrs_by_shift[shift]))
+                if mean_corr > best_corr:
+                    best_corr = mean_corr
+                    best_config = {
+                        "kwargs": dict(kwargs),
+                        "shift": shift,
+                        "correlation": mean_corr,
+                    }
+
+        if best_config is not None:
+            results[signal_name] = best_config
+            log.info(
+                f"  {signal_name}: corr={best_config['correlation']:.4f}"
+                f"  kwargs={best_config['kwargs']}"
+                f"  shift={best_config['shift']}"
+            )
+
+    return results
+
+
+def _precompute_signals(seg, tune_cache, signal_configs):
     """Pre-compute shifted signals and silence masks for all utterances.
 
-    Everything computed here is invariant across grid hparams
-    (drop_k, norm_method, prominence, snap_silence).
-    """
-    h = base_seg.hparams
-    signal_names = h["combined_signals"]
-    signal_kwargs = h["signal_kwargs"]
-    signal_shifts = h["signal_shifts"]
+    Uses the best per-signal kwargs/shifts from ``run_signal_tuning``.
 
+    Args:
+        signal_configs: ``{name: {"kwargs": dict, "shift": int, ...}}``
+    """
     precomputed = []
-    for c in tqdm(tune_cache, desc="Pre-computing signals", leave=False):
+    for c in tqdm(
+        tune_cache, desc="Pre-computing signals", leave=False,
+    ):
         net_feats = c["net_feats"]
         waveform_np = c["waveform_np"]
-        proj_ipa = base_seg.pv_ipa.project_raw(net_feats)
-        proj_r1 = base_seg.pv_r1.project_raw(net_feats)
-        proj_l1 = base_seg.pv_l1.project_raw(net_feats)
+        proj_ipa = seg.pv_ipa.project_raw(net_feats)
+        proj_r1 = seg.pv_r1.project_raw(net_feats)
+        proj_l1 = seg.pv_l1.project_raw(net_feats)
 
         shifted = {}
-        for name in signal_names:
-            sig = base_seg._signal(
+        for name, cfg in signal_configs.items():
+            sig = seg._signal(
                 name, proj_ipa, proj_r1, proj_l1,
-                waveform_np, kwargs=signal_kwargs[name],
+                waveform_np, kwargs=cfg["kwargs"],
             )
-            shifted[name] = _shift_signal(sig, signal_shifts[name])
+            shifted[name] = _shift_signal(sig, cfg["shift"])
 
-        silence_mask = base_seg.silence_handler.predict_silence_mask(
-            net_feats
+        silence_mask = seg.silence_handler.predict_silence_mask(
+            net_feats,
         )
         precomputed.append({
             "shifted_signals": shifted,
@@ -419,19 +575,25 @@ def _precompute_signals(base_seg, tune_cache):
 def run_grid_search(
     base_seg: Segmenter,
     tune_cache: List[dict],
+    signal_configs: dict,
     pt_cfg: DictConfig,
     frame_shift: int,
     sr: int,
 ) -> Tuple[Segmenter, List[dict]]:
-    """Run grid search over `pt_cfg.grid`; return (best_seg, all_results)."""
+    """Grid search over combined hparams; return (best_seg, results).
+
+    Args:
+        signal_configs: output of ``run_signal_tuning``.
+    """
     evaluator = SegmentationEvaluator(
         tolerance_ms=int(pt_cfg.get("tolerance_ms", 20))
     )
     strip_outer = bool(pt_cfg.get("strip_outer_silences", True))
     grid_cfg = OmegaConf.to_container(pt_cfg.grid, resolve=True)
-    default_hparams = base_seg.default_hparams()
 
-    precomputed = _precompute_signals(base_seg, tune_cache)
+    precomputed = _precompute_signals(
+        base_seg, tune_cache, signal_configs,
+    )
 
     gt_dict = {}
     for c in tune_cache:
@@ -441,28 +603,35 @@ def run_grid_search(
             strip_outer_silences=strip_outer,
         )
 
-    log.info("Running grid search...")
+    log.info("Running combined grid search...")
     results = []
     for point in iter_grid_points(grid_cfg):
-        hp = apply_grid_point(default_hparams, point)
-        norm = hp["norm_method"]
-        drop_k = hp["drop_k"]
-        prominence = hp["prominence"]
-        snap_silence = hp["snap_silence"]
-        snap_tolerance = hp["snap_tolerance"]
-        signal_names = hp["combined_signals"]
+        norm = point["norm_method"]
+        drop_k = point["drop_k"]
+        prominence = point["prominence"]
+        snap_silence = point["snap_silence"]
+        snap_tolerance = point.get("snap_tolerance", 2)
+        min_corr = point.get("min_correlation", 0.0)
+
+        active = [
+            n for n, c in signal_configs.items()
+            if c["correlation"] >= min_corr
+        ]
+        if len(active) < 2:
+            continue
 
         preds_dict = {}
         for c, pc in zip(tune_cache, precomputed):
             components = [
                 _normalize_signal(
-                    pc["shifted_signals"][name].copy(), norm
+                    pc["shifted_signals"][name].copy(), norm,
                 )
-                for name in signal_names
+                for name in active
             ]
             stacked = np.stack(components, axis=0)
-            if drop_k > 0:
-                stacked = np.sort(stacked, axis=0)[drop_k:]
+            eff_drop = min(drop_k, len(active) - 1)
+            if eff_drop > 0:
+                stacked = np.sort(stacked, axis=0)[eff_drop:]
             signal = _combine_stacked(stacked, norm)
 
             preds = find_peaks(signal, prominence=prominence)[0]
@@ -477,14 +646,43 @@ def run_grid_search(
             )
         score = evaluator.evaluate_batch(preds_dict, gt_dict)
         rval = float(score.get("rval", 0.0))
-        log.info(f"  {point} -> RV={rval:.4f}")
-        results.append({"point": point, "rval": rval, "score": score})
+        log.info(
+            f"  {point} -> RV={rval:.4f} ({len(active)} signals)"
+        )
+        results.append({
+            "point": point, "rval": rval,
+            "score": score, "active_signals": active,
+        })
 
     best = max(results, key=lambda r: r["rval"])
-    log.info(f"Best grid point: {best['point']} (RV={best['rval']:.4f})")
-    best_seg = base_seg.with_hparams(
-        apply_grid_point(default_hparams, best["point"])
+    log.info(
+        f"Best: {best['point']} (RV={best['rval']:.4f})"
     )
+
+    min_corr = best["point"].get("min_correlation", 0.0)
+    active = [
+        n for n, c in signal_configs.items()
+        if c["correlation"] >= min_corr
+    ]
+    hparams = {
+        "combined_signals": active,
+        "signal_kwargs": {
+            n: signal_configs[n]["kwargs"] for n in active
+        },
+        "signal_shifts": {
+            n: signal_configs[n]["shift"] for n in active
+        },
+        "signal_correlations": {
+            n: signal_configs[n]["correlation"]
+            for n in signal_configs
+        },
+        "drop_k": best["point"]["drop_k"],
+        "norm_method": best["point"]["norm_method"],
+        "prominence": best["point"]["prominence"],
+        "snap_silence": best["point"]["snap_silence"],
+        "snap_tolerance": best["point"].get("snap_tolerance", 2),
+    }
+    best_seg = base_seg.with_hparams(hparams)
     return best_seg, results
 
 
