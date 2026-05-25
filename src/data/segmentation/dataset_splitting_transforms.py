@@ -92,7 +92,9 @@ def split_torgo_test_speaker_independent(ddict: Any) -> Any:
     for group in (dysarthric, control):
         if not group:
             continue
-        idx = rng.choice(len(group), size=min(n_each, len(group)), replace=False)
+        idx = rng.choice(
+            len(group), size=min(n_each, len(group)), replace=False
+        )
         tune_spk_set.update(group[int(i)] for i in idx)
     tune_idx = [i for i, s in enumerate(speakers) if s in tune_spk_set]
     test_idx = [i for i, s in enumerate(speakers) if s not in tune_spk_set]
@@ -170,16 +172,16 @@ def split_ssnce_test_speaker_independent(ddict: Any) -> Any:
 
 
 # Registry: HuggingFace repo id -> default DatasetDict-level split transform.
-HF_REPO_SPLIT_TRANSFORMS: Dict[str, Callable[[Any], Any]] = {
-    "changelinglab/timit-segment": split_timit_train_for_tuning,
-    "changelinglab/voxangeles-segment": split_voxangeles_test_for_tuning,
-    "changelinglab/buckeye-segment": split_buckeye_val_as_tune,
-    "changelinglab/gtimit-l2simple-segment": split_gtimit_test_speaker_independent,
-    "changelinglab/gtimit-l2tbnk-segment": split_gtimit_test_speaker_independent,
-    "changelinglab/gtimit-l1simple-segment": split_gtimit_test_speaker_independent,
-    "changelinglab/gtimit-l1tbnk-segment": split_gtimit_test_speaker_independent,
-    "changelinglab/gtimit-tha-segment": split_gtimit_test_speaker_independent,
-    "changelinglab/torgo-segment": split_torgo_test_speaker_independent,
-    "changelinglab/ssnce-segment": split_ssnce_test_speaker_independent,
+HF_REPO_SPLIT_TRANSFORMS: Dict[str, Any] = {
+    "changelinglab/timit-segment": False,
+    "changelinglab/voxangeles-segment": False,
+    "changelinglab/buckeye-segment": False,
+    "changelinglab/gtimit-l2simple-segment": False,
+    "changelinglab/gtimit-l2tbnk-segment": False,
+    "changelinglab/gtimit-l1simple-segment": False,
+    "changelinglab/gtimit-l1tbnk-segment": False,
+    "changelinglab/gtimit-tha-segment": False,
+    "changelinglab/torgo-segment": False,
+    "changelinglab/ssnce-segment": False,
     "exp/downloads/librispeech-mfa-seg": merge_librispeech_train_clean_460,
 }

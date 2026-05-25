@@ -1,5 +1,6 @@
 """Phonvec training + tuning entrypoint.
-
+# NOTE(shikhar): The logic concering tune split for individual datasets 
+# is deprecated now since we moved to a single training phase.
 Process
 -------
 1. Fit: PhonologicalVectors + cross-position regressors on a ``train``
@@ -80,29 +81,47 @@ def main(cfg: DictConfig) -> None:
 
     fit_cache_id = make_cache_id(pt.net, cfg.data.hf_repo, "train")
     tune_cache_id = make_cache_id(
-        pt.net, pt.tune_data.hf_repo, "tune",
+        pt.net,
+        pt.tune_data.hf_repo,
+        "tune",
     )
 
     base_seg, saved_net_spec = fit_or_load_segmenter(
-        pt, fit_ds, net, device, frame_shift, sr,
-        mel_frame_shift_ms, fit_cache_id=fit_cache_id,
+        pt,
+        fit_ds,
+        net,
+        device,
+        frame_shift,
+        sr,
+        mel_frame_shift_ms,
+        fit_cache_id=fit_cache_id,
     )
 
     log.info("Caching encoder features for tune subset...")
     tune_cache = collect_eval_inputs(
-        tune_cache_id, tune_ds, net, device, frame_shift, sr,
+        tune_cache_id,
+        tune_ds,
+        net,
+        device,
+        frame_shift,
+        sr,
     )
 
     # --- Per-signal correlation analysis ---
     signal_grid = OmegaConf.to_container(
-        pt.signal_grid, resolve=True,
+        pt.signal_grid,
+        resolve=True,
     )
     shift_values = list(
         OmegaConf.to_container(pt.shift_values, resolve=True),
     )
     signal_configs = run_signal_tuning(
-        base_seg, tune_cache, signal_grid, shift_values,
-        frame_shift, sr,
+        base_seg,
+        tune_cache,
+        signal_grid,
+        shift_values,
+        frame_shift,
+        sr,
         strip_outer_silences=strip_outer,
     )
 
