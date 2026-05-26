@@ -43,8 +43,8 @@ def process_timit_symbols(
 
     Returns:
         ``(merged_timestamps, merged_phones)`` with phones in IPA, closure-
-        stop pairs merged into the stop, and adjacent silence runs
-        collapsed into a single span.
+        stop pairs merged into the stop, standalone closures relabeled to
+        their stop, and adjacent silence runs collapsed into a single span.
     """
     ipa_phones = [ARPABET_TO_IPA.get(p.lower(), p.lower()) for p in phones]
     segs = [(s, e, p) for (s, e), p in zip(phone_timestamps, ipa_phones)]
@@ -62,7 +62,7 @@ def process_timit_symbols(
                 merged.append((s, ne, np_))
                 i += 2
                 continue
-        merged.append((s, e, p))
+        merged.append((s, e, _IPA_CLOSURE_TO_STOP.get(p, p)))
         i += 1
 
     collapsed = []
@@ -106,8 +106,9 @@ def process_gtimit_arpabet_symbols(
 
     Handles both lowercase-no-stress (l2simple) and uppercase-with-stress
     (l2tbnk, l1simple, l1tbnk) variants in a single pass: lowercase, strip
-    trailing stress digits, ARPABET→IPA, then merge closure+stop pairs and
-    collapse adjacent silences. Idempotent on already-clean IPA input.
+    trailing stress digits, ARPABET→IPA, then merge closure+stop pairs
+    (relabeling standalone closures to their stop) and collapse adjacent
+    silences. Idempotent on already-clean IPA input.
     """
     ipa_phones = [
         ARPABET_TO_IPA.get(stripped, stripped)
@@ -128,7 +129,7 @@ def process_gtimit_arpabet_symbols(
                 merged.append((s, ne, np_))
                 i += 2
                 continue
-        merged.append((s, e, p))
+        merged.append((s, e, _IPA_CLOSURE_TO_STOP.get(p, p)))
         i += 1
 
     collapsed = []
