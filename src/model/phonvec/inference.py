@@ -30,7 +30,7 @@ class PhoneModelInference:
         phoible_id: Optional[int] = None,
         phoneme: bool = False,
         vocab: Optional[Sequence[str]] = None,
-        dedup: bool = True,
+        dedup: bool = False,
     ):
         """Args:
         model: a loaded ``PhoneModel`` (encoder + posteriogram + hparams).
@@ -38,7 +38,7 @@ class PhoneModelInference:
             constraint forwarded to ``PhoneModel.recognize``.
         vocab: optional explicit phone vocabulary (mutually exclusive with the
             Phoible constraint).
-        dedup: merge consecutive segments sharing a label (default True).
+        dedup: merge consecutive segments sharing a label (default False).
         """
         self.model = model
         self.lang = lang
@@ -82,7 +82,7 @@ def build_phonvec_inference(
     phoible_id: Optional[int] = None,
     phoneme: bool = False,
     vocab: Optional[Sequence[str]] = None,
-    dedup: bool = True,
+    dedup: bool = False,
 ) -> PhoneModelInference:
     """Hydra entry point: load a PhoneModel via ``from_pretrained`` and wrap it.
 
