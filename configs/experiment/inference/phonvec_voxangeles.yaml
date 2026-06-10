@@ -1,6 +1,6 @@
 # @package _global_
 # python src/main.py experiment=inference/phonvec_voxangeles \
-#     inference.inference_runner.artifact_path=...
+#     inference.inference_runner.model_name_or_path=...
 #
 # Predicts on the VoxAngeles 'test' split AFTER the registered split
 # transform is applied. This ensures tuning and prediction sets are disjoint.
@@ -32,14 +32,9 @@ inference:
     - "split"
   inference_runner:
     _target_: src.model.phonvec.inference.build_phonvec_inference
-    artifact_path: ???
+    model_name_or_path: ??? # HuggingFace repo id or local path
     device: cuda
-    # frame_shift / sr default to the artifact's saved net spec.
-    # Uncomment to override at inference time:
-    # frame_shift: 320
-    # sr: 16000
-    net:
-      _target_: src.model.wavlm.builders.build_wavlm_model
-      hf_repo: microsoft/wavlm-large
-      encoder_layer: 24
-      cache_dir: ${paths.cache_dir}/hf
+    # Optional vocab constraints forwarded to PhoneModel.recognize:
+    # lang: eng
+    # phoneme: false
+    # dedup: true
