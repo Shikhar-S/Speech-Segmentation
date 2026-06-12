@@ -38,7 +38,7 @@ dependencies = [
     "matplotlib",
     "seaborn",
     "phone-inventory-metric @ git+https://github.com/changelinglab/phone-inventory-metric@v0.2.5",
-    "phonological-posteriogram @ git+https://github.com/juice500ml/phonological-posteriogram@main",
+    "phonological-posteriogram @ git+https://github.com/juice500ml/phonological-posteriogram@v0.1.0",
 ]
 
 [project.optional-dependencies]
