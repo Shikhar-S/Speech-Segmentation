@@ -1,0 +1,7 @@
+_target_: src.data.recognition.prism_preval.build_prism_preval_datamodule
+dataset_name: timit
+dataset_config_path: configs/data/powsm_evalset_index.yaml
+data_dir: ${oc.env:PRISM_DUMP_DIR,${paths.root_dir}/exp/data/prism}  # PRiSM Kaldi dump root (test_*/wav.scp)
+portable_wavscp: False
+num_workers: 1
+batch_size: 1

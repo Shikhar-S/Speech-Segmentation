@@ -1,0 +1,44 @@
+_target_: src.data.mixed_prseg_dataset.build_prseg_datamodule
+
+batch_size: 32
+num_workers: 4
+pin_memory: true
+
+
+# a dict of dataset types to list of (dataset, weight) tuples for training
+# dataset types can be "segmentation" or "recognition"
+train_datasets:
+  segmentation:
+    - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+        hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+        split: train
+        tokenizer:
+          _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+          vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+        target_sr: 16000
+      - 1.0
+
+
+# a dict of dataset types to list of datasets for validation
+# dataset types can be "segmentation" or "recognition"
+validation_datasets:
+  segmentation:
+    - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+      hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+      split: val
+      tokenizer:
+        _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+        vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+      target_sr: 16000
+
+
+# a single optional dataset for running inference during prediction step.
+# This can be switched in distributed inference configs.
+prediction_dataset:
+  _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+  hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+  split: test
+  tokenizer:
+    _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+  target_sr: 16000

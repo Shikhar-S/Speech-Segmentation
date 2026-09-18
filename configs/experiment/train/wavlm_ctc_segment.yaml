@@ -1,0 +1,91 @@
+# @package _global_
+
+# CTC on TIMIT with WavLM-large (16 kHz, encoder fully fine-tuned),
+# checkpoint-selected for SEGMENTATION (monitor val_seg/rval).
+# CTCRecognitionHead is registered under seg_losses so it sees TIMIT's
+# segmentation sub-batch (target + target_start/end). The head needs
+# target/target_length for the CTC loss; target_start_idx/target_end_idx
+# are used by its built-in boundary-rval validation metric.
+# The recognition-selected variant (monitor val_seg/per) is
+# train/wavlm_ctc_recognition.yaml, which extends this config.
+
+defaults:
+  - override /data: joint_prseg
+  - override /model: segment_recognize_bare
+  - override /model/net: wavlm
+
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "timit_wavlm_ctc_segment"
+tags: ["wavlm", "segment_recognize", "timit", "sr16k", "ctc", "segment"]
+
+seed: 42
+test: False
+
+trainer:
+  devices: -1
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 0
+  max_epochs: -1
+  max_steps: 20000
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 250
+  check_val_every_n_epoch: null
+  log_every_n_steps: 100
+
+callbacks:
+  model_checkpoint:
+    monitor: val_seg/rval
+    mode: max
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping:
+    monitor: val_seg/rval
+    mode: max
+    patience: 100
+
+model:
+  audio_sr: 16000
+  optimizer:
+    lr: 0.0001
+  net:
+    hf_repo: microsoft/wavlm-large
+    output_vocabsz: 56
+    vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+    freeze_encoder: false
+  seg_losses:
+    ctc:
+      _target_: src.recipe.segment_recognize.heads.ctc_recognition.CTCRecognitionHead
+      _partial_: true
+      weight: 1.0
+
+data:
+  batch_size: 8
+  train_datasets:
+    segmentation:
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+          target_sr: 16000
+          max_speech_length: 8
+        - 1.0
+  validation_datasets:
+    segmentation:
+      - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+        hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+        split: val
+        tokenizer:
+          _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+          vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+        target_sr: 16000
+        max_speech_length: 8
+
+logger:
+  wandb:
+    tags: ${tags}

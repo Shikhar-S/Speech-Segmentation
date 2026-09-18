@@ -1,0 +1,20 @@
+{
+  "_description": "Normalizes phone predictions from the timit-segment / timit_ipa_vocab training alphabet (M_seg) into the prism `text` IPA convention as used by the VoxAngeles prism dataset, so prism-style recognition eval (eval_recognition.py against `text`) is fair for models trained on timit-segment (WavLM-CTC, WavLM-FCE). Companion to seg2prism_ipa_map.json (TIMIT); use this one only for VoxAngeles scoring.",
+  "_why_separate_from_timit": "The affricate tie-bar convention FLIPS between datasets. prism-TIMIT `text` writes affricates tie-full (t͡ʃ=1081, d͡ʒ=1581 unit occurrences), so the model's tie-full t͡ʃ/d͡ʒ already match and the TIMIT map does NOT split them. prism-VOX `text` writes affricates tie-less (t͡ʃ=0, d͡ʒ=0 unit occurrences; the scorer's panphon ipa_segs splits the tie-less digraph into t,ʃ / d,ʒ). So on VoxAngeles the model's tie-full affricate predictions must be split to match the reference convention.",
+  "_derivation": "Each entry is justified by either (a) panphon canonical reduction (canonical_ipa('ŋ̍')=='ŋ'; diphthongs split via ipa_segs) or (b) the corpus-confirmed tie-bar convention above. Excluded vs the TIMIT map: ɨ→ɪ (TIMIT-specific; ɨ is a real distinct VoxAngeles phone) and l̩/m̩/n̩→plain (panphon treats syllabic consonants as distinct known segments, so relabeling them would be lossy error-laundering, not alphabet conversion).",
+  "_impact_note": "On VoxAngeles this map is ~a no-op (FCE PER 0.940->0.934, PFER ~unchanged). The model's output alphabet (52 English/TIMIT phones) is a tiny subset of prism-Vox's 319-token multilingual inventory, so most Vox error is genuine coverage error, not convention mismatch. The map removes only the convention noise from the model's English predictions; it cannot (and must not) convert the foreign phones it never emits.",
+  "_application_order": "per token: drop -> split -> relabel (split outputs are already prism-convention, not relabeled again)",
+  "drop": [],
+  "split": {
+    "eɪ": ["e", "ɪ"],
+    "oʊ": ["o", "ʊ"],
+    "aɪ": ["a", "ɪ"],
+    "ɔɪ": ["ɔ", "ɪ"],
+    "aʊ": ["a", "ʊ"],
+    "t͡ʃ": ["t", "ʃ"],
+    "d͡ʒ": ["d", "ʒ"]
+  },
+  "relabel": {
+    "ŋ̍": "ŋ"
+  }
+}

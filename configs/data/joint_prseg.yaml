@@ -1,0 +1,11 @@
+_target_: src.data.mixed_prseg_dataset.build_prseg_datamodule
+
+batch_size: 32
+num_workers: 4
+pin_memory: true
+
+# train_datasets / validation_datasets are defined per-experiment.
+# Schema: dict[str, ...] where keys are "segmentation" or "recognition".
+train_datasets: ???
+validation_datasets: ???
+prediction_dataset: null

@@ -1,0 +1,48 @@
+# @package _global_
+# PhoneticXEUS recognition inference on SSNCE, masked to the tamil_cv
+# acoustic-model inventory. Reuses src/main.py -> distributed_inference with the masked
+# recognizer as the inference_runner itself: it dumps predicted_transcript per
+# utterance. Consumed by `src.model.mfa.mfa2_align --source cascade` to build the
+# mfa2 Tamil cascade. The recognizer block masks PhoneticXEUS to the tamil_cv
+# inventory (acoustic_model/normalizer=tamil_cv, allowed_phones_file=tamil_cv.json).
+#   python src/main.py experiment=recognize/xeuspr_tamil
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_xeuspr_tamil_recog"
+tags: ["xeuspr", "recognition", "inference", "tamil"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: ${oc.env:SEG_REPO_SSNCE,changelinglab/ssnce-segment}
+  predict_split: test
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/ssnce_xeuspr_tamil_phones.jsonl
+  passthrough_keys:
+    - utt_id
+  # The masked recognizer is the runner directly; distributed_inference calls it
+  # as recognizer(**dataset_item) and dumps its [{"predicted_transcript": ...}].
+  inference_runner:
+    _target_: src.model.xeusphoneme.mfa_xeuspr_utils.build_masked_xeus_recognizer
+    acoustic_model: tamil_cv
+    normalizer: tamil_cv
+    allowed_phones_file: configs/inference/mfa_mask_vocab/tamil_cv.json
+    cache_dir: ${paths.cache_dir}/mfa
+    dtype: float32
+    work_dir: ${paths.cache_dir}/xeus
+    hf_repo: espnet/xeus
+    checkpoint: ${oc.env:XEUSPR_CKPT}  # PhoneticXEUS fine-tuned .ckpt
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+    interctc_layer_idx: [4, 8, 12]
+    interctc_weight: 0.3
+    interctc_use_conditioning: true
+    ctc_weight: 1.0

@@ -1,0 +1,43 @@
+# @package _global_
+
+# Inference config for wavlm-ctc segment_recognize checkpoint.
+# Decodes via greedy CTC + torchaudio forced_align (CTCRecognitionHead.decode),
+# emits per-utt boundary units consumed by scripts/eval_segmentation.py.
+#
+# python src/main.py experiment=segment/wavlm_ctc \
+#     inference.inference_runner.ckpt_path=<path> \
+#     data.prediction_dataset.hf_repo=<repo>
+defaults:
+  - override /data: timit_prseg
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: wavlm
+
+task_name: "inf_segmentrecognize_wavlm_ctc_16k"
+tags: ["segmentation", "ctc", "inference", "wavlm", "16k"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  prediction_dataset:
+    target_sr: 16000
+
+inference:
+  num_workers: 2
+  out_file: ${paths.output_dir}/wavlm_ctc_16k.json
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.recipe.segment_recognize.inference.build_segment_recognize_inference
+    ckpt_path: ???
+    net:
+      _target_: src.model.wavlm.builders.build_wavlm_model
+      hf_repo: microsoft/wavlm-large
+      output_vocabsz: 56
+      vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+      cache_dir: ${paths.cache_dir}/hf

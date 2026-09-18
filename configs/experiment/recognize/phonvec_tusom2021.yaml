@@ -1,0 +1,18 @@
+# @package _global_
+# Phonvec PR inference on tusom2021 with per-language vocab routing.
+# Vocab JSON was precomputed via:
+#   PYTHONPATH=. python scripts/build_phonvec_vocab.py tusom2021 \
+#       configs/inference/phonvec_vocab/tusom2021.json
+# Override the encoder at the CLI:
+#   python src/main.py experiment=recognize/phonvec_tusom2021 \
+#       inference.inference_runner.model_name_or_path=juice500/wavlm-12-phonemodel
+defaults:
+  - /experiment/recognize/phonvec
+  - _self_
+
+data:
+  dataset_name: tusom2021
+
+inference:
+  inference_runner:
+    vocab_file: configs/inference/phonvec_vocab/tusom2021.json

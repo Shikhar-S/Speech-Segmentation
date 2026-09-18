@@ -1,0 +1,42 @@
+# @package _global_
+# Stage 2 of the English MFA cascade: mfa align_one over the Stage-1
+# recognition dump (recognize/xeuspr.yaml). CPU only.  
+#   python src/main.py experiment=inference/mfa_align_dump \
+#       data.hf_repo=changelinglab/timit-segment \
+#       inference.inference_runner.recog_jsonl='exp/runs/pxeus_recognize/.../timit/xeuspr_phones.*.jsonl'
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_mfa_align_dump"
+tags: ["mfa", "align", "inference", "cascade", "dump"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+  predict_split: test
+
+inference:
+  num_workers: 4
+  batch_size: 1
+  limit_samples: null
+  out_file: ${paths.output_dir}/mfa_align_dump.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+  inference_runner:
+    _target_: src.model.mfa.align_from_dump.build_mfa_align_from_dump
+    recog_jsonl: ???  # glob of the Stage-1 dump; set by the launch script
+    acoustic_model: english_mfa
+    dictionary: english_mfa
+    sr: 16000
+    cache_dir: ${paths.cache_dir}/mfa
+    phone_normalizer: english_mfa
+    device: cpu

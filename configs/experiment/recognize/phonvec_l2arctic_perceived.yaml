@@ -1,0 +1,18 @@
+# @package _global_
+# Phonvec PR inference on l2arctic_perceived with per-language vocab routing.
+# Vocab JSON was precomputed via:
+#   PYTHONPATH=. python scripts/build_phonvec_vocab.py l2arctic_perceived \
+#       configs/inference/phonvec_vocab/l2arctic_perceived.json
+# Override the encoder at the CLI:
+#   python src/main.py experiment=recognize/phonvec_l2arctic_perceived \
+#       inference.inference_runner.model_name_or_path=juice500/wavlm-12-phonemodel
+defaults:
+  - /experiment/recognize/phonvec
+  - _self_
+
+data:
+  dataset_name: l2arctic_perceived
+
+inference:
+  inference_runner:
+    vocab_file: configs/inference/phonvec_vocab/l2arctic_perceived.json

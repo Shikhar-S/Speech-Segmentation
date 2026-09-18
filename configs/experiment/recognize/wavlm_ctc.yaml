@@ -1,0 +1,43 @@
+# @package _global_
+# WavLM-CTC recognition inference on Kaldi-format prism_preval datasets.
+# Reuses SegmentRecognizeInference: the CTC head's decode emits per-utt
+# token sequences (with timings); scripts/eval_recognition.py reads them
+# via the head-keyed dict branch of parse_pred_labels.
+#
+# Override the dataset and checkpoint at the CLI:
+#   python src/main.py experiment=recognize/wavlm_ctc \
+#       data.dataset_name=timit \
+#       inference.inference_runner.ckpt_path=<path>
+defaults:
+  - override /data: prism_preval
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_wavlm_ctc"
+tags: ["wavlm", "ctc", "recognition", "inference", "kaldi"]
+
+train: false
+test: false
+distributed_predict: True
+
+inference:
+  num_workers: 2
+  limit_samples: null
+  out_file: ${paths.output_dir}/${data.dataset_name}_wavlm_ctc.jsonl
+  passthrough_keys:
+    - "key"
+    - "utt_id"
+    - "text"
+    - "wavpath"
+    - "lang_sym"
+    - "split"
+  inference_runner:
+    _target_: src.recipe.segment_recognize.inference.build_segment_recognize_inference
+    ckpt_path: ???
+    net:
+      _target_: src.model.wavlm.builders.build_wavlm_model
+      hf_repo: microsoft/wavlm-large
+      output_vocabsz: 56
+      vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+      cache_dir: ${paths.cache_dir}/hf

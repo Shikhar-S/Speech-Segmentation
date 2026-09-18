@@ -1,0 +1,46 @@
+# @package _global_
+# Tamil MFA topline: per-utterance text-dependent forced alignment using GT
+# phones from SSNCE (no recognizer), aligned with the tamil_cv acoustic model.
+#   python src/main.py experiment=segment/mfa_topline_tamil \
+#       data.hf_repo=changelinglab/ssnce-segment
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_topline_mfa_tamil"
+tags: ["mfa", "topline", "tamil", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: ${oc.env:SEG_REPO_SSNCE,changelinglab/ssnce-segment}
+  predict_split: test
+
+inference:
+  num_workers: 16
+  batch_size: 1
+  limit_samples: null
+  out_file: ${paths.output_dir}/topline_mfa_tamil.jsonl
+  passthrough_keys:
+    - utt_id
+    - phone_timestamps
+    - phones
+    - split
+  inference_runner:
+    _target_: src.model.mfa.inference_baseline.build_mfa_single_inference
+    dictionary: tamil_cv
+    acoustic_model: tamil_cv
+    sr: 16000
+    cache_dir: ${paths.cache_dir}/mfa
+    phone_normalizer: tamil_cv
+    # tamil_cv (CommonVoice) is a weaker acoustic match for SSNCE than
+    # english_mfa is for the English sets; the default beam (10/40) hard-fails
+    # ~35% of utterances ("Could not align ... with the current beam size").
+    # Widen the beam so the Viterbi path stays in-beam.
+    beam: 100
+    retry_beam: 400
+    recognizer: null

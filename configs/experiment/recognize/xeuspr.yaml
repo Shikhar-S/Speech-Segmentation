@@ -1,0 +1,46 @@
+# @package _global_
+# Stage 1 of the decoupled English cascade: PhoneticXEUS recognition only,
+# masked to the english_mfa acoustic-model inventory. Reuses src/main.py ->
+# distributed_inference with the masked recognizer as the inference_runner: it
+# dumps predicted_transcript per utterance (no MFA, so it cannot hang). Stage 2
+# (inference/mfa_align_dump.yaml) forced-aligns these predictions. English twin
+# of recognize/xeuspr_tamil.yaml. Override data.hf_repo per dataset.
+#   python src/main.py experiment=recognize/xeuspr data.hf_repo=changelinglab/timit-segment
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_xeuspr_recog"
+tags: ["xeuspr", "recognition", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+
+data:
+  hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+  predict_split: test
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/xeuspr_phones.jsonl
+  passthrough_keys:
+    - utt_id
+  inference_runner:
+    _target_: src.model.xeusphoneme.mfa_xeuspr_utils.build_masked_xeus_recognizer
+    acoustic_model: english_mfa
+    normalizer: english_mfa
+    allowed_phones_file: configs/inference/mfa_mask_vocab/english_mfa.json
+    cache_dir: ${paths.cache_dir}/mfa
+    dtype: float32
+    work_dir: ${paths.cache_dir}/xeus
+    hf_repo: espnet/xeus
+    checkpoint: ${oc.env:XEUSPR_CKPT}  # PhoneticXEUS fine-tuned .ckpt
+    vocab_file: src/model/xeusphoneme/resources/ipa_vocab.json
+    interctc_layer_idx: [4, 8, 12]
+    interctc_weight: 0.3
+    interctc_use_conditioning: true
+    ctc_weight: 1.0

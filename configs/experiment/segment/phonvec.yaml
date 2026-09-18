@@ -1,0 +1,35 @@
+# @package _global_
+# python src/main.py experiment=segment/phonvec inference.inference_runner.model_name_or_path=...
+defaults:
+  - override /data: segmentation_phonvec
+  - override /logger: csv
+  - override /model: null
+  - override /model/net: null
+
+task_name: "inf_phonvec"
+tags: ["phonvec", "inference"]
+
+train: false
+test: false
+distributed_predict: True
+ 
+data:
+  hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+
+inference:
+  num_workers: 4
+  limit_samples: null
+  out_file: ${paths.output_dir}/phonvec.jsonl
+  passthrough_keys:
+    - "utt_id"
+    - "phone_timestamps"
+    - "phones"
+    - "split"
+  inference_runner:
+    _target_: src.model.phonvec.inference.build_phonvec_inference
+    model_name_or_path: ??? # HuggingFace repo id or local path
+    device: cuda
+    # Segmentation: emit only the segmenter's boundaries (no recognizer, no
+    # label-based outer-silence trimming) so boundaries never depend on
+    # recognition labels.
+    boundaries_only: true

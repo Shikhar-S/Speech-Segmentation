@@ -1,0 +1,85 @@
+# @package _global_
+
+# FCE (frame-wise cross-entropy) only on TIMIT with WavLM (16 kHz)
+
+defaults:
+  - override /data: joint_prseg
+  - override /model: segment_recognize_bare
+  - override /model/net: wavlm
+
+  - override /trainer: ddp
+  - override /callbacks: default
+  - override /logger: wandb
+
+task_name: "timit_wavlm_fce"
+tags: ["wavlm", "segment_recognize", "timit", "sr16k", "fce"]
+
+seed: 42
+test: False
+
+trainer:
+  devices: -1
+  strategy: ddp_find_unused_parameters_true
+  min_epochs: 0
+  max_epochs: -1
+  max_steps: 10000
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 250
+  check_val_every_n_epoch: null
+  log_every_n_steps: 100
+
+callbacks:
+  model_checkpoint:
+    monitor: val_seg/rval
+    mode: max
+    filename: step_{step:06d}
+    save_last: true
+  early_stopping:
+    monitor: val_seg/rval
+    mode: max
+    patience: 100
+
+model:
+  audio_sr: 16000
+  optimizer:
+    lr: 0.0001
+  net:
+    hf_repo: microsoft/wavlm-large
+    output_vocabsz: 56
+    vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+    freeze_encoder: false
+  seg_losses:
+    fa:
+      _target_: src.recipe.segment_recognize.heads.fce_segmentation.FCESegmentationHead
+      _partial_: true
+      weight: 1.0
+      tolerance_ms: 20
+
+data:
+  batch_size: 8
+  train_datasets:
+    segmentation:
+      - - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+          hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+          split: train
+          tokenizer:
+            _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+            vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+          target_sr: 16000
+          max_speech_length: 8
+        - 1.0
+  validation_datasets:
+    segmentation:
+      - _target_: src.data.segmentation.segmentation_dataset.build_segmentation_dataset
+        hf_repo: ${oc.env:SEG_REPO_TIMIT,changelinglab/timit-segment}
+        split: val
+        tokenizer:
+          _target_: src.model.xeusphoneme.builders.XeusPRTokenizer
+          vocab_file: src/model/xeusphoneme/resources/timit_ipa_vocab.json
+        target_sr: 16000
+        max_speech_length: 8
+
+logger:
+  wandb:
+    tags: ${tags}

@@ -1,0 +1,23 @@
+# @package _global_
+
+# CTC on TIMIT with WavLM-large, checkpoint-selected for RECOGNITION
+# (monitor val_seg/per, mode=min). Extends train/wavlm_ctc_segment.yaml and
+# overrides only the selection metric + run identity. val_seg/per is logged by
+# CTCRecognitionHead.eval_metrics via src/recipe/common/error_calculator.py
+# (token-level PER, matching scripts/eval_recognition.py).
+
+defaults:
+  - /experiment/train/wavlm_ctc_segment
+  - _self_
+
+task_name: "timit_wavlm_ctc_recognition"
+tags: ["wavlm", "segment_recognize", "timit", "sr16k", "ctc", "recognition"]
+
+callbacks:
+  model_checkpoint:
+    monitor: val_seg/per
+    mode: min
+  early_stopping:
+    monitor: val_seg/per
+    mode: min
+    patience: 30

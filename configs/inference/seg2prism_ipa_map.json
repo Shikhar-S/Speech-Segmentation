@@ -1,0 +1,18 @@
+{
+  "_description": "Normalizes phone predictions from the timit-segment / ipa_vocab training alphabet (M_seg) into the prism `text` IPA convention, so prism-style recognition eval (eval_recognition.py against `text`) is fair for models trained on timit-segment (WavLM-CTC, WavLM-FCE). Derived purely from ground-truth-vs-ground-truth alignment of the two TIMIT transcriptions (6300 utts), so it converts the alphabet only and cannot mask genuine model errors.",
+  "_decision_final_stops": "Per design decision (a): prism omits certain word-final/unreleased stops (t,k,d,p,g,b) that the segment convention keeps (~2.7% of phones). We deliberately do NOT drop these from predictions — that would be a lossy, context-dependent edit. They remain as a known residual (genuine annotation difference, not alphabet), so postprocessed PER carries a ~2-3% floor above the model's true error.",
+  "_application_order": "per token: drop -> split -> relabel (split outputs are already prism-convention, not relabeled again)",
+  "drop": ["h#", "sil", "pau"],
+  "split": {
+    "eɪ": ["e", "ɪ"],
+    "oʊ": ["o", "ʊ"],
+    "aɪ": ["a", "ɪ"],
+    "ɔɪ": ["ɔ", "ɪ"],
+    "aʊ": ["a", "ʊ"]
+  },
+  "relabel": {
+    "ɨ": "ɪ",
+    "ʔ̞": "ʔ",
+    "ŋ̍": "ŋ"
+  }
+}
